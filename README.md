@@ -1,6 +1,6 @@
-# revert v3utils
+# v3utils
 
-This repository contains the smart contracts for revert v3utils.
+This repository contains the smart contracts for v3Utils and v3Automation.
 
 It uses Foundry as development toolchain.
 
