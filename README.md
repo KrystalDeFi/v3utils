@@ -22,6 +22,9 @@ forge install
 
 Most tests use a forked state of Ethereum Mainnet. You can run all tests with: 
 
+NOTE: 
+Prepare .env file with sample values from sample.env before you run test.
+
 ```sh
 make test
 ```
