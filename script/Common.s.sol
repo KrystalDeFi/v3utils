@@ -49,5 +49,6 @@ abstract contract CommonScript is Script {
         console.log("WITHDRAWER: ", withdrawer);
     }
 
+    // To ignore from test coverage
     function testCommon() external {}
 }

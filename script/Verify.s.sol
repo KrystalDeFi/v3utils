@@ -18,6 +18,7 @@ contract VerifyV3UtilsScript is CommonScript {
         );    
     }
 
+    // To ignore from test coverage
     function test() external {}
 }
 

@@ -15,5 +15,6 @@ contract V3UtilsScript is CommonScript {
         vm.stopBroadcast();
     }
 
+    // To ignore from test coverage
     function test() external {}
 }
