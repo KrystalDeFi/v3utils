@@ -1,17 +1,17 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
 import "./Common.sol";
-import "./Signature.sol";
+import "./EIP712.sol";
 
-contract V3Automation is Pausable, Common, Signature {
+contract V3Automation is Pausable, Common, EIP712 {
 
-    event CancelOrder(address user, Order order, bytes signature);
+    event CancelOrder(address user, StructHash.Order order, bytes signature);
 
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     mapping (bytes32=>bool) _cancelledOrder;
 
-    constructor() Signature("V3AutomationOrder", "1.0") {}
+    constructor() EIP712("V3AutomationOrder", "1.0") {}
 
     function initialize(address _swapRouter, address admin, address withdrawer, address feeTaker, address[] calldata whitelistedNfpms) public override  {
         super.initialize(_swapRouter, admin, withdrawer, feeTaker, whitelistedNfpms);
@@ -77,7 +77,7 @@ contract V3Automation is Pausable, Common, Signature {
         uint256 amountAddMin1;
 
         // user signed config
-        Order userOrder;
+        StructHash.Order userOrder;
         bytes orderSignature;
     }
 
@@ -85,14 +85,6 @@ contract V3Automation is Pausable, Common, Signature {
         require(_isWhitelistedNfpm(address(params.nfpm)));
         address positionOwner = params.nfpm.ownerOf(params.tokenId);
         _validateOrder(params.userOrder, params.orderSignature, positionOwner);
-        _execute(params, positionOwner);
-    }
-
-    function executeWithPermit(ExecuteParams calldata params, uint8 v, bytes32 r, bytes32 s) public payable onlyRole(OPERATOR_ROLE) whenNotPaused() {
-        require(_isWhitelistedNfpm(address(params.nfpm)));
-        address positionOwner = params.nfpm.ownerOf(params.tokenId);
-        _validateOrder(params.userOrder, params.orderSignature, positionOwner);
-        params.nfpm.permit(address(this), params.tokenId, params.deadline, v, r, s);
         _execute(params, positionOwner);
     }
 
@@ -175,13 +167,13 @@ contract V3Automation is Pausable, Common, Signature {
         params.nfpm.transferFrom(address(this), positionOwner, params.tokenId);
     }
 
-    function _validateOrder(Order memory order, bytes memory orderSignature, address actor) internal view {
-        address userAddress = _recover(order, orderSignature);
+    function _validateOrder(StructHash.Order memory order, bytes memory orderSignature, address actor) internal view {
+        address userAddress = recover(order, orderSignature);
         require(userAddress == actor);
         require(!_cancelledOrder[keccak256(orderSignature)]);
     }
 
-    function cancelOrder(Order calldata order, bytes calldata orderSignature) external {
+    function cancelOrder(StructHash.Order calldata order, bytes calldata orderSignature) external {
         _validateOrder(order, orderSignature, msg.sender);
         _cancelledOrder[keccak256(orderSignature)] = true;
         emit CancelOrder(msg.sender, order, orderSignature);

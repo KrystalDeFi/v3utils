@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
 import "v3-periphery/interfaces/external/IWETH9.sol";
@@ -52,8 +52,6 @@ abstract contract Common is AccessControl, Pausable {
 
     bytes32 public constant WITHDRAWER_ROLE = keccak256("WITHDRAWER_ROLE");
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-    uint256 internal constant Q64 = 2 ** 64;
-    uint256 internal constant Q96 = 2 ** 96;
     
     // error types
     error SelfSend();
@@ -658,6 +656,7 @@ abstract contract Common is AccessControl, Pausable {
      * we need to emit event latter
      */
     function _deductFees(DeductFeesParams memory params, bool emitEvent) internal returns(uint256 amount0Left, uint256 amount1Left, uint256 amount2Left, uint256 feeAmount0, uint256 feeAmount1, uint256 feeAmount2) {
+        uint256 Q64 = 2 ** 64;
         if (params.feeX64 > _maxFeeX64[params.feeType]) {
             revert TooMuchFee();
         }

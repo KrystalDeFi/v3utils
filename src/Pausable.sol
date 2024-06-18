@@ -1,9 +1,7 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BUSL-1.1
 // OpenZeppelin Contracts (last updated v5.0.0) (utils/Pausable.sol)
 
 pragma solidity ^0.8.0;
-
-import {Context} from "@openzeppelin/contracts/utils/Context.sol";
 
 /**
  * @dev Contract module which allows children to implement an emergency stop
@@ -14,7 +12,7 @@ import {Context} from "@openzeppelin/contracts/utils/Context.sol";
  * the functions of your contract. Note that they will not be pausable by
  * simply including this module, only once the modifiers are put in place.
  */
-abstract contract Pausable is Context {
+abstract contract Pausable {
     bool private _paused;
 
     /**
@@ -27,15 +25,6 @@ abstract contract Pausable is Context {
      */
     event Unpaused(address account);
 
-    /**
-     * @dev The operation failed because the contract is paused.
-     */
-    error EnforcedPause();
-
-    /**
-     * @dev The operation failed because the contract is not paused.
-     */
-    error ExpectedPause();
 
     /**
      * @dev Initializes the contract in unpaused state.
@@ -52,24 +41,8 @@ abstract contract Pausable is Context {
      * - The contract must not be paused.
      */
     modifier whenNotPaused() {
-        _requireNotPaused();
+        require(!_paused);
         _;
-    }
-
-    /**
-     * @dev Returns true if the contract is paused, and false otherwise.
-     */
-    function paused() public view virtual returns (bool) {
-        return _paused;
-    }
-
-    /**
-     * @dev Throws if the contract is paused.
-     */
-    function _requireNotPaused() internal view virtual {
-        if (paused()) {
-            revert EnforcedPause();
-        }
     }
 
     /**
@@ -81,7 +54,7 @@ abstract contract Pausable is Context {
      */
     function _pause() internal virtual whenNotPaused {
         _paused = true;
-        emit Paused(_msgSender());
+        emit Paused(msg.sender);
     }
 
     /**
@@ -93,6 +66,6 @@ abstract contract Pausable is Context {
      */
     function _unpause() internal virtual {
         _paused = false;
-        emit Unpaused(_msgSender());
+        emit Unpaused(msg.sender);
     }
 }

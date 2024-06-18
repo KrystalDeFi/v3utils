@@ -1,16 +1,9 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./EIP712.sol";
 
-abstract contract Signature is EIP712 {
-
-    constructor(string memory name, string memory version) EIP712(name, version){}
-
-    function _recover(Order memory order, bytes memory signature) internal view returns (address) {
-        bytes32 digest = _hashTypedDataV4(_hash(order));
-        return ECDSA.recover(digest, signature);
-    }
+library StructHash {
 
     // keccak256(
     //     "AutoCompound(AutoCompoundAction action)AutoCompoundAction(int256 maxGasProportionX64,int256 feeToPrincipalRatioThresholdX64)"
@@ -19,7 +12,7 @@ abstract contract Signature is EIP712 {
     struct AutoCompound {
         AutoCompoundAction action;
     }
-    function _hash(AutoCompound memory obj) internal pure returns (bytes32) {
+    function _hash(AutoCompound memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             AutoCompound_TYPEHASH,
             _hash(obj.action)
@@ -34,7 +27,7 @@ abstract contract Signature is EIP712 {
         int256 maxGasProportionX64;
         int256 feeToPrincipalRatioThresholdX64;
     }
-    function _hash(AutoCompoundAction memory obj) internal pure returns (bytes32) {
+    function _hash(AutoCompoundAction memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             AutoCompoundAction_TYPEHASH,
             obj.maxGasProportionX64,
@@ -50,7 +43,7 @@ abstract contract Signature is EIP712 {
         uint32 gteTickOffset;
         uint32 lteTickOffset;
     }
-    function _hash(TickOffsetCondition memory obj) internal pure returns (bytes32) {
+    function _hash(TickOffsetCondition memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             TickOffsetCondition_TYPEHASH,
             obj.gteTickOffset,
@@ -67,7 +60,7 @@ abstract contract Signature is EIP712 {
         uint256 gteOffsetSqrtPriceX96;
         uint256 lteOffsetSqrtPriceX96;
     }
-    function _hash(PriceOffsetCondition memory obj) internal pure returns (bytes32) {
+    function _hash(PriceOffsetCondition memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             PriceOffsetCondition_TYPEHASH,
             obj.baseToken,
@@ -84,7 +77,7 @@ abstract contract Signature is EIP712 {
         int256 lteToken0RatioX64;
         int256 gteToken0RatioX64;
     }
-    function _hash(TokenRatioCondition memory obj) internal pure returns (bytes32) {
+    function _hash(TokenRatioCondition memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             TokenRatioCondition_TYPEHASH,
             obj.lteToken0RatioX64,
@@ -104,7 +97,7 @@ abstract contract Signature is EIP712 {
         PriceOffsetCondition priceOffsetCondition;
         TokenRatioCondition tokenRatioCondition;
     }
-    function _hash(RebalanceCondition memory obj) internal pure returns (bytes32) {
+    function _hash(RebalanceCondition memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             RebalanceCondition_TYPEHASH,
             keccak256(bytes(obj._type)),
@@ -124,7 +117,7 @@ abstract contract Signature is EIP712 {
         uint32 tickLowerOffset;
         uint32 tickUpperOffset;
     }
-    function _hash(TickOffsetAction memory obj) internal pure returns (bytes32) {
+    function _hash(TickOffsetAction memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             TickOffsetAction_TYPEHASH,
             obj.tickLowerOffset,
@@ -141,7 +134,7 @@ abstract contract Signature is EIP712 {
         int160 lowerOffsetSqrtPriceX96;
         int160 upperOffsetSqrtPriceX96;
     }
-    function _hash(PriceOffsetAction memory obj) internal pure returns (bytes32) {
+    function _hash(PriceOffsetAction memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             PriceOffsetAction_TYPEHASH,
             obj.baseToken,
@@ -158,7 +151,7 @@ abstract contract Signature is EIP712 {
         uint32 tickWidth;
         int256 token0RatioX64;
     }
-    function _hash(TokenRatioAction memory obj) internal pure returns (bytes32) {
+    function _hash(TokenRatioAction memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             TokenRatioAction_TYPEHASH,
             obj.tickWidth,
@@ -179,7 +172,7 @@ abstract contract Signature is EIP712 {
         PriceOffsetAction priceOffsetAction;
         TokenRatioAction tokenRatioAction;
     }
-    function _hash(RebalanceAction memory obj) internal pure returns (bytes32) {
+    function _hash(RebalanceAction memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             RebalanceAction_TYPEHASH,
             obj.maxGasProportionX64,
@@ -202,7 +195,7 @@ abstract contract Signature is EIP712 {
         AutoCompound autoCompound;
         bool recurring;
     }
-    function _hash(RebalanceConfig memory obj) internal pure returns (bytes32) {
+    function _hash(RebalanceConfig memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             RebalanceConfig_TYPEHASH,
             _hash(obj.rebalanceCondition),
@@ -221,7 +214,7 @@ abstract contract Signature is EIP712 {
         int32 gteTickAbsolute;
         int32 lteTickAbsolute;
     }
-    function _hash(RangeOrderCondition memory obj) internal pure returns (bytes32) {
+    function _hash(RangeOrderCondition memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             RangeOrderCondition_TYPEHASH,
             obj.zeroToOne,
@@ -239,7 +232,7 @@ abstract contract Signature is EIP712 {
         int256 swapSlippageX64;
         int256 withdrawSlippageX64;
     }
-    function _hash(RangeOrderAction memory obj) internal pure returns (bytes32) {
+    function _hash(RangeOrderAction memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             RangeOrderAction_TYPEHASH,
             obj.maxGasProportionX64,
@@ -256,7 +249,7 @@ abstract contract Signature is EIP712 {
         RangeOrderCondition condition;
         RangeOrderAction action;
     }
-    function _hash(RangeOrderConfig memory obj) internal pure returns (bytes32) {
+    function _hash(RangeOrderConfig memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             RangeOrderConfig_TYPEHASH,
             _hash(obj.condition),
@@ -272,7 +265,7 @@ abstract contract Signature is EIP712 {
         RebalanceConfig rebalanceConfig;
         RangeOrderConfig rangeOrderConfig;
     }
-    function _hash(OrderConfig memory obj) internal pure returns (bytes32) {
+    function _hash(OrderConfig memory obj) private pure returns (bytes32) {
         return keccak256(abi.encode(
             OrderConfig_TYPEHASH,
             _hash(obj.rebalanceConfig),
@@ -292,7 +285,7 @@ abstract contract Signature is EIP712 {
         OrderConfig config;
         int64 signatureTime;
     }
-    function _hash(Order memory obj) internal pure returns (bytes32) {
+    function _hash(Order memory obj) external pure returns (bytes32) {
         return keccak256(abi.encode(
             Order_TYPEHASH,
             obj.chainId,

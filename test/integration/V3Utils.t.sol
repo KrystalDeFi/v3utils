@@ -835,7 +835,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         vm.prank(TEST_OWNER_ACCOUNT);
         v3utils.pause();
 
-        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.expectRevert();
 
         hoax(TEST_NFT_ACCOUNT, 1 ether);
         V3Utils.SwapAndMintParams memory params = Common.SwapAndMintParams(
