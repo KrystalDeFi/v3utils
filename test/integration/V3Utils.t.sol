@@ -2,7 +2,8 @@
 pragma solidity ^0.8.0;
 
 import "../IntegrationTestBase.sol";
-import "../../src/Pausable.sol";
+import '@openzeppelin/contracts/security/Pausable.sol';
+
 
 contract V3UtilsIntegrationTest is IntegrationTestBase {
 

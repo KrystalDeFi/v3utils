@@ -7,8 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "v3-core/libraries/FullMath.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import '@openzeppelin/contracts/utils/structs/EnumerableSet.sol';
-
-import "./Pausable.sol";
+import '@openzeppelin/contracts/security/Pausable.sol';
 
 interface INonfungiblePositionManager is univ3.INonfungiblePositionManager {
     /// @notice mintParams for algebra v1
