@@ -74,5 +74,6 @@ abstract contract CommonScript is Script {
         withdrawer = vm.envAddress("WITHDRAWER");
     }
 
+    // To ignore from test coverage
     function testCommon() external {}
 }
