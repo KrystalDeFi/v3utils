@@ -21,6 +21,23 @@ contract VerifyV3UtilsScript is CommonScript {
     function test() external {}
 }
 
+contract VerifyStructHashScript is CommonScript {
+    function run() view external {
+        address deploymentAddress = getStructHashDeploymentAddress();
+        console.log("deployment address: ", deploymentAddress);
+        console.log("\nrun script below to verify contract: \n");
+        console.log(
+            string.concat(
+                "forge verify-contract ", 
+                Strings.toHexString(deploymentAddress),
+                " src/StructHash.sol:StructHash"
+            )
+        );    
+    }
+
+    function test() external {}
+}
+
 contract VerifyV3AutomationScript is CommonScript {
     function run() view external {
         address deploymentAddress = getV3AutomationDeploymentAddress();
@@ -30,7 +47,9 @@ contract VerifyV3AutomationScript is CommonScript {
             string.concat(
                 "forge verify-contract ", 
                 Strings.toHexString(deploymentAddress),
-                " src/V3Automation.sol:V3Automation"
+                " src/V3Automation.sol:V3Automation",
+                " --libraries src/StructHash.sol:StructHash:",
+                Strings.toHexString(getStructHashDeploymentAddress())
             )
         );    
     }

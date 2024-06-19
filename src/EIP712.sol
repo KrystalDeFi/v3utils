@@ -1,6 +1,7 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BUSL-1.1
 // modified version of @openzeppelin
 pragma solidity ^0.8.0;
+import "./StructHash.sol";
 
 abstract contract EIP712 {
     bytes32 private constant TYPE_HASH =
@@ -18,6 +19,11 @@ abstract contract EIP712 {
                 address(this)
             )
         );
+    }
+
+    function recover(StructHash.Order memory order, bytes memory signature) internal view returns (address) {
+        bytes32 digest = _hashTypedDataV4(StructHash._hash(order));
+        return ECDSA.recover(digest, signature);
     }
 
     function _hashTypedDataV4(bytes32 structHash) internal view virtual returns (bytes32) {
