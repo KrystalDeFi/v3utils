@@ -2,6 +2,7 @@
 // modified version of @openzeppelin
 pragma solidity ^0.8.0;
 import "./StructHash.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 abstract contract EIP712 {
     bytes32 private constant TYPE_HASH =
