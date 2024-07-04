@@ -730,10 +730,12 @@ abstract contract Common is AccessControl, Pausable {
     }
 
     function _safeApprove(IERC20 token, address _spender, uint256 _value) internal {
-        bytes memory returnData = address(token).functionCall(abi.encodeWithSelector(token.approve.selector, _spender, _value));
-        if (returnData.length > 0) { // Return data is optional
-            require(abi.decode(returnData, (bool)), "SafeERC20: ERC20 operation did not succeed");
+        (bool success, bytes memory returnData) = address(token).call(abi.encodeWithSelector(token.approve.selector, _spender, _value));
+        if (_value == 0) {
+            // some token does not allow approve(0) so we skip check for this case
+            return;
         }
+        require(success && (returnData.length == 0 || abi.decode(returnData, (bool))), "SafeERC20: approve failed");
     }
 
     function _isWhitelistedNfpm(address nfpm) internal view returns(bool) {
