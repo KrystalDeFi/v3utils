@@ -668,17 +668,23 @@ abstract contract Common is AccessControl, Pausable {
         if (params.amount0 > 0) {
             feeAmount0 = FullMath.mulDiv(params.amount0, params.feeX64, Q64);
             amount0Left = params.amount0 - feeAmount0;
-            SafeERC20.safeTransfer(IERC20(params.token0), FEE_TAKER, feeAmount0);
+            if (feeAmount0 > 0) {
+                SafeERC20.safeTransfer(IERC20(params.token0), FEE_TAKER, feeAmount0);
+            }
         }
         if (params.amount1 > 0) {
             feeAmount1 = FullMath.mulDiv(params.amount1, params.feeX64, Q64);
             amount1Left = params.amount1 - feeAmount1;
-            SafeERC20.safeTransfer(IERC20(params.token1), FEE_TAKER, feeAmount1);
+            if (feeAmount1 > 0) {
+                SafeERC20.safeTransfer(IERC20(params.token1), FEE_TAKER, feeAmount1);
+            }
         }
         if (params.amount2 > 0) {
             feeAmount2 = FullMath.mulDiv(params.amount2, params.feeX64, Q64);
             amount2Left = params.amount2 - feeAmount2;
-            SafeERC20.safeTransfer(IERC20(params.token2), FEE_TAKER, feeAmount2);
+            if (feeAmount2 > 0) {
+                SafeERC20.safeTransfer(IERC20(params.token2), FEE_TAKER, feeAmount2);
+            }
         }
 
 
@@ -724,10 +730,12 @@ abstract contract Common is AccessControl, Pausable {
     }
 
     function _safeApprove(IERC20 token, address _spender, uint256 _value) internal {
-        bytes memory returnData = address(token).functionCall(abi.encodeWithSelector(token.approve.selector, _spender, _value));
-        if (returnData.length > 0) { // Return data is optional
-            require(abi.decode(returnData, (bool)), "SafeERC20: ERC20 operation did not succeed");
+        (bool success, bytes memory returnData) = address(token).call(abi.encodeWithSelector(token.approve.selector, _spender, _value));
+        if (_value == 0) {
+            // some token does not allow approve(0) so we skip check for this case
+            return;
         }
+        require(success && (returnData.length == 0 || abi.decode(returnData, (bool))), "SafeERC20: approve failed");
     }
 
     function _isWhitelistedNfpm(address nfpm) internal view returns(bool) {
