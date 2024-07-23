@@ -22,7 +22,7 @@ abstract contract EIP712 {
         );
     }
 
-    function recover(StructHash.Order memory order, bytes memory signature) internal view returns (address) {
+    function _recover(bytes memory order, bytes memory signature) internal view returns (address) {
         bytes32 digest = _hashTypedDataV4(StructHash._hash(order));
         return ECDSA.recover(digest, signature);
     }

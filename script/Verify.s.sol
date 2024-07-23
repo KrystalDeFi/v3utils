@@ -50,7 +50,7 @@ contract VerifyV3AutomationScript is CommonScript {
                 Strings.toHexString(deploymentAddress),
                 " src/V3Automation.sol:V3Automation",
                 " --libraries src/StructHash.sol:StructHash:",
-                Strings.toHexString(getStructHashDeploymentAddress())
+                vm.envString("STRUCT_HASH_ADDRESS")
             )
         );    
     }
