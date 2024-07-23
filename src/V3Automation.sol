@@ -11,7 +11,7 @@ contract V3Automation is Pausable, Common, EIP712 {
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     mapping (bytes32=>bool) _cancelledOrder;
 
-    constructor() EIP712("V3AutomationOrder", "1.0") {}
+    constructor() EIP712("V3AutomationOrder", "2.0") {}
 
     function initialize(address _swapRouter, address admin, address withdrawer, address feeTaker, address[] calldata whitelistedNfpms) public override  {
         super.initialize(_swapRouter, admin, withdrawer, feeTaker, whitelistedNfpms);

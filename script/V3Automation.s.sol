@@ -8,7 +8,7 @@ contract BeforeV3AutomationScript is CommonScript {
         address libraryAddress = getStructHashDeploymentAddress();
         try vm.envAddress("STRUCT_HASH_ADDRESS") {
             if (vm.envAddress("STRUCT_HASH_ADDRESS") != libraryAddress) {
-                console.log("wrong STRUCT_HASH_ADDRESS:");
+                console.log("wrong STRUCT_HASH_ADDRESS:", toHexString(vm.envAddress("STRUCT_HASH_ADDRESS")));
                 console.log("set `STRUCT_HASH_ADDRESS=", toHexString(libraryAddress));
                 revert();
             }
