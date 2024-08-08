@@ -100,8 +100,8 @@ abstract contract Common is AccessControl, Pausable {
     address private _initializer;
     mapping (FeeType=>uint64) private _maxFeeX64;
     constructor() {
-        _maxFeeX64[FeeType.GAS_FEE] = 1844674407370955264; // 10%
-        _maxFeeX64[FeeType.PROTOCOL_FEE] = 1844674407370955264; // 10%
+        _maxFeeX64[FeeType.GAS_FEE] = 5534023222112865280; // 10%
+        _maxFeeX64[FeeType.PROTOCOL_FEE] = 5534023222112865280; // 10%
         _initializer = tx.origin;
     }
 
