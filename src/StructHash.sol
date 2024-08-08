@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
+pragma abicoder v2;
 
 library StructHash {
+    function _hash(bytes memory abiEncodedUserOrder) external pure returns (bytes32) {
+        return _hash(abi.decode(abiEncodedUserOrder, (Order)));
+    }
 
     // keccak256(
     //     "RebalanceAutoCompound(RebalanceAutoCompoundAction action)RebalanceAutoCompoundAction(int256 maxGasProportionX64,int256 feeToPrincipalRatioThresholdX64)"
@@ -403,7 +407,7 @@ library StructHash {
         OrderConfig config;
         int64 signatureTime;
     }
-    function _hash(Order memory obj) external pure returns (bytes32) {
+    function _hash(Order memory obj) internal pure returns (bytes32) {
         return keccak256(abi.encode(
             Order_TYPEHASH,
             obj.chainId,

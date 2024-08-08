@@ -6,7 +6,7 @@ import "./EIP712.sol";
 
 contract V3Automation is Pausable, Common, EIP712 {
 
-    event CancelOrder(address user, StructHash.Order order, bytes signature);
+    event CancelOrder(address user, bytes order, bytes signature);
 
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     mapping (bytes32=>bool) _cancelledOrder;
@@ -76,15 +76,15 @@ contract V3Automation is Pausable, Common, EIP712 {
         uint256 amountAddMin0;
         uint256 amountAddMin1;
 
-        // user signed config
-        StructHash.Order userOrder;
+        // abi encoded order
+        bytes abiEncodedUserOrder;
         bytes orderSignature;
     }
 
     function execute(ExecuteParams calldata params) public payable onlyRole(OPERATOR_ROLE) whenNotPaused() {
         require(_isWhitelistedNfpm(address(params.nfpm)));
         address positionOwner = params.nfpm.ownerOf(params.tokenId);
-        _validateOrder(params.userOrder, params.orderSignature, positionOwner);
+        _validateOrder(params.abiEncodedUserOrder, params.orderSignature, positionOwner);
         _execute(params, positionOwner);
     }
 
@@ -167,16 +167,16 @@ contract V3Automation is Pausable, Common, EIP712 {
         params.nfpm.transferFrom(address(this), positionOwner, params.tokenId);
     }
 
-    function _validateOrder(StructHash.Order memory order, bytes memory orderSignature, address actor) internal view {
-        address userAddress = recover(order, orderSignature);
+    function _validateOrder(bytes memory abiEncodedUserOrder, bytes memory orderSignature, address actor) internal view {
+        address userAddress = _recover(abiEncodedUserOrder, orderSignature);
         require(userAddress == actor);
         require(!_cancelledOrder[keccak256(orderSignature)]);
     }
 
-    function cancelOrder(StructHash.Order calldata order, bytes calldata orderSignature) external {
-        _validateOrder(order, orderSignature, msg.sender);
+    function cancelOrder(bytes calldata abiEncodedUserOrder, bytes calldata orderSignature) external {
+        _validateOrder(abiEncodedUserOrder, orderSignature, msg.sender);
         _cancelledOrder[keccak256(orderSignature)] = true;
-        emit CancelOrder(msg.sender, order, orderSignature);
+        emit CancelOrder(msg.sender, abiEncodedUserOrder, orderSignature);
     }
 
     function isOrderCancelled(bytes calldata orderSignature) external view returns (bool) {

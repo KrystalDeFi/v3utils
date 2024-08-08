@@ -50,7 +50,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             true,
             0,
             0,
-            emptyUserConfig,
+            abi.encode(emptyUserConfig),
             signature
         );
 
@@ -103,7 +103,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             true,
             0,
             0,
-            emptyUserConfig,
+            abi.encode(emptyUserConfig),
             ""
         );
 
@@ -143,7 +143,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             true,
             0,
             0,
-            emptyUserConfig,
+            abi.encode(emptyUserConfig),
             ""
         );
         vm.prank(TEST_OWNER_ACCOUNT);
@@ -152,7 +152,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
         v3automation.execute(params);
     }
 
-    event CancelOrder(address user, StructHash.Order order, bytes signature);
+    event CancelOrder(address user, bytes order, bytes signature);
 
     function testCancelOrder() external {
         (address userAddress, uint256 privateKey) = makeAddrAndKey("cancelOrderUser");
@@ -160,8 +160,8 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
 
         vm.prank(userAddress);
         vm.expectEmit(false, false, false, true, address(v3automation));
-        emit CancelOrder(userAddress, emptyUserConfig, signature);
-        v3automation.cancelOrder(emptyUserConfig, signature);
+        emit CancelOrder(userAddress, abi.encode(emptyUserConfig), signature);
+        v3automation.cancelOrder(abi.encode(emptyUserConfig), signature);
 
         bool cancelled = v3automation.isOrderCancelled(signature);
         assertTrue(cancelled);
@@ -207,7 +207,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             true,
             0,
             0,
-            emptyUserConfig,
+            abi.encode(emptyUserConfig),
             signature
         );
 
@@ -268,7 +268,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             false,
             0,
             0,
-            emptyUserConfig,
+            abi.encode(emptyUserConfig),
             signature
         );
 
