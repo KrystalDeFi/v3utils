@@ -1,0 +1,33 @@
+{
+    "extends": "solhint:recommended",
+    "plugins": [
+        "prettier"
+    ],
+    "rules": {
+        "no-unused-vars": "warn",
+        "var-name-mixedcase": "warn",
+        "func-name-mixedcase": "warn",
+        "quotes": [
+            "error",
+            "single"
+        ],
+        "compiler-version": "warn",
+        "ordering": "warn",
+        "mark-callable-contracts": "off",
+        "no-empty-blocks": "on",
+        "no-unused-import": "warn",
+        "private-vars-leading-underscore": "warn",
+        "interface-starts-with-i": "warn",
+        "imports-order": "warn",
+        "explicit-types": [
+            "warn",
+            "explicit"
+        ],
+        "func-visibility": [
+            "error",
+            {
+                "ignoreConstructors": true
+            }
+        ]
+    }
+}

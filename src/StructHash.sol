@@ -10,31 +10,33 @@ library StructHash {
     // keccak256(
     //     "RebalanceAutoCompound(RebalanceAutoCompoundAction action)RebalanceAutoCompoundAction(int256 maxGasProportionX64,int256 feeToPrincipalRatioThresholdX64)"
     // );
-    bytes32 constant RebalanceAutoCompound_TYPEHASH = 0x35d8f787f18def78c8e6fcafa2acf783916baed9dc692c38b4e8a97c853b7477;
+    bytes32 constant RebalanceAutoCompound_TYPEHASH =
+        0x35d8f787f18def78c8e6fcafa2acf783916baed9dc692c38b4e8a97c853b7477;
     struct RebalanceAutoCompound {
         RebalanceAutoCompoundAction action;
     }
     function _hash(RebalanceAutoCompound memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            RebalanceAutoCompound_TYPEHASH,
-            _hash(obj.action)
-        ));
+        return keccak256(abi.encode(RebalanceAutoCompound_TYPEHASH, _hash(obj.action)));
     }
 
     // keccak256(
     //     "RebalanceAutoCompoundAction(int256 maxGasProportionX64,int256 feeToPrincipalRatioThresholdX64)"
     // );
-    bytes32 constant RebalanceAutoCompoundAction_TYPEHASH = 0x3fa522c715dd2d3373663b38d551ef7f7a5beec25a19992cd26eae7d7df39486;
+    bytes32 constant RebalanceAutoCompoundAction_TYPEHASH =
+        0x3fa522c715dd2d3373663b38d551ef7f7a5beec25a19992cd26eae7d7df39486;
     struct RebalanceAutoCompoundAction {
         int256 maxGasProportionX64;
         int256 feeToPrincipalRatioThresholdX64;
     }
     function _hash(RebalanceAutoCompoundAction memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            RebalanceAutoCompoundAction_TYPEHASH,
-            obj.maxGasProportionX64,
-            obj.feeToPrincipalRatioThresholdX64
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    RebalanceAutoCompoundAction_TYPEHASH,
+                    obj.maxGasProportionX64,
+                    obj.feeToPrincipalRatioThresholdX64
+                )
+            );
     }
 
     // keccak256(
@@ -46,11 +48,7 @@ library StructHash {
         uint32 lteTickOffset;
     }
     function _hash(TickOffsetCondition memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            TickOffsetCondition_TYPEHASH,
-            obj.gteTickOffset,
-            obj.lteTickOffset
-        ));
+        return keccak256(abi.encode(TickOffsetCondition_TYPEHASH, obj.gteTickOffset, obj.lteTickOffset));
     }
 
     // keccak256(
@@ -63,12 +61,15 @@ library StructHash {
         uint256 lteOffsetSqrtPriceX96;
     }
     function _hash(PriceOffsetCondition memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            PriceOffsetCondition_TYPEHASH,
-            obj.baseToken,
-            obj.gteOffsetSqrtPriceX96,
-            obj.lteOffsetSqrtPriceX96
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    PriceOffsetCondition_TYPEHASH,
+                    obj.baseToken,
+                    obj.gteOffsetSqrtPriceX96,
+                    obj.lteOffsetSqrtPriceX96
+                )
+            );
     }
 
     // keccak256(
@@ -80,11 +81,7 @@ library StructHash {
         int256 gteToken0RatioX64;
     }
     function _hash(TokenRatioCondition memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            TokenRatioCondition_TYPEHASH,
-            obj.lteToken0RatioX64,
-            obj.gteToken0RatioX64
-        ));
+        return keccak256(abi.encode(TokenRatioCondition_TYPEHASH, obj.lteToken0RatioX64, obj.gteToken0RatioX64));
     }
 
     // keccak256(
@@ -100,15 +97,18 @@ library StructHash {
         TokenRatioCondition tokenRatioCondition;
     }
     function _hash(Condition memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            Condition_TYPEHASH,
-            keccak256(bytes(obj._type)),
-            obj.sqrtPriceX96,
-            obj.timeBuffer,
-            _hash(obj.tickOffsetCondition),
-            _hash(obj.priceOffsetCondition),
-            _hash(obj.tokenRatioCondition)
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    Condition_TYPEHASH,
+                    keccak256(bytes(obj._type)),
+                    obj.sqrtPriceX96,
+                    obj.timeBuffer,
+                    _hash(obj.tickOffsetCondition),
+                    _hash(obj.priceOffsetCondition),
+                    _hash(obj.tokenRatioCondition)
+                )
+            );
     }
 
     // keccak256(
@@ -120,11 +120,7 @@ library StructHash {
         uint32 tickUpperOffset;
     }
     function _hash(TickOffsetAction memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            TickOffsetAction_TYPEHASH,
-            obj.tickLowerOffset,
-            obj.tickUpperOffset
-        ));
+        return keccak256(abi.encode(TickOffsetAction_TYPEHASH, obj.tickLowerOffset, obj.tickUpperOffset));
     }
 
     // keccak256(
@@ -137,12 +133,15 @@ library StructHash {
         int160 upperOffsetSqrtPriceX96;
     }
     function _hash(PriceOffsetAction memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            PriceOffsetAction_TYPEHASH,
-            obj.baseToken,
-            obj.lowerOffsetSqrtPriceX96,
-            obj.upperOffsetSqrtPriceX96
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    PriceOffsetAction_TYPEHASH,
+                    obj.baseToken,
+                    obj.lowerOffsetSqrtPriceX96,
+                    obj.upperOffsetSqrtPriceX96
+                )
+            );
     }
 
     // keccak256(
@@ -154,11 +153,7 @@ library StructHash {
         int256 token0RatioX64;
     }
     function _hash(TokenRatioAction memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            TokenRatioAction_TYPEHASH,
-            obj.tickWidth,
-            obj.token0RatioX64
-        ));
+        return keccak256(abi.encode(TokenRatioAction_TYPEHASH, obj.tickWidth, obj.token0RatioX64));
     }
 
     // keccak256(
@@ -175,16 +170,19 @@ library StructHash {
         TokenRatioAction tokenRatioAction;
     }
     function _hash(RebalanceAction memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            RebalanceAction_TYPEHASH,
-            obj.maxGasProportionX64,
-            obj.swapSlippageX64,
-            obj.liquiditySlippageX64,
-            keccak256(bytes(obj._type)),
-            _hash(obj.tickOffsetAction),
-            _hash(obj.priceOffsetAction),
-            _hash(obj.tokenRatioAction)
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    RebalanceAction_TYPEHASH,
+                    obj.maxGasProportionX64,
+                    obj.swapSlippageX64,
+                    obj.liquiditySlippageX64,
+                    keccak256(bytes(obj._type)),
+                    _hash(obj.tickOffsetAction),
+                    _hash(obj.priceOffsetAction),
+                    _hash(obj.tokenRatioAction)
+                )
+            );
     }
 
     // keccak256(
@@ -198,13 +196,16 @@ library StructHash {
         bool recurring;
     }
     function _hash(RebalanceConfig memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            RebalanceConfig_TYPEHASH,
-            _hash(obj.rebalanceCondition),
-            _hash(obj.rebalanceAction),
-            _hash(obj.autoCompound),
-            obj.recurring
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    RebalanceConfig_TYPEHASH,
+                    _hash(obj.rebalanceCondition),
+                    _hash(obj.rebalanceAction),
+                    _hash(obj.autoCompound),
+                    obj.recurring
+                )
+            );
     }
 
     // keccak256(
@@ -217,12 +218,10 @@ library StructHash {
         int32 lteTickAbsolute;
     }
     function _hash(RangeOrderCondition memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            RangeOrderCondition_TYPEHASH,
-            obj.zeroToOne,
-            obj.gteTickAbsolute,
-            obj.lteTickAbsolute
-        ));
+        return
+            keccak256(
+                abi.encode(RangeOrderCondition_TYPEHASH, obj.zeroToOne, obj.gteTickAbsolute, obj.lteTickAbsolute)
+            );
     }
 
     // keccak256(
@@ -235,12 +234,15 @@ library StructHash {
         int256 withdrawSlippageX64;
     }
     function _hash(RangeOrderAction memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            RangeOrderAction_TYPEHASH,
-            obj.maxGasProportionX64,
-            obj.swapSlippageX64,
-            obj.withdrawSlippageX64
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    RangeOrderAction_TYPEHASH,
+                    obj.maxGasProportionX64,
+                    obj.swapSlippageX64,
+                    obj.withdrawSlippageX64
+                )
+            );
     }
 
     // keccak256(
@@ -252,11 +254,7 @@ library StructHash {
         RangeOrderAction action;
     }
     function _hash(RangeOrderConfig memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            RangeOrderConfig_TYPEHASH,
-            _hash(obj.condition),
-            _hash(obj.action)
-        ));
+        return keccak256(abi.encode(RangeOrderConfig_TYPEHASH, _hash(obj.condition), _hash(obj.action)));
     }
 
     // keccak256(
@@ -267,10 +265,7 @@ library StructHash {
         int256 minFeeEarnedUsdX64;
     }
     function _hash(FeeBasedCondition memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            FeeBasedCondition_TYPEHASH,
-            obj.minFeeEarnedUsdX64
-        ));
+        return keccak256(abi.encode(FeeBasedCondition_TYPEHASH, obj.minFeeEarnedUsdX64));
     }
 
     // keccak256(
@@ -281,28 +276,29 @@ library StructHash {
         int256 intervalInSecond;
     }
     function _hash(TimeBasedCondition memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            TimeBasedCondition_TYPEHASH,
-            obj.intervalInSecond
-        ));
+        return keccak256(abi.encode(TimeBasedCondition_TYPEHASH, obj.intervalInSecond));
     }
 
     // keccak256(
     //     "AutoCompoundCondition(string type,FeeBasedCondition feeBasedCondition,TimeBasedCondition timeBasedCondition)FeeBasedCondition(int256 minFeeEarnedUsdX64)TimeBasedCondition(int256 intervalInSecond)"
     // );
-    bytes32 constant AutoCompoundCondition_TYPEHASH = 0x8077238253cf3aae9fc43bae69ede107dc9ecfe05cc3947a0cac4f94212a6223;
+    bytes32 constant AutoCompoundCondition_TYPEHASH =
+        0x8077238253cf3aae9fc43bae69ede107dc9ecfe05cc3947a0cac4f94212a6223;
     struct AutoCompoundCondition {
         string _type;
         FeeBasedCondition feeBasedCondition;
         TimeBasedCondition timeBasedCondition;
     }
     function _hash(AutoCompoundCondition memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            AutoCompoundCondition_TYPEHASH,
-            keccak256(bytes(obj._type)),
-            _hash(obj.feeBasedCondition),
-            _hash(obj.timeBasedCondition)
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    AutoCompoundCondition_TYPEHASH,
+                    keccak256(bytes(obj._type)),
+                    _hash(obj.feeBasedCondition),
+                    _hash(obj.timeBasedCondition)
+                )
+            );
     }
 
     // keccak256(
@@ -315,12 +311,15 @@ library StructHash {
         int256 swapSlippageX64;
     }
     function _hash(AutoCompoundAction memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            AutoCompoundAction_TYPEHASH,
-            obj.maxGasProportionX64,
-            obj.poolSlippageX64,
-            obj.swapSlippageX64
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    AutoCompoundAction_TYPEHASH,
+                    obj.maxGasProportionX64,
+                    obj.poolSlippageX64,
+                    obj.swapSlippageX64
+                )
+            );
     }
 
     // keccak256(
@@ -332,11 +331,7 @@ library StructHash {
         AutoCompoundAction action;
     }
     function _hash(AutoCompoundConfig memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            AutoCompoundConfig_TYPEHASH,
-            _hash(obj.condition),
-            _hash(obj.action)
-        ));
+        return keccak256(abi.encode(AutoCompoundConfig_TYPEHASH, _hash(obj.condition), _hash(obj.action)));
     }
 
     // keccak256(
@@ -348,11 +343,7 @@ library StructHash {
         AutoExitAction action;
     }
     function _hash(AutoExitConfig memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            AutoExitConfig_TYPEHASH,
-            _hash(obj.condition),
-            _hash(obj.action)
-        ));
+        return keccak256(abi.encode(AutoExitConfig_TYPEHASH, _hash(obj.condition), _hash(obj.action)));
     }
 
     // keccak256(
@@ -366,13 +357,16 @@ library StructHash {
         address tokenOutAddress;
     }
     function _hash(AutoExitAction memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            AutoExitAction_TYPEHASH,
-            obj.maxGasProportionX64,
-            obj.swapSlippageX64,
-            obj.liquiditySlippageX64,
-            obj.tokenOutAddress
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    AutoExitAction_TYPEHASH,
+                    obj.maxGasProportionX64,
+                    obj.swapSlippageX64,
+                    obj.liquiditySlippageX64,
+                    obj.tokenOutAddress
+                )
+            );
     }
 
     // keccak256(
@@ -386,13 +380,16 @@ library StructHash {
         AutoExitConfig autoExitConfig;
     }
     function _hash(OrderConfig memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            OrderConfig_TYPEHASH,
-            _hash(obj.rebalanceConfig),
-            _hash(obj.rangeOrderConfig),
-            _hash(obj.autoCompoundConfig),
-            _hash(obj.autoExitConfig)
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    OrderConfig_TYPEHASH,
+                    _hash(obj.rebalanceConfig),
+                    _hash(obj.rangeOrderConfig),
+                    _hash(obj.autoCompoundConfig),
+                    _hash(obj.autoExitConfig)
+                )
+            );
     }
 
     // keccak256(
@@ -408,14 +405,17 @@ library StructHash {
         int64 signatureTime;
     }
     function _hash(Order memory obj) internal pure returns (bytes32) {
-        return keccak256(abi.encode(
-            Order_TYPEHASH,
-            obj.chainId,
-            obj.nfpmAddress,
-            obj.tokenId,
-            keccak256(bytes(obj.orderType)),
-            _hash(obj.config),
-            obj.signatureTime
-        ));
+        return
+            keccak256(
+                abi.encode(
+                    Order_TYPEHASH,
+                    obj.chainId,
+                    obj.nfpmAddress,
+                    obj.tokenId,
+                    keccak256(bytes(obj.orderType)),
+                    _hash(obj.config),
+                    obj.signatureTime
+                )
+            );
     }
 }
