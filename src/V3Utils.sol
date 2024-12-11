@@ -88,7 +88,7 @@ contract V3Utils is IERC721Receiver, Common {
 
         (address token0, address token1, , , , uint24 fee) = _getPosition(nfpm, instructions.protocol, tokenId);
 
-        (uint256 amount0, uint256 amount1) = _decreaseLiquidityAndCollectFees(
+        (uint256 amount0, uint256 amount1, , ) = _decreaseLiquidityAndCollectFees(
             DecreaseAndCollectFeesParams(
                 nfpm,
                 instructions.recipient,
@@ -111,7 +111,7 @@ contract V3Utils is IERC721Receiver, Common {
                     amount1,
                     0,
                     instructions.protocolFeeX64,
-                    FeeType.PROTOCOL_FEE,
+                    FeeType.LIQUIDITY_FEE,
                     address(nfpm),
                     tokenId,
                     instructions.recipient,
@@ -424,7 +424,7 @@ contract V3Utils is IERC721Receiver, Common {
                     params.amount1,
                     params.amount2,
                     params.protocolFeeX64,
-                    FeeType.PROTOCOL_FEE,
+                    FeeType.LIQUIDITY_FEE,
                     address(params.nfpm),
                     0,
                     params.recipient,
@@ -446,7 +446,7 @@ contract V3Utils is IERC721Receiver, Common {
                 feeAmount1: feeAmount1,
                 feeAmount2: feeAmount2,
                 feeX64: params.protocolFeeX64,
-                feeType: FeeType.PROTOCOL_FEE
+                feeType: FeeType.LIQUIDITY_FEE
             });
         }
         result = _swapAndMint(_params, msg.value != 0);
@@ -491,7 +491,7 @@ contract V3Utils is IERC721Receiver, Common {
                     params.amount1,
                     params.amount2,
                     params.protocolFeeX64,
-                    FeeType.PROTOCOL_FEE,
+                    FeeType.LIQUIDITY_FEE,
                     address(params.nfpm),
                     params.tokenId,
                     params.recipient,

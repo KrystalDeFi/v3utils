@@ -35,8 +35,12 @@ contract V3Automation is Pausable, Common, EIP712 {
         uint24 fee;
         int24 tickLower;
         int24 tickUpper;
+        // amount0 and amount1 in position (including fees)
         uint256 amount0;
         uint256 amount1;
+        // feeAmount0 and feeAmount1 in position
+        uint256 feeAmount0;
+        uint256 feeAmount1;
         uint128 liquidity;
     }
 
@@ -61,7 +65,8 @@ contract V3Automation is Pausable, Common, EIP712 {
         uint256 amountRemoveMin1; // min amount to be removed from liquidity
         uint256 deadline; // for uniswap operations - operator promises fair value
         uint64 gasFeeX64; // amount of tokens to be used as gas fee
-        uint64 protocolFeeX64; // amount of tokens to be used as protocol fee
+        uint64 liquidityFeeX64; // amount of tokens to be used as liquidity fee
+        uint64 performanceFeeX64; // amount of tokens to be used as performance fee
         // for mint new range
         int24 newTickLower;
         int24 newTickUpper;
@@ -94,7 +99,7 @@ contract V3Automation is Pausable, Common, EIP712 {
 
         require(state.liquidity != params.liquidity || params.liquidity != 0);
 
-        (state.amount0, state.amount1) = _decreaseLiquidityAndCollectFees(
+        (state.amount0, state.amount1, state.feeAmount0, state.feeAmount1) = _decreaseLiquidityAndCollectFees(
             DecreaseAndCollectFeesParams(
                 params.nfpm,
                 positionOwner,
@@ -131,16 +136,16 @@ contract V3Automation is Pausable, Common, EIP712 {
                     true
                 );
             }
-            uint256 protocolFeeAmount0;
-            uint256 protocolFeeAmount1;
-            if (params.protocolFeeX64 > 0) {
-                (, , , protocolFeeAmount0, protocolFeeAmount1, ) = _deductFees(
+            uint256 liquidityFeeAmount0;
+            uint256 liquidityFeeAmount1;
+            if (params.liquidityFeeX64 > 0) {
+                (, , , liquidityFeeAmount0, liquidityFeeAmount1, ) = _deductFees(
                     DeductFeesParams(
-                        state.amount0,
-                        state.amount1,
+                        state.amount0 - state.feeAmount0, // only liquidity tokens, not including fees
+                        state.amount1 - state.feeAmount1,
                         0,
-                        params.protocolFeeX64,
-                        FeeType.PROTOCOL_FEE,
+                        params.liquidityFeeX64,
+                        FeeType.LIQUIDITY_FEE,
                         address(params.nfpm),
                         params.tokenId,
                         positionOwner,
@@ -151,8 +156,29 @@ contract V3Automation is Pausable, Common, EIP712 {
                     true
                 );
             }
-            state.amount0 = state.amount0 - gasFeeAmount0 - protocolFeeAmount0;
-            state.amount1 = state.amount1 - gasFeeAmount1 - protocolFeeAmount1;
+            uint256 performanceFeeAmount0;
+            uint256 performanceFeeAmount1;
+            if (params.performanceFeeX64 > 0) {
+                (, , , performanceFeeAmount0, performanceFeeAmount1, ) = _deductFees(
+                    DeductFeesParams(
+                        state.feeAmount0, // only fees
+                        state.feeAmount1, // only fees
+                        0,
+                        params.performanceFeeX64,
+                        FeeType.PERFORMANCE_FEE,
+                        address(params.nfpm),
+                        params.tokenId,
+                        positionOwner,
+                        state.token0,
+                        state.token1,
+                        address(0)
+                    ),
+                    true
+                );
+            }
+
+            state.amount0 = state.amount0 - gasFeeAmount0 - liquidityFeeAmount0 - performanceFeeAmount0;
+            state.amount1 = state.amount1 - gasFeeAmount1 - liquidityFeeAmount1 - performanceFeeAmount1;
         }
 
         if (params.action == Action.AUTO_ADJUST) {

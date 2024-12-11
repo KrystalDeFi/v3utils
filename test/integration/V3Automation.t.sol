@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import "../IntegrationTestBase.sol";
+import '../IntegrationTestBase.sol';
 
 contract V3AutomationIntegrationTest is IntegrationTestBase {
     StructHash.Order emptyUserConfig; // todo: remove this when we fill user configuration
@@ -13,7 +13,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
     function testAutoAdjustRange() external {
         // add liquidity to existing (empty) position (add 1 DAI / 0 USDC)
         _increaseLiquidity();
-        (address userAddress, uint256 privateKey) = makeAddrAndKey("positionOwnerAddress");
+        (address userAddress, uint256 privateKey) = makeAddrAndKey('positionOwnerAddress');
 
         vm.startPrank(TEST_NFT_ACCOUNT);
         NPM.safeTransferFrom(TEST_NFT_ACCOUNT, userAddress, TEST_NFT);
@@ -23,9 +23,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
 
         uint256 countBefore = NPM.balanceOf(userAddress);
 
-        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(
-            TEST_NFT
-        );
+        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT);
 
         V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
             V3Automation.Action.AUTO_ADJUST,
@@ -39,11 +37,12 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             _get05DAIToUSDCSwapData(),
             0,
             0,
-            "",
+            '',
             0,
             0,
             block.timestamp,
             184467440737095520, // 0.01 * 2^64
+            0,
             0,
             MIN_TICK_500,
             -MIN_TICK_500,
@@ -66,9 +65,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
         uint256 countAfter = NPM.balanceOf(userAddress);
         assertGt(countAfter, countBefore);
 
-        (, , , , , , , uint128 liquidityAfter, , , , ) = NPM.positions(
-            TEST_NFT
-        );
+        (, , , , , , , uint128 liquidityAfter, , , , ) = NPM.positions(TEST_NFT);
         assertEq(liquidityAfter, 0);
     }
 
@@ -76,9 +73,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
         // add liquidity to existing (empty) position (add 1 DAI / 0 USDC)
         _increaseLiquidity();
 
-        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(
-            TEST_NFT
-        );
+        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT);
 
         V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
             V3Automation.Action.AUTO_ADJUST,
@@ -92,11 +87,12 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             _get05DAIToUSDCSwapData(),
             0,
             0,
-            "",
+            '',
             0,
             0,
             block.timestamp,
             184467440737095520, // 0.01 * 2^64
+            0,
             0,
             MIN_TICK_100,
             -MIN_TICK_100,
@@ -104,7 +100,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             0,
             0,
             abi.encode(emptyUserConfig),
-            ""
+            ''
         );
 
         // using approve / execute pattern
@@ -118,7 +114,9 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
     }
 
     function testAutoAdjustWithInvalidNfpm() external {
-        INonfungiblePositionManager invalidNfpm = INonfungiblePositionManager(0xC36442b4A4522E871399cD717aBDD847Ab11FE99);
+        INonfungiblePositionManager invalidNfpm = INonfungiblePositionManager(
+            0xC36442b4A4522E871399cD717aBDD847Ab11FE99
+        );
 
         V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
             V3Automation.Action.AUTO_ADJUST,
@@ -129,14 +127,15 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             address(0),
             500000000000000000,
             400000,
-            "",
+            '',
             0,
             0,
-            "",
+            '',
             0,
             0,
             block.timestamp,
             184467440737095520, // 0.01 * 2^64
+            0,
             0,
             MIN_TICK_100,
             -MIN_TICK_100,
@@ -144,7 +143,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             0,
             0,
             abi.encode(emptyUserConfig),
-            ""
+            ''
         );
         vm.prank(TEST_OWNER_ACCOUNT);
 
@@ -155,7 +154,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
     event CancelOrder(address user, bytes order, bytes signature);
 
     function testCancelOrder() external {
-        (address userAddress, uint256 privateKey) = makeAddrAndKey("cancelOrderUser");
+        (address userAddress, uint256 privateKey) = makeAddrAndKey('cancelOrderUser');
         bytes memory signature = _signOrder(emptyUserConfig, privateKey);
 
         vm.prank(userAddress);
@@ -170,16 +169,14 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
     function testAutoExit() external {
         _increaseLiquidity();
 
-        (address userAddress, uint256 privateKey) = makeAddrAndKey("positionOwnerAddress");
+        (address userAddress, uint256 privateKey) = makeAddrAndKey('positionOwnerAddress');
         vm.startPrank(TEST_NFT_ACCOUNT);
         NPM.safeTransferFrom(TEST_NFT_ACCOUNT, userAddress, TEST_NFT);
         vm.stopPrank();
 
         bytes memory signature = _signOrder(emptyUserConfig, privateKey);
 
-        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(
-            TEST_NFT
-        );
+        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT);
 
         uint256 minDestAmount = 400000;
         uint64 protocolFeeX64 = 18446744073709552; // 0.1%
@@ -196,12 +193,13 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             _get05DAIToUSDCSwapData(),
             0,
             0,
-            "",
+            '',
             0,
             0,
             block.timestamp,
             184467440737095520, // 0.01 * 2^64
             protocolFeeX64,
+            0,
             0,
             0,
             true,
@@ -222,9 +220,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
         // Execute auto exit
         v3automation.execute(params);
 
-        (, , , , , , , uint128 liquidityAfter, , , , ) = NPM.positions(
-            TEST_NFT
-        );
+        (, , , , , , , uint128 liquidityAfter, , , , ) = NPM.positions(TEST_NFT);
 
         uint256 balanceUSDCAfter = USDC.balanceOf(userAddress);
         assertEq(liquidityAfter, 0);
@@ -234,17 +230,14 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
     function testAutoCompound() external {
         _increaseLiquidity();
 
-        (address userAddress, uint256 privateKey) = makeAddrAndKey("positionOwnerAddress");
+        (address userAddress, uint256 privateKey) = makeAddrAndKey('positionOwnerAddress');
         vm.startPrank(TEST_NFT_ACCOUNT);
         NPM.safeTransferFrom(TEST_NFT_ACCOUNT, userAddress, TEST_NFT);
         vm.stopPrank();
 
         bytes memory signature = _signOrder(emptyUserConfig, privateKey);
-        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(
-            TEST_NFT
-        );
+        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT);
 
-        
         V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
             V3Automation.Action.AUTO_COMPOUND,
             Common.Protocol.UNI_V3,
@@ -254,15 +247,16 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
             address(0),
             0,
             0,
-            "",
+            '',
             0,
             0,
-            "",
+            '',
             0,
             0,
             block.timestamp,
             0, // gas fee
             0, // protocol fee
+            0,
             0,
             0,
             false,
@@ -282,7 +276,10 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
         v3automation.execute(params);
     }
 
-    function _signOrder(StructHash.Order memory order, uint256 privateKey) internal view returns (bytes memory signature) {
+    function _signOrder(
+        StructHash.Order memory order,
+        uint256 privateKey
+    ) internal view returns (bytes memory signature) {
         bytes32 digest = v3automation.hashTypedDataV4(StructHash._hash(order));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
         signature = abi.encodePacked(r, s, v);
