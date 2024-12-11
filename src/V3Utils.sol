@@ -53,7 +53,8 @@ contract V3Utils is IERC721Receiver, Common {
         // if tokenIn or tokenOut is WETH - unwrap
         bool unwrap;
         // protocol fees
-        uint64 protocolFeeX64;
+        uint64 liquidityFeeX64;
+        uint64 performanceFeeX64;
     }
 
     /// @notice Execute instruction by pulling approved NFT instead of direct safeTransferFrom call from owner
@@ -76,52 +77,78 @@ contract V3Utils is IERC721Receiver, Common {
         uint256 tokenId,
         bytes calldata data
     ) external override whenNotPaused returns (bytes4) {
-        INonfungiblePositionManager nfpm = INonfungiblePositionManager(msg.sender);
         // not allowed to send to itself
         if (from == address(this)) {
             revert SelfSend();
         }
 
-        require(_isWhitelistedNfpm(address(nfpm)));
+        require(_isWhitelistedNfpm(msg.sender));
 
         Instructions memory instructions = abi.decode(data, (Instructions));
 
-        (address token0, address token1, , , , uint24 fee) = _getPosition(nfpm, instructions.protocol, tokenId);
-
-        (uint256 amount0, uint256 amount1, , ) = _decreaseLiquidityAndCollectFees(
-            DecreaseAndCollectFeesParams(
-                nfpm,
-                instructions.recipient,
-                IERC20(token0),
-                IERC20(token1),
-                tokenId,
-                instructions.liquidity,
-                instructions.deadline,
-                instructions.amountRemoveMin0,
-                instructions.amountRemoveMin1,
-                instructions.compoundFees
-            )
+        (address token0, address token1, , , , uint24 fee) = _getPosition(
+            INonfungiblePositionManager(msg.sender),
+            instructions.protocol,
+            tokenId
         );
 
-        // take protocol fees
-        if (instructions.protocolFeeX64 > 0) {
-            (amount0, amount1, , , , ) = _deductFees(
-                DeductFeesParams(
-                    amount0,
-                    amount1,
+        uint256 amount0;
+        uint256 amount1;
+        {
+            (uint256 feeAmount0, uint256 feeAmount1) = (0, 0);
+
+            (amount0, amount1, feeAmount0, feeAmount1) = _decreaseLiquidityAndCollectFees(
+                DecreaseAndCollectFeesParams(
+                    INonfungiblePositionManager(msg.sender),
+                    instructions.recipient,
+                    IERC20(token0),
+                    IERC20(token1),
+                    tokenId,
+                    instructions.liquidity,
+                    instructions.deadline,
+                    instructions.amountRemoveMin0,
+                    instructions.amountRemoveMin1,
+                    instructions.compoundFees
+                )
+            );
+
+            // deduct fees
+            {
+                DeductFeesParams memory _deductFeesParams = DeductFeesParams(
+                    amount0 - feeAmount0, // only liquidity tokens, not including fees
+                    amount1 - feeAmount1,
                     0,
-                    instructions.protocolFeeX64,
+                    instructions.liquidityFeeX64,
                     FeeType.LIQUIDITY_FEE,
-                    address(nfpm),
+                    msg.sender,
                     tokenId,
                     instructions.recipient,
                     token0,
                     token1,
                     address(0)
-                ),
-                true
-            );
+                );
+                uint256 liquidityFeeAmount0;
+                uint256 liquidityFeeAmount1;
+                if (instructions.liquidityFeeX64 > 0) {
+                    (, , , liquidityFeeAmount0, liquidityFeeAmount1, ) = _deductFees(_deductFeesParams, true);
+                }
+
+                _deductFeesParams.amount0 = feeAmount0;
+                _deductFeesParams.amount1 = feeAmount1;
+                _deductFeesParams.feeX64 = instructions.performanceFeeX64;
+                _deductFeesParams.feeType = FeeType.PERFORMANCE_FEE;
+                uint256 performanceFeeAmount0;
+                uint256 performanceFeeAmount1;
+                if (instructions.performanceFeeX64 > 0) {
+                    (, , , performanceFeeAmount0, performanceFeeAmount1, ) = _deductFees(_deductFeesParams, true);
+                }
+
+                amount0 = amount0 - liquidityFeeAmount0 - performanceFeeAmount0;
+                amount1 = amount1 - liquidityFeeAmount1 - performanceFeeAmount1;
+            }
         }
+
+        INonfungiblePositionManager nfpm = INonfungiblePositionManager(msg.sender);
 
         // check if enough tokens are available for swaps
         if (amount0 < instructions.amountIn0 || amount1 < instructions.amountIn1) {
