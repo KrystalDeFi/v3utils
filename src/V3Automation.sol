@@ -177,8 +177,18 @@ contract V3Automation is Pausable, Common, EIP712 {
                 );
             }
 
-            state.amount0 = state.amount0 - gasFeeAmount0 - liquidityFeeAmount0 - performanceFeeAmount0;
-            state.amount1 = state.amount1 - gasFeeAmount1 - liquidityFeeAmount1 - performanceFeeAmount1;
+            state.amount0 = state.amount0 - gasFeeAmount0 - liquidityFeeAmount0;
+            state.amount1 = state.amount1 - gasFeeAmount1 - liquidityFeeAmount1;
+
+            // if compound fees, amount for next action is deducted from performance fees
+            // otherwise, we exclude collected fees from the amounts
+            if (params.compoundFees) {
+                state.amount0 -= performanceFeeAmount0;
+                state.amount1 -= performanceFeeAmount1;
+            } else {
+                state.amount0 -= state.feeAmount0;
+                state.amount1 -= state.feeAmount1;
+            }
         }
 
         if (params.action == Action.AUTO_ADJUST) {

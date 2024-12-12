@@ -143,8 +143,18 @@ contract V3Utils is IERC721Receiver, Common {
                     (, , , performanceFeeAmount0, performanceFeeAmount1, ) = _deductFees(_deductFeesParams, true);
                 }
 
-                amount0 = amount0 - liquidityFeeAmount0 - performanceFeeAmount0;
-                amount1 = amount1 - liquidityFeeAmount1 - performanceFeeAmount1;
+                amount0 -= liquidityFeeAmount0;
+                amount1 -= liquidityFeeAmount1;
+
+                // if compound fees, amount for next action is deducted from performance fees
+                // otherwise, we exclude collected fees from the amounts
+                if (params.compoundFees) {
+                    amount0 -= performanceFeeAmount0;
+                    amount1 -= performanceFeeAmount1;
+                } else {
+                    amount0 -= feeAmount0;
+                    amount1 -= feeAmount1;
+                }
             }
         }
 
