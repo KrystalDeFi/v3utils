@@ -1,22 +1,16 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import "../IntegrationTestBase.sol";
+import '../IntegrationTestBase.sol';
 import '@openzeppelin/contracts/security/Pausable.sol';
 
-
 contract V3UtilsIntegrationTest is IntegrationTestBase {
-
     function setUp() external {
         _setupBase();
     }
 
     function testUnauthorizedTransfer() external {
-        vm.expectRevert(
-            abi.encodePacked(
-                "ERC721: transfer caller is not owner nor approved"
-            )
-        );
+        vm.expectRevert(abi.encodePacked('ERC721: transfer caller is not owner nor approved'));
         V3Utils.Instructions memory inst = V3Utils.Instructions(
             V3Utils.WhatToDo.CHANGE_RANGE,
             Common.Protocol.UNI_V3,
@@ -25,10 +19,10 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             0,
             0,
             0,
-            "",
+            '',
             0,
             0,
-            "",
+            '',
             0,
             0,
             true,
@@ -38,45 +32,30 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             0,
             TEST_NFT_ACCOUNT,
             false,
+            0,
             0
         );
-        NPM.safeTransferFrom(
-            TEST_NFT_ACCOUNT,
-            address(v3utils),
-            TEST_NFT,
-            abi.encode(inst)
-        );
+        NPM.safeTransferFrom(TEST_NFT_ACCOUNT, address(v3utils), TEST_NFT, abi.encode(inst));
     }
 
     function testInvalidInstructions() external {
         // reverts with ERC721Receiver error if Instructions are invalid
-        vm.expectRevert(
-            abi.encodePacked(
-                "ERC721: transfer to non ERC721Receiver implementer"
-            )
-        );
+        vm.expectRevert(abi.encodePacked('ERC721: transfer to non ERC721Receiver implementer'));
         vm.prank(TEST_NFT_ACCOUNT);
-        NPM.safeTransferFrom(
-            TEST_NFT_ACCOUNT,
-            address(v3utils),
-            TEST_NFT,
-            abi.encode(true, false, 1, "test")
-        );
+        NPM.safeTransferFrom(TEST_NFT_ACCOUNT, address(v3utils), TEST_NFT, abi.encode(true, false, 1, 'test'));
     }
 
     function testSendEtherNotAllowed() external {
         bool success;
         vm.expectRevert(Common.NotWETH.selector);
-        (success,) = address(v3utils).call{value: 123}("");
+        (success, ) = address(v3utils).call{ value: 123 }('');
     }
 
     function testTransferDecreaseSlippageError() external {
         // add liquidity to existing (empty) position (add 1 DAI / 0 USDC)
         _increaseLiquidity();
 
-        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(
-            TEST_NFT
-        );
+        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT);
 
         // swap a bit more dai than available - fails with slippage error because not enough liquidity + fees is collected
         V3Utils.Instructions memory inst = V3Utils.Instructions(
@@ -90,7 +69,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             _get05DAIToUSDCSwapData(),
             0,
             0,
-            "",
+            '',
             MIN_TICK_100,
             -MIN_TICK_100,
             true,
@@ -100,26 +79,20 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             block.timestamp,
             TEST_NFT_ACCOUNT,
             false,
+            0,
             0
         );
 
         vm.prank(TEST_NFT_ACCOUNT);
-        vm.expectRevert("Price slippage check");
-        NPM.safeTransferFrom(
-            TEST_NFT_ACCOUNT,
-            address(v3utils),
-            TEST_NFT,
-            abi.encode(inst)
-        );
+        vm.expectRevert('Price slippage check');
+        NPM.safeTransferFrom(TEST_NFT_ACCOUNT, address(v3utils), TEST_NFT, abi.encode(inst));
     }
 
     function testTransferAmountError() external {
         // add liquidity to existing (empty) position (add 1 DAI / 0 USDC)
         _increaseLiquidity();
 
-        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(
-            TEST_NFT
-        );
+        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT);
 
         // swap a bit more dai than available - fails with slippage error because not enough liquidity + fees is collected
         V3Utils.Instructions memory inst = V3Utils.Instructions(
@@ -133,7 +106,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             _get05DAIToUSDCSwapData(),
             0,
             0,
-            "",
+            '',
             MIN_TICK_100,
             -MIN_TICK_100,
             true,
@@ -143,18 +116,14 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             block.timestamp,
             TEST_NFT_ACCOUNT,
             false,
+            0,
             0
         );
 
         vm.prank(TEST_NFT_ACCOUNT);
         vm.expectRevert(Common.AmountError.selector);
 
-        NPM.safeTransferFrom(
-            TEST_NFT_ACCOUNT,
-            address(v3utils),
-            TEST_NFT,
-            abi.encode(inst)
-        );
+        NPM.safeTransferFrom(TEST_NFT_ACCOUNT, address(v3utils), TEST_NFT, abi.encode(inst));
     }
 
     function testTransferWithChangeRange() external {
@@ -163,9 +132,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
 
         uint256 countBefore = NPM.balanceOf(TEST_NFT_ACCOUNT);
 
-        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(
-            TEST_NFT
-        );
+        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT);
 
         // swap half of DAI to USDC and add full range
         V3Utils.Instructions memory inst = V3Utils.Instructions(
@@ -179,7 +146,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             _get05DAIToUSDCSwapData(),
             0,
             0,
-            "",
+            '',
             MIN_TICK_500,
             -MIN_TICK_500,
             true,
@@ -189,6 +156,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             block.timestamp,
             TEST_NFT_ACCOUNT,
             false,
+            0,
             0
         );
 
@@ -203,9 +171,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         uint256 countAfter = NPM.balanceOf(TEST_NFT_ACCOUNT);
         assertGt(countAfter, countBefore);
 
-        (, , , , , , , uint128 liquidityAfter, , , , ) = NPM.positions(
-            TEST_NFT
-        );
+        (, , , , , , , uint128 liquidityAfter, , , , ) = NPM.positions(TEST_NFT);
         assertEq(liquidityAfter, 0);
     }
 
@@ -218,10 +184,10 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             0,
             0,
             0,
-            "",
+            '',
             0,
             0,
-            "",
+            '',
             0,
             0,
             true,
@@ -231,32 +197,24 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             block.timestamp,
             TEST_NFT_3_ACCOUNT,
             false,
+            0,
             0
         );
 
         uint256 daiBefore = DAI.balanceOf(TEST_NFT_3_ACCOUNT);
         uint256 usdcBefore = USDC.balanceOf(TEST_NFT_3_ACCOUNT);
-        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(
-            TEST_NFT_3
-        );
+        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT_3);
 
         assertEq(daiBefore, 0);
         assertEq(usdcBefore, 0);
         assertEq(liquidityBefore, 4700646086778448669);
 
         vm.prank(TEST_NFT_3_ACCOUNT);
-        NPM.safeTransferFrom(
-            TEST_NFT_3_ACCOUNT,
-            address(v3utils),
-            TEST_NFT_3,
-            abi.encode(inst)
-        );
+        NPM.safeTransferFrom(TEST_NFT_3_ACCOUNT, address(v3utils), TEST_NFT_3, abi.encode(inst));
 
         uint256 daiAfter = DAI.balanceOf(TEST_NFT_3_ACCOUNT);
         uint256 usdcAfter = USDC.balanceOf(TEST_NFT_3_ACCOUNT);
-        (, , , , , , , uint128 liquidityAfter, , , , ) = NPM.positions(
-            TEST_NFT_3
-        );
+        (, , , , , , , uint128 liquidityAfter, , , , ) = NPM.positions(TEST_NFT_3);
 
         assertEq(daiAfter, 155);
         assertEq(usdcAfter, 278462);
@@ -265,7 +223,6 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
 
     function testTransferWithCompoundSwap() external {
         _writeTokenBalance(TEST_NFT_ACCOUNT, address(DAI), 500000000000000000);
-
 
         V3Utils.Instructions memory inst = V3Utils.Instructions(
             V3Utils.WhatToDo.COMPOUND_FEES,
@@ -278,7 +235,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             _get05DAIToUSDCSwapData(),
             0,
             0,
-            "",
+            '',
             0,
             0,
             true,
@@ -288,32 +245,24 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             block.timestamp,
             TEST_NFT_3_ACCOUNT,
             false,
+            0,
             0
         );
 
         uint256 daiBefore = DAI.balanceOf(TEST_NFT_3_ACCOUNT);
         uint256 usdcBefore = USDC.balanceOf(TEST_NFT_3_ACCOUNT);
-        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(
-            TEST_NFT_3
-        );
+        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT_3);
 
         assertEq(daiBefore, 0);
         assertEq(usdcBefore, 0);
         assertEq(liquidityBefore, 4700646086778448669);
 
         vm.prank(TEST_NFT_3_ACCOUNT);
-        NPM.safeTransferFrom(
-            TEST_NFT_3_ACCOUNT,
-            address(v3utils),
-            TEST_NFT_3,
-            abi.encode(inst)
-        );
+        NPM.safeTransferFrom(TEST_NFT_3_ACCOUNT, address(v3utils), TEST_NFT_3, abi.encode(inst));
 
         uint256 daiAfter = DAI.balanceOf(TEST_NFT_3_ACCOUNT);
         uint256 usdcAfter = USDC.balanceOf(TEST_NFT_3_ACCOUNT);
-        (, , , , , , , uint128 liquidityAfter, , , , ) = NPM.positions(
-            TEST_NFT_3
-        );
+        (, , , , , , , uint128 liquidityAfter, , , , ) = NPM.positions(TEST_NFT_3);
 
         assertEq(daiAfter, 438);
         assertEq(usdcAfter, 1269729);
@@ -338,7 +287,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             _get1DAIToUSDSwapData(),
             0,
             0,
-            "",
+            '',
             0,
             0,
             true,
@@ -348,16 +297,12 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             block.timestamp,
             TEST_NFT_ACCOUNT,
             false,
+            0,
             0
         );
 
         vm.prank(TEST_NFT_ACCOUNT);
-        NPM.safeTransferFrom(
-            TEST_NFT_ACCOUNT,
-            address(v3utils),
-            TEST_NFT,
-            abi.encode(inst)
-        );
+        NPM.safeTransferFrom(TEST_NFT_ACCOUNT, address(v3utils), TEST_NFT, abi.encode(inst));
 
         uint256 countAfter = NPM.balanceOf(TEST_NFT_ACCOUNT);
 
@@ -371,13 +316,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         // decrease liquidity without collect (simulate fee growth)
         vm.prank(TEST_NFT_ACCOUNT);
         (uint256 amount0, uint256 amount1) = NPM.decreaseLiquidity(
-            IUniV3NonfungiblePositionManager.DecreaseLiquidityParams(
-                TEST_NFT,
-                liquidity,
-                0,
-                0,
-                block.timestamp
-            )
+            IUniV3NonfungiblePositionManager.DecreaseLiquidityParams(TEST_NFT, liquidity, 0, 0, block.timestamp)
         );
 
         // should be same amount as added
@@ -398,7 +337,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             _get1DAIToUSDSwapData(),
             0,
             0,
-            "",
+            '',
             0,
             0,
             true,
@@ -408,16 +347,12 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             block.timestamp,
             TEST_NFT_ACCOUNT,
             false,
+            0,
             0
         );
 
         vm.prank(TEST_NFT_ACCOUNT);
-        NPM.safeTransferFrom(
-            TEST_NFT_ACCOUNT,
-            address(v3utils),
-            TEST_NFT,
-            abi.encode(inst)
-        );
+        NPM.safeTransferFrom(TEST_NFT_ACCOUNT, address(v3utils), TEST_NFT, abi.encode(inst));
 
         uint256 countAfter = NPM.balanceOf(TEST_NFT_ACCOUNT);
 
@@ -425,27 +360,26 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
     }
 
     function testFailEmptySwapAndIncreaseLiquidity() external {
-        V3Utils.SwapAndIncreaseLiquidityParams memory params = Common
-            .SwapAndIncreaseLiquidityParams(
-                Common.Protocol.UNI_V3,
-                NPM,
-                TEST_NFT,
-                0,
-                0,
-                0,
-                TEST_NFT_ACCOUNT,
-                block.timestamp,
-                IERC20(address(0)),
-                0,
-                0,
-                "",
-                0,
-                0,
-                "",
-                0,
-                0,
-                0
-            );
+        V3Utils.SwapAndIncreaseLiquidityParams memory params = Common.SwapAndIncreaseLiquidityParams(
+            Common.Protocol.UNI_V3,
+            NPM,
+            TEST_NFT,
+            0,
+            0,
+            0,
+            TEST_NFT_ACCOUNT,
+            block.timestamp,
+            IERC20(address(0)),
+            0,
+            0,
+            '',
+            0,
+            0,
+            '',
+            0,
+            0,
+            0
+        );
 
         vm.prank(TEST_NFT_ACCOUNT);
         v3utils.swapAndIncreaseLiquidity(params);
@@ -456,27 +390,26 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
 
         uint256 balanceUSDC = 1001001;
         _writeTokenBalance(TEST_NFT_ACCOUNT, address(USDC), balanceUSDC);
-        V3Utils.SwapAndIncreaseLiquidityParams memory params = Common
-            .SwapAndIncreaseLiquidityParams(
-                Common.Protocol.UNI_V3,
-                NPM,
-                TEST_NFT,
-                0,
-                balanceUSDC,
-                0,
-                TEST_NFT_ACCOUNT,
-                block.timestamp,
-                USDC,
-                1000000,
-                900000000000000000,
-                _get1USDCToDAISwapData(),
-                0,
-                0,
-                "",
-                0,
-                0,
-                protocolFeeX64
-            );
+        V3Utils.SwapAndIncreaseLiquidityParams memory params = Common.SwapAndIncreaseLiquidityParams(
+            Common.Protocol.UNI_V3,
+            NPM,
+            TEST_NFT,
+            0,
+            balanceUSDC,
+            0,
+            TEST_NFT_ACCOUNT,
+            block.timestamp,
+            USDC,
+            1000000,
+            900000000000000000,
+            _get1USDCToDAISwapData(),
+            0,
+            0,
+            '',
+            0,
+            0,
+            protocolFeeX64
+        );
 
         vm.prank(TEST_NFT_ACCOUNT);
         USDC.approve(address(v3utils), balanceUSDC);
@@ -489,7 +422,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
 
         assertEq(result.liquidity, 495285928421852);
         assertEq(result.added0, 989333334060081199);
-        assertEq(1000000 / (feeBalance-feeBalanceBefore), 100);
+        assertEq(1000000 / (feeBalance - feeBalanceBefore), 100);
         assertEq(result.added1, 0); // one sided adding
     }
 
@@ -497,27 +430,26 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         _writeTokenBalance(TEST_NFT_5_ACCOUNT, address(USDC), 3000000);
         // add liquidity to another positions which is not owned
 
-        V3Utils.SwapAndIncreaseLiquidityParams memory params = Common
-            .SwapAndIncreaseLiquidityParams(
-                Common.Protocol.UNI_V3,
-                NPM,
-                TEST_NFT_5,
-                0,
-                2000000,
-                0,
-                TEST_NFT_5_ACCOUNT,
-                block.timestamp,
-                USDC,
-                1000000,
-                900000000000000000,
-                _get1USDCToDAISwapData(),
-                0,
-                0,
-                "",
-                0,
-                0,
-                0
-            );
+        V3Utils.SwapAndIncreaseLiquidityParams memory params = Common.SwapAndIncreaseLiquidityParams(
+            Common.Protocol.UNI_V3,
+            NPM,
+            TEST_NFT_5,
+            0,
+            2000000,
+            0,
+            TEST_NFT_5_ACCOUNT,
+            block.timestamp,
+            USDC,
+            1000000,
+            900000000000000000,
+            _get1USDCToDAISwapData(),
+            0,
+            0,
+            '',
+            0,
+            0,
+            0
+        );
 
         vm.prank(TEST_NFT_5_ACCOUNT);
         USDC.approve(address(v3utils), 3000000);
@@ -539,43 +471,41 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         assertEq(result.added1, 620657);
 
         // all usdc spent
-        assertEq(usdcBefore - usdcAfter, 1000000+result.added1);
+        assertEq(usdcBefore - usdcAfter, 1000000 + result.added1);
         //some dai returned - because not 100% correct swap ratio
         assertEq(daiAfter - daiBefore, 47);
     }
 
     function testSwapAndIncreaseLiquidityInvalidOwner() external {
-
         _writeTokenBalance(TEST_NFT_ACCOUNT, address(USDC), 3000000);
         // add liquidity to another positions which is not owned
 
-        V3Utils.SwapAndIncreaseLiquidityParams memory params = Common
-            .SwapAndIncreaseLiquidityParams(
-                Common.Protocol.UNI_V3,
-                NPM,
-                TEST_NFT_5,
-                0,
-                2000000,
-                0,
-                TEST_NFT_ACCOUNT,
-                block.timestamp,
-                USDC,
-                1000000,
-                900000000000000000,
-                _get1USDCToDAISwapData(),
-                0,
-                0,
-                "",
-                0,
-                0,
-                0
-            );
+        V3Utils.SwapAndIncreaseLiquidityParams memory params = Common.SwapAndIncreaseLiquidityParams(
+            Common.Protocol.UNI_V3,
+            NPM,
+            TEST_NFT_5,
+            0,
+            2000000,
+            0,
+            TEST_NFT_ACCOUNT,
+            block.timestamp,
+            USDC,
+            1000000,
+            900000000000000000,
+            _get1USDCToDAISwapData(),
+            0,
+            0,
+            '',
+            0,
+            0,
+            0
+        );
 
         vm.prank(TEST_NFT_ACCOUNT);
         USDC.approve(address(v3utils), 3000000);
 
         vm.prank(TEST_NFT_ACCOUNT);
-        vm.expectRevert(bytes("sender is not owner of position"));
+        vm.expectRevert(bytes('sender is not owner of position'));
         v3utils.swapAndIncreaseLiquidity(params);
     }
 
@@ -597,10 +527,10 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             IERC20(address(0)),
             0,
             0,
-            "",
+            '',
             0,
             0,
-            "",
+            '',
             0,
             0
         );
@@ -610,23 +540,11 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
     }
 
     function testSwapAndMint() external {
-        _testSwapAndMint(
-            MIN_TICK_500,
-            -MIN_TICK_500,
-            989419165008,
-            989333334059719092,
-            989506
-        );
+        _testSwapAndMint(MIN_TICK_500, -MIN_TICK_500, 989419165008, 989333334059719092, 989506);
     }
 
     function testSwapAndMintOneSided0() external {
-        _testSwapAndMint(
-            MIN_TICK_500,
-            MIN_TICK_500 + 200000,
-            837822485815257126640,
-            0,
-            1000000
-        );
+        _testSwapAndMint(MIN_TICK_500, MIN_TICK_500 + 200000, 837822485815257126640, 0, 1000000);
     }
 
     function testSwapAndMintOneSided1() external {
@@ -670,7 +588,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             _get1USDCToDAISwapData(),
             0,
             0,
-            "",
+            '',
             0,
             0
         );
@@ -682,7 +600,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         Common.SwapAndMintResult memory result = v3utils.swapAndMint(params);
 
         uint256 feeBalance = USDC.balanceOf(TEST_FEE_ACCOUNT);
-        assertEq(feeBalance-feeBalanceBefore, 10000); // fee is 1%
+        assertEq(feeBalance - feeBalanceBefore, 10000); // fee is 1%
 
         assertGt(result.tokenId, 0);
         assertEq(result.liquidity, eLiquidity);
@@ -722,7 +640,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         );
 
         hoax(TEST_NFT_ACCOUNT);
-        Common.SwapAndMintResult memory result = v3utils.swapAndMint{value: 1.1 ether}(params);
+        Common.SwapAndMintResult memory result = v3utils.swapAndMint{ value: 1.1 ether }(params);
 
         assertGt(result.tokenId, 0);
         assertEq(result.liquidity, 1249239075875054);
@@ -731,19 +649,15 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
 
         uint256 feeBalance = WETH_ERC20.balanceOf(TEST_FEE_ACCOUNT);
         uint256 feeTakerBalanceAfter = WETH_ERC20.balanceOf(TEST_OWNER_ACCOUNT);
-        assertEq(feeBalance-feeBalanceBefore, 10000000000000000);
+        assertEq(feeBalance - feeBalanceBefore, 10000000000000000);
         assertGt(feeTakerBalanceAfter, feeTakerBalanceBefore);
     }
 
     function testSwapAndIncreaseLiquidityAndCollectFees() external {
         uint64 protocolFeeX64 = 18446744073709552; // 0.1%
 
-        
-
         uint256 feeTakerBalanceBefore = WETH_ERC20.balanceOf(TEST_OWNER_ACCOUNT);
-        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(
-            TEST_NFT
-        );
+        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT);
 
         _writeTokenBalance(TEST_NFT_ACCOUNT, address(WETH_ERC20), 1.5 ether);
 
@@ -800,7 +714,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             _get1DAIToUSDSwapData(),
             0,
             0,
-            "",
+            '',
             0,
             0,
             true,
@@ -810,18 +724,14 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             block.timestamp,
             TEST_NFT_ACCOUNT,
             false,
-            protocolFeeX64
+            protocolFeeX64,
+            0
         );
 
         uint256 balanceDAIFeeTakerBefore = DAI.balanceOf(TEST_OWNER_ACCOUNT);
 
         vm.prank(TEST_NFT_ACCOUNT);
-        NPM.safeTransferFrom(
-            TEST_NFT_ACCOUNT,
-            address(v3utils),
-            TEST_NFT,
-            abi.encode(inst)
-        );
+        NPM.safeTransferFrom(TEST_NFT_ACCOUNT, address(v3utils), TEST_NFT, abi.encode(inst));
         vm.stopPrank();
 
         uint256 countAfter = NPM.balanceOf(TEST_NFT_ACCOUNT);
@@ -863,7 +773,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             0,
             0
         );
-        v3utils.swapAndMint{value: 1 ether}(params);
+        v3utils.swapAndMint{ value: 1 ether }(params);
     }
 
     function testSwapAndMintWithETHAlgebra() external {
@@ -898,7 +808,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         );
 
         hoax(TEST_NFT_ACCOUNT, 1.1 ether);
-        Common.SwapAndMintResult memory result = v3utils.swapAndMint{value: 1.1 ether}(params);
+        Common.SwapAndMintResult memory result = v3utils.swapAndMint{ value: 1.1 ether }(params);
 
         assertGt(result.tokenId, 0);
         assertGt(result.liquidity, 0);
@@ -907,7 +817,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
 
         uint256 feeBalance = WETH_ERC20.balanceOf(TEST_FEE_ACCOUNT);
         uint256 feeTakerBalanceAfter = WETH_ERC20.balanceOf(TEST_OWNER_ACCOUNT);
-        assertEq(feeBalance-feeBalanceBefore, 10000000000000000);
+        assertEq(feeBalance - feeBalanceBefore, 10000000000000000);
         assertGt(feeTakerBalanceAfter, feeTakerBalanceBefore);
     }
 }

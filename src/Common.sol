@@ -123,8 +123,9 @@ abstract contract Common is AccessControl, Pausable {
     address private _initializer;
     mapping(FeeType => uint64) private _maxFeeX64;
     constructor() {
-        _maxFeeX64[FeeType.GAS_FEE] = 5534023222112865280; // 10%
-        _maxFeeX64[FeeType.PROTOCOL_FEE] = 5534023222112865280; // 10%
+        _maxFeeX64[FeeType.GAS_FEE] = 5534023222112865280; // 30%
+        _maxFeeX64[FeeType.LIQUIDITY_FEE] = 5534023222112865280; // 30%
+        _maxFeeX64[FeeType.PERFORMANCE_FEE] = 3689348814741910528; // 20%
         _initializer = tx.origin;
     }
 
@@ -744,8 +745,8 @@ abstract contract Common is AccessControl, Pausable {
 
     function _decreaseLiquidityAndCollectFees(
         DecreaseAndCollectFeesParams memory params
-    ) internal returns (uint256 amount0, uint256 amount1) {
-        (uint256 positionAmount0, uint256 positionAmount1) = _decreaseLiquidity(
+    ) internal returns (uint256 collectedAmount0, uint256 collectedAmount1, uint256 feeAmount0, uint256 feeAmount1) {
+        (uint256 amount0, uint256 amount1) = _decreaseLiquidity(
             params.nfpm,
             params.tokenId,
             params.liquidity,
@@ -753,7 +754,7 @@ abstract contract Common is AccessControl, Pausable {
             params.token0Min,
             params.token1Min
         );
-        (amount0, amount1) = params.nfpm.collect(
+        (collectedAmount0, collectedAmount1) = params.nfpm.collect(
             IUniV3NonfungiblePositionManager.CollectParams(
                 params.tokenId,
                 address(this),
@@ -761,21 +762,8 @@ abstract contract Common is AccessControl, Pausable {
                 type(uint128).max
             )
         );
-        if (!params.compoundFees) {
-            {
-                uint256 fees0Return = amount0 - positionAmount0;
-                uint256 fees1Return = amount1 - positionAmount1;
-                // return feesToken
-                if (fees0Return > 0) {
-                    SafeERC20.safeTransfer(params.token0, params.userAddress, fees0Return);
-                }
-                if (fees1Return > 0) {
-                    SafeERC20.safeTransfer(params.token1, params.userAddress, fees1Return);
-                }
-            }
-            amount0 = positionAmount0;
-            amount1 = positionAmount1;
-        }
+        feeAmount0 = collectedAmount0 - amount0;
+        feeAmount1 = collectedAmount1 - amount1;
     }
 
     function _getWeth9(INonfungiblePositionManager nfpm, Protocol protocol) internal view returns (IWETH9 weth) {
