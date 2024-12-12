@@ -148,7 +148,7 @@ contract V3Utils is IERC721Receiver, Common {
 
                 // if compound fees, amount for next action is deducted from performance fees
                 // otherwise, we exclude collected fees from the amounts
-                if (params.compoundFees) {
+                if (instructions.compoundFees) {
                     amount0 -= performanceFeeAmount0;
                     amount1 -= performanceFeeAmount1;
                 } else {
