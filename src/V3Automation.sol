@@ -121,8 +121,8 @@ contract V3Automation is Pausable, Common, EIP712 {
             if (params.gasFeeX64 > 0) {
                 (, , , gasFeeAmount0, gasFeeAmount1, ) = _deductFees(
                     DeductFeesParams(
-                        state.amount0,
-                        state.amount1,
+                        state.amount0 - state.feeAmount0, // only liquidity tokens, not including fees
+                        state.amount1 - state.feeAmount1,
                         0,
                         params.gasFeeX64,
                         FeeType.GAS_FEE,
@@ -188,6 +188,19 @@ contract V3Automation is Pausable, Common, EIP712 {
             } else {
                 state.amount0 -= state.feeAmount0;
                 state.amount1 -= state.feeAmount1;
+                _returnLeftoverTokens(
+                    ReturnLeftoverTokensParams({
+                        weth: _getWeth9(params.nfpm, params.protocol),
+                        to: positionOwner,
+                        token0: IERC20(state.token0),
+                        token1: IERC20(state.token1),
+                        total0: state.feeAmount0,
+                        total1: state.feeAmount1,
+                        added0: performanceFeeAmount0,
+                        added1: performanceFeeAmount1,
+                        unwrap: false
+                    })
+                );
             }
         }
 

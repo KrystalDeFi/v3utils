@@ -83,6 +83,7 @@ contract V3Utils is IERC721Receiver, Common {
         }
 
         require(_isWhitelistedNfpm(msg.sender));
+        INonfungiblePositionManager nfpm = INonfungiblePositionManager(msg.sender);
 
         Instructions memory instructions = abi.decode(data, (Instructions));
 
@@ -154,11 +155,22 @@ contract V3Utils is IERC721Receiver, Common {
                 } else {
                     amount0 -= feeAmount0;
                     amount1 -= feeAmount1;
+                    ReturnLeftoverTokensParams memory _returnLeftoverTokensParams;
+
+                    _returnLeftoverTokensParams.weth = _getWeth9(nfpm, instructions.protocol);
+                    _returnLeftoverTokensParams.to = instructions.recipient;
+                    _returnLeftoverTokensParams.token0 = IERC20(token0);
+                    _returnLeftoverTokensParams.token1 = IERC20(token1);
+                    _returnLeftoverTokensParams.total0 = feeAmount0;
+                    _returnLeftoverTokensParams.total1 = feeAmount1;
+                    _returnLeftoverTokensParams.added0 = performanceFeeAmount0;
+                    _returnLeftoverTokensParams.added1 = performanceFeeAmount1;
+                    _returnLeftoverTokensParams.unwrap = instructions.unwrap;
+
+                    _returnLeftoverTokens(_returnLeftoverTokensParams);
                 }
             }
         }
-
-        INonfungiblePositionManager nfpm = INonfungiblePositionManager(msg.sender);
 
         // check if enough tokens are available for swaps
         if (amount0 < instructions.amountIn0 || amount1 < instructions.amountIn1) {
