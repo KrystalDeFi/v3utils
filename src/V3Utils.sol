@@ -87,11 +87,12 @@ contract V3Utils is IERC721Receiver, Common {
 
         Instructions memory instructions = abi.decode(data, (Instructions));
 
-        (address token0, address token1, , , , uint24 fee) = _getPosition(
+        Position memory position = _getPosition(
             INonfungiblePositionManager(msg.sender),
             instructions.protocol,
             tokenId
         );
+        // (address token0, address token1, uint24 fee, int24 tickSpacing) = (position.token0, position.token1, position.fee, position.tickSpacing);
 
         uint256 amount0;
         uint256 amount1;
@@ -102,8 +103,8 @@ contract V3Utils is IERC721Receiver, Common {
                 DecreaseAndCollectFeesParams(
                     INonfungiblePositionManager(msg.sender),
                     instructions.recipient,
-                    IERC20(token0),
-                    IERC20(token1),
+                    IERC20(position.token0),
+                    IERC20(position.token1),
                     tokenId,
                     instructions.liquidity,
                     instructions.deadline,
@@ -124,8 +125,8 @@ contract V3Utils is IERC721Receiver, Common {
                     msg.sender,
                     tokenId,
                     instructions.recipient,
-                    token0,
-                    token1,
+                    position.token0,
+                    position.token1,
                     address(0)
                 );
                 uint256 liquidityFeeAmount0;
@@ -159,8 +160,8 @@ contract V3Utils is IERC721Receiver, Common {
 
                     _returnLeftoverTokensParams.weth = _getWeth9(nfpm, instructions.protocol);
                     _returnLeftoverTokensParams.to = instructions.recipient;
-                    _returnLeftoverTokensParams.token0 = IERC20(token0);
-                    _returnLeftoverTokensParams.token1 = IERC20(token1);
+                    _returnLeftoverTokensParams.token0 = IERC20(position.token0);
+                    _returnLeftoverTokensParams.token1 = IERC20(position.token1);
                     _returnLeftoverTokensParams.total0 = feeAmount0;
                     _returnLeftoverTokensParams.total1 = feeAmount1;
                     _returnLeftoverTokensParams.added0 = performanceFeeAmount0;
@@ -179,7 +180,7 @@ contract V3Utils is IERC721Receiver, Common {
 
         if (instructions.whatToDo == WhatToDo.COMPOUND_FEES) {
             SwapAndIncreaseLiquidityResult memory result;
-            if (instructions.targetToken == token0) {
+            if (instructions.targetToken == position.token0) {
                 result = _swapAndIncrease(
                     SwapAndIncreaseLiquidityParams(
                         instructions.protocol,
@@ -190,7 +191,7 @@ contract V3Utils is IERC721Receiver, Common {
                         0,
                         instructions.recipient,
                         instructions.deadline,
-                        IERC20(token1),
+                        IERC20(position.token1),
                         instructions.amountIn1,
                         instructions.amountOut1Min,
                         instructions.swapData1,
@@ -201,11 +202,11 @@ contract V3Utils is IERC721Receiver, Common {
                         instructions.amountAddMin1,
                         0
                     ),
-                    IERC20(token0),
-                    IERC20(token1),
+                    IERC20(position.token0),
+                    IERC20(position.token1),
                     instructions.unwrap
                 );
-            } else if (instructions.targetToken == token1) {
+            } else if (instructions.targetToken == position.token1) {
                 result = _swapAndIncrease(
                     SwapAndIncreaseLiquidityParams(
                         instructions.protocol,
@@ -216,7 +217,7 @@ contract V3Utils is IERC721Receiver, Common {
                         0,
                         instructions.recipient,
                         instructions.deadline,
-                        IERC20(token0),
+                        IERC20(position.token0),
                         0,
                         0,
                         '',
@@ -227,8 +228,8 @@ contract V3Utils is IERC721Receiver, Common {
                         instructions.amountAddMin1,
                         0
                     ),
-                    IERC20(token0),
-                    IERC20(token1),
+                    IERC20(position.token0),
+                    IERC20(position.token1),
                     instructions.unwrap
                 );
             } else {
@@ -254,22 +255,23 @@ contract V3Utils is IERC721Receiver, Common {
                         instructions.amountAddMin1,
                         0
                     ),
-                    IERC20(token0),
-                    IERC20(token1),
+                    IERC20(position.token0),
+                    IERC20(position.token1),
                     instructions.unwrap
                 );
             }
             emit CompoundFees(address(nfpm), tokenId, result.liquidity, result.added0, result.added1);
         } else if (instructions.whatToDo == WhatToDo.CHANGE_RANGE) {
             SwapAndMintResult memory result;
-            if (instructions.targetToken == token0) {
+            if (instructions.targetToken == position.token0) {
                 result = _swapAndMint(
                     SwapAndMintParams(
                         instructions.protocol,
                         nfpm,
-                        IERC20(token0),
-                        IERC20(token1),
-                        fee,
+                        IERC20(position.token0),
+                        IERC20(position.token1),
+                        position.fee,
+                        position.tickSpacing,
                         instructions.tickLower,
                         instructions.tickUpper,
                         0,
@@ -278,7 +280,7 @@ contract V3Utils is IERC721Receiver, Common {
                         0,
                         instructions.recipient,
                         instructions.deadline,
-                        IERC20(token1),
+                        IERC20(position.token1),
                         instructions.amountIn1,
                         instructions.amountOut1Min,
                         instructions.swapData1,
@@ -290,14 +292,15 @@ contract V3Utils is IERC721Receiver, Common {
                     ),
                     instructions.unwrap
                 );
-            } else if (instructions.targetToken == token1) {
+            } else if (instructions.targetToken == position.token1) {
                 result = _swapAndMint(
                     SwapAndMintParams(
                         instructions.protocol,
                         nfpm,
-                        IERC20(token0),
-                        IERC20(token1),
-                        fee,
+                        IERC20(position.token0),
+                        IERC20(position.token1),
+                        position.fee,
+                        position.tickSpacing,
                         instructions.tickLower,
                         instructions.tickUpper,
                         0,
@@ -306,7 +309,7 @@ contract V3Utils is IERC721Receiver, Common {
                         0,
                         instructions.recipient,
                         instructions.deadline,
-                        IERC20(token0),
+                        IERC20(position.token0),
                         0,
                         0,
                         '',
@@ -324,9 +327,10 @@ contract V3Utils is IERC721Receiver, Common {
                     SwapAndMintParams(
                         instructions.protocol,
                         nfpm,
-                        IERC20(token0),
-                        IERC20(token1),
-                        fee,
+                        IERC20(position.token0),
+                        IERC20(position.token1),
+                        position.fee,
+                        position.tickSpacing,
                         instructions.tickLower,
                         instructions.tickUpper,
                         0,
@@ -353,9 +357,9 @@ contract V3Utils is IERC721Receiver, Common {
         } else if (instructions.whatToDo == WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP) {
             IWETH9 weth = _getWeth9(nfpm, instructions.protocol);
             uint256 targetAmount;
-            if (token0 != instructions.targetToken) {
+            if (position.token0 != instructions.targetToken) {
                 (uint256 amountInDelta, uint256 amountOutDelta) = _swap(
-                    IERC20(token0),
+                    IERC20(position.token0),
                     IERC20(instructions.targetToken),
                     amount0,
                     instructions.amountOut0Min,
@@ -365,7 +369,7 @@ contract V3Utils is IERC721Receiver, Common {
                     _transferToken(
                         weth,
                         instructions.recipient,
-                        IERC20(token0),
+                        IERC20(position.token0),
                         amount0 - amountInDelta,
                         instructions.unwrap
                     );
@@ -374,9 +378,9 @@ contract V3Utils is IERC721Receiver, Common {
             } else {
                 targetAmount += amount0;
             }
-            if (token1 != instructions.targetToken) {
+            if (position.token1 != instructions.targetToken) {
                 (uint256 amountInDelta, uint256 amountOutDelta) = _swap(
-                    IERC20(token1),
+                    IERC20(position.token1),
                     IERC20(instructions.targetToken),
                     amount1,
                     instructions.amountOut1Min,
@@ -386,7 +390,7 @@ contract V3Utils is IERC721Receiver, Common {
                     _transferToken(
                         weth,
                         instructions.recipient,
-                        IERC20(token1),
+                        IERC20(position.token1),
                         amount1 - amountInDelta,
                         instructions.unwrap
                     );
@@ -511,7 +515,9 @@ contract V3Utils is IERC721Receiver, Common {
         require(_isWhitelistedNfpm(address(params.nfpm)));
         address owner = params.nfpm.ownerOf(params.tokenId);
         require(owner == msg.sender, 'sender is not owner of position');
-        (address token0, address token1, , , , ) = _getPosition(params.nfpm, params.protocol, params.tokenId);
+
+        Position memory position = _getPosition(params.nfpm, params.protocol, params.tokenId);
+        (address token0, address token1) = (position.token0, position.token1);
         IWETH9 weth = _getWeth9(params.nfpm, params.protocol);
 
         // validate if amount2 is enough for action

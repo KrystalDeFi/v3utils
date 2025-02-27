@@ -36,6 +36,33 @@ interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
         AlgebraV1MintParams calldata params
     ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 
+    /// @notice mintParams for Ramses v3
+    struct RamsesV3MintParams {
+        address token0;
+        address token1;
+        int24 tickSpacing;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        address recipient;
+        uint256 deadline;
+    }
+
+    /// @notice Creates a new position wrapped in a NFT
+    /// @dev Call this when the pool does exist and is initialized. Note that if the pool is created but not initialized
+    /// a method does not exist, i.e. the pool is assumed to be initialized.
+    /// @param params The params necessary to mint a position, encoded as `MintParams` in calldata
+    /// @return tokenId The ID of the token that represents the minted position
+    /// @return liquidity The amount of liquidity for this position
+    /// @return amount0 The amount of token0
+    /// @return amount1 The amount of token1
+    function mint(
+        RamsesV3MintParams calldata params
+    ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+
     /// @return Returns the address of WNativeToken
     function WNativeToken() external view returns (address);
 }
@@ -159,7 +186,8 @@ abstract contract Common is AccessControl, Pausable {
     /// @notice protocol to provide lp
     enum Protocol {
         UNI_V3,
-        ALGEBRA_V1
+        ALGEBRA_V1,
+        RAMSES_V3
     }
 
     enum FeeType {
@@ -175,6 +203,7 @@ abstract contract Common is AccessControl, Pausable {
         IERC20 token0;
         IERC20 token1;
         uint24 fee;
+        int24 tickSpacing;
         int24 tickLower;
         int24 tickUpper;
         uint64 protocolFeeX64;
@@ -266,6 +295,16 @@ abstract contract Common is AccessControl, Pausable {
         address token0;
         address token1;
         address token2;
+    }
+
+    struct Position {
+        address token0;
+        address token1;
+        uint24 fee;
+        int24 tickSpacing;
+        int24 tickLower;
+        int24 tickUpper;
+        uint128 liquidity;
     }
 
     /**
@@ -406,7 +445,7 @@ abstract contract Common is AccessControl, Pausable {
                     total1,
                     params.amountAddMin0,
                     params.amountAddMin1,
-                    address(this), // is sent to real recipient aftwards
+                    address(this), // is sent to real recipient afterwards
                     params.deadline
                 )
             );
@@ -424,7 +463,25 @@ abstract contract Common is AccessControl, Pausable {
                     total1,
                     params.amountAddMin0,
                     params.amountAddMin1,
-                    address(this), // is sent to real recipient aftwards
+                    address(this), // is sent to real recipient afterwards
+                    params.deadline
+                )
+            );
+        } else if (params.protocol == Protocol.RAMSES_V3) {
+            // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
+            (result.tokenId, result.liquidity, result.added0, result.added1) = _mintRamsesV3(
+                params.nfpm,
+                INonfungiblePositionManager.RamsesV3MintParams(
+                    address(params.token0),
+                    address(params.token1),
+                    params.tickSpacing,
+                    params.tickLower,
+                    params.tickUpper,
+                    total0,
+                    total1,
+                    params.amountAddMin0,
+                    params.amountAddMin1,
+                    address(this), // is sent to real recipient afterwards
                     params.deadline
                 )
             );
@@ -479,6 +536,14 @@ abstract contract Common is AccessControl, Pausable {
         return nfpm.mint(mintParams);
     }
 
+    function _mintRamsesV3(
+        INonfungiblePositionManager nfpm,
+        INonfungiblePositionManager.RamsesV3MintParams memory params
+    ) internal returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) {
+        // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
+        return nfpm.mint(params);
+    }
+
     struct SwapAndIncreaseLiquidityResult {
         uint128 liquidity;
         uint256 added0;
@@ -499,6 +564,7 @@ abstract contract Common is AccessControl, Pausable {
                 params.nfpm,
                 token0,
                 token1,
+                0,
                 0,
                 0,
                 0,
@@ -767,7 +833,7 @@ abstract contract Common is AccessControl, Pausable {
     }
 
     function _getWeth9(INonfungiblePositionManager nfpm, Protocol protocol) internal view returns (IWETH9 weth) {
-        if (protocol == Protocol.UNI_V3) {
+        if (protocol == Protocol.UNI_V3 || protocol == Protocol.RAMSES_V3) {
             weth = IWETH9(nfpm.WETH9());
         } else if (protocol == Protocol.ALGEBRA_V1) {
             weth = IWETH9(nfpm.WNativeToken());
@@ -782,12 +848,20 @@ abstract contract Common is AccessControl, Pausable {
         uint256 tokenId
     )
         internal
-        returns (address token0, address token1, uint128 liquidity, int24 tickLower, int24 tickUpper, uint24 fee)
+        returns (Position memory)
     {
         (bool success, bytes memory data) = address(nfpm).call(abi.encodeWithSignature('positions(uint256)', tokenId));
         if (!success) {
             revert GetPositionFailed();
         }
+        address token0;
+        address token1;
+        uint24 fee;
+        int24 tickSpacing;
+        int24 tickLower;
+        int24 tickUpper;
+        uint128 liquidity;
+
         if (protocol == Protocol.UNI_V3) {
             (, , token0, token1, fee, tickLower, tickUpper, liquidity, , , , ) = abi.decode(
                 data,
@@ -798,7 +872,23 @@ abstract contract Common is AccessControl, Pausable {
                 data,
                 (uint96, address, address, address, int24, int24, uint128, uint256, uint256, uint128, uint128)
             );
+        } else if (protocol == Protocol.RAMSES_V3) {
+            (token0, token1, tickSpacing, tickLower, tickUpper, liquidity, , , , ) = abi.decode(
+                data,
+                (address, address, int24, int24, int24, uint128, uint256, uint256, uint128, uint128)
+            );
         }
+
+        Position memory position = Position(
+            token0,
+            token1,
+            fee,
+            tickSpacing,
+            tickLower,
+            tickUpper,
+            liquidity
+        );
+        return position;
     }
 
     /**

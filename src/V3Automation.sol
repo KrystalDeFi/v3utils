@@ -33,6 +33,7 @@ contract V3Automation is Pausable, Common, EIP712 {
         address token0;
         address token1;
         uint24 fee;
+        int24 tickSpacing;
         int24 tickLower;
         int24 tickUpper;
         // amount0 and amount1 in position (including fees)
@@ -91,11 +92,22 @@ contract V3Automation is Pausable, Common, EIP712 {
         params.nfpm.transferFrom(positionOwner, address(this), params.tokenId);
 
         ExecuteState memory state;
-        (state.token0, state.token1, state.liquidity, state.tickLower, state.tickUpper, state.fee) = _getPosition(
-            params.nfpm,
-            params.protocol,
-            params.tokenId
-        );
+
+        Position memory position = _getPosition(params.nfpm, params.protocol, params.tokenId);
+
+        state.token0 = position.token0;
+        state.token1 = position.token1;
+        state.fee = position.fee;
+        state.tickSpacing = position.tickSpacing;
+        state.tickLower = position.tickLower;
+        state.tickUpper = position.tickUpper;
+        state.liquidity = params.liquidity;
+
+        // (state.token0, state.token1, state.liquidity, state.tickLower, state.tickUpper, state.fee, state.tickSpacing) = _getPosition(
+        //     params.nfpm,
+        //     params.protocol,
+        //     params.tokenId
+        // );
 
         require(state.liquidity != params.liquidity || params.liquidity != 0);
 
@@ -215,6 +227,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         IERC20(state.token0),
                         IERC20(state.token1),
                         state.fee,
+                        state.tickSpacing,
                         params.newTickLower,
                         params.newTickUpper,
                         0,
@@ -243,6 +256,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         IERC20(state.token0),
                         IERC20(state.token1),
                         state.fee,
+                        state.tickSpacing,
                         params.newTickLower,
                         params.newTickUpper,
                         0,
@@ -272,6 +286,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         IERC20(state.token0),
                         IERC20(state.token1),
                         state.fee,
+                        state.tickSpacing,
                         params.newTickLower,
                         params.newTickUpper,
                         0,
