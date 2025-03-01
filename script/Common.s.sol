@@ -11,7 +11,6 @@ abstract contract CommonScript is Script {
 
     address krystalRouter;
     address admin;
-    address withdrawer;
     bytes32 salt;
     address factory = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
@@ -71,7 +70,6 @@ abstract contract CommonScript is Script {
         salt = keccak256(bytes(vm.envString("SALT_SEED")));
         krystalRouter = vm.envAddress("KRYSTAL_ROUTER");
         admin = vm.envAddress("WITHDRAWER"); // for now, admin is the withdrawer
-        withdrawer = vm.envAddress("WITHDRAWER");
     }
 
     // To ignore from test coverage

@@ -15,11 +15,11 @@ contract V3Automation is Pausable, Common, EIP712 {
     function initialize(
         address _swapRouter,
         address admin,
-        address withdrawer,
         address feeTaker,
+        address _weth,
         address[] calldata whitelistedNfpms
     ) public override {
-        super.initialize(_swapRouter, admin, withdrawer, feeTaker, whitelistedNfpms);
+        super.initialize(_swapRouter, admin, feeTaker, _weth, whitelistedNfpms);
         _grantRole(OPERATOR_ROLE, admin);
     }
 
@@ -102,12 +102,6 @@ contract V3Automation is Pausable, Common, EIP712 {
         state.tickLower = position.tickLower;
         state.tickUpper = position.tickUpper;
         state.liquidity = params.liquidity;
-
-        // (state.token0, state.token1, state.liquidity, state.tickLower, state.tickUpper, state.fee, state.tickSpacing) = _getPosition(
-        //     params.nfpm,
-        //     params.protocol,
-        //     params.tokenId
-        // );
 
         require(state.liquidity != params.liquidity || params.liquidity != 0);
 
@@ -202,7 +196,6 @@ contract V3Automation is Pausable, Common, EIP712 {
                 state.amount1 -= state.feeAmount1;
                 _returnLeftoverTokens(
                     ReturnLeftoverTokensParams({
-                        weth: _getWeth9(params.nfpm, params.protocol),
                         to: positionOwner,
                         token0: IERC20(state.token0),
                         token1: IERC20(state.token1),
@@ -317,7 +310,6 @@ contract V3Automation is Pausable, Common, EIP712 {
                 result.added1
             );
         } else if (params.action == Action.AUTO_EXIT) {
-            IWETH9 weth = _getWeth9(params.nfpm, params.protocol);
             uint256 targetAmount;
             if (state.token0 != params.targetToken) {
                 (uint256 amountInDelta, uint256 amountOutDelta) = _swap(
@@ -328,7 +320,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                     params.swapData0
                 );
                 if (amountInDelta < state.amount0) {
-                    _transferToken(weth, positionOwner, IERC20(state.token0), state.amount0 - amountInDelta, false);
+                    _transferToken(positionOwner, IERC20(state.token0), state.amount0 - amountInDelta, false);
                 }
                 targetAmount += amountOutDelta;
             } else {
@@ -343,7 +335,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                     params.swapData1
                 );
                 if (amountInDelta < state.amount1) {
-                    _transferToken(weth, positionOwner, IERC20(state.token1), state.amount1 - amountInDelta, false);
+                    _transferToken(positionOwner, IERC20(state.token1), state.amount1 - amountInDelta, false);
                 }
                 targetAmount += amountOutDelta;
             } else {
@@ -352,7 +344,7 @@ contract V3Automation is Pausable, Common, EIP712 {
 
             // send complete target amount
             if (targetAmount != 0 && params.targetToken != address(0)) {
-                _transferToken(weth, positionOwner, IERC20(params.targetToken), targetAmount, false);
+                _transferToken(positionOwner, IERC20(params.targetToken), targetAmount, false);
             }
         } else if (params.action == Action.AUTO_COMPOUND) {
             if (params.targetToken == state.token0) {

@@ -53,13 +53,14 @@ abstract contract IntegrationTestBase is Test {
 
     function _setupBase() internal {
         mainnetFork = vm.createFork("https://arbitrum.blockpi.network/v1/rpc/d806195b2a58dc2aa626f6c77b0626fc4d03d70d", 171544977);
+        address WETH = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1;
         vm.selectFork(mainnetFork);
         vm.startBroadcast(TEST_OWNER_ACCOUNT);
         
         v3utils = new V3Utils();
-        v3utils.initialize(KRYSTAL_ROUTER, TEST_OWNER_ACCOUNT, TEST_OWNER_ACCOUNT, TEST_OWNER_ACCOUNT, _getNfpms());
+        v3utils.initialize(KRYSTAL_ROUTER, TEST_OWNER_ACCOUNT, TEST_OWNER_ACCOUNT, WETH, _getNfpms());
         v3automation = new V3AutomationHarness();
-        v3automation.initialize(KRYSTAL_ROUTER, TEST_OWNER_ACCOUNT, TEST_OWNER_ACCOUNT, TEST_OWNER_ACCOUNT, _getNfpms());
+        v3automation.initialize(KRYSTAL_ROUTER, TEST_OWNER_ACCOUNT, TEST_OWNER_ACCOUNT, WETH, _getNfpms());
 
         vm.stopBroadcast();
     }

@@ -88,11 +88,10 @@ contract V3Utils is IERC721Receiver, Common {
         Instructions memory instructions = abi.decode(data, (Instructions));
 
         Position memory position = _getPosition(
-            INonfungiblePositionManager(msg.sender),
+            nfpm,
             instructions.protocol,
             tokenId
         );
-        // (address token0, address token1, uint24 fee, int24 tickSpacing) = (position.token0, position.token1, position.fee, position.tickSpacing);
 
         uint256 amount0;
         uint256 amount1;
@@ -101,7 +100,7 @@ contract V3Utils is IERC721Receiver, Common {
 
             (amount0, amount1, feeAmount0, feeAmount1) = _decreaseLiquidityAndCollectFees(
                 DecreaseAndCollectFeesParams(
-                    INonfungiblePositionManager(msg.sender),
+                    nfpm,
                     instructions.recipient,
                     IERC20(position.token0),
                     IERC20(position.token1),
@@ -158,7 +157,6 @@ contract V3Utils is IERC721Receiver, Common {
                     amount1 -= feeAmount1;
                     ReturnLeftoverTokensParams memory _returnLeftoverTokensParams;
 
-                    _returnLeftoverTokensParams.weth = _getWeth9(nfpm, instructions.protocol);
                     _returnLeftoverTokensParams.to = instructions.recipient;
                     _returnLeftoverTokensParams.token0 = IERC20(position.token0);
                     _returnLeftoverTokensParams.token1 = IERC20(position.token1);
@@ -355,7 +353,6 @@ contract V3Utils is IERC721Receiver, Common {
 
             emit ChangeRange(msg.sender, tokenId, result.tokenId, result.liquidity, result.added0, result.added1);
         } else if (instructions.whatToDo == WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP) {
-            IWETH9 weth = _getWeth9(nfpm, instructions.protocol);
             uint256 targetAmount;
             if (position.token0 != instructions.targetToken) {
                 (uint256 amountInDelta, uint256 amountOutDelta) = _swap(
@@ -367,7 +364,6 @@ contract V3Utils is IERC721Receiver, Common {
                 );
                 if (amountInDelta < amount0) {
                     _transferToken(
-                        weth,
                         instructions.recipient,
                         IERC20(position.token0),
                         amount0 - amountInDelta,
@@ -388,7 +384,6 @@ contract V3Utils is IERC721Receiver, Common {
                 );
                 if (amountInDelta < amount1) {
                     _transferToken(
-                        weth,
                         instructions.recipient,
                         IERC20(position.token1),
                         amount1 - amountInDelta,
@@ -403,7 +398,6 @@ contract V3Utils is IERC721Receiver, Common {
             // send complete target amount
             if (targetAmount != 0 && instructions.targetToken != address(0)) {
                 _transferToken(
-                    weth,
                     instructions.recipient,
                     IERC20(instructions.targetToken),
                     targetAmount,
@@ -422,18 +416,6 @@ contract V3Utils is IERC721Receiver, Common {
         return IERC721Receiver.onERC721Received.selector;
     }
 
-    /// @notice Params for swap() function
-    struct SwapParams {
-        IWETH9 weth;
-        IERC20 tokenIn;
-        IERC20 tokenOut;
-        uint256 amountIn;
-        uint256 minAmountOut;
-        address recipient; // recipient of tokenOut and leftover tokenIn (if any leftover)
-        bytes swapData;
-        bool unwrap; // if tokenIn or tokenOut is WETH - unwrap
-    }
-
     /// @notice Does 1 or 2 swaps from swapSourceToken to token0 and token1 and adds as much as possible liquidity to a newly minted position.
     /// @param params Swap and mint configuration
     /// Newly minted NFT and leftover tokens are returned to recipient
@@ -444,7 +426,6 @@ contract V3Utils is IERC721Receiver, Common {
             revert SameToken();
         }
         require(_isWhitelistedNfpm(address(params.nfpm)));
-        IWETH9 weth = _getWeth9(params.nfpm, params.protocol);
 
         // validate if amount2 is enough for action
         if (
@@ -455,7 +436,6 @@ contract V3Utils is IERC721Receiver, Common {
             revert AmountError();
         }
         _prepareSwap(
-            weth,
             params.token0,
             params.token1,
             params.swapSourceToken,
@@ -514,25 +494,22 @@ contract V3Utils is IERC721Receiver, Common {
     ) external payable whenNotPaused returns (SwapAndIncreaseLiquidityResult memory result) {
         require(_isWhitelistedNfpm(address(params.nfpm)));
         address owner = params.nfpm.ownerOf(params.tokenId);
-        require(owner == msg.sender, 'sender is not owner of position');
+        require(owner == msg.sender);
 
         Position memory position = _getPosition(params.nfpm, params.protocol, params.tokenId);
-        (address token0, address token1) = (position.token0, position.token1);
-        IWETH9 weth = _getWeth9(params.nfpm, params.protocol);
 
         // validate if amount2 is enough for action
         if (
-            address(params.swapSourceToken) != token0 &&
-            address(params.swapSourceToken) != token1 &&
+            address(params.swapSourceToken) != position.token0 &&
+            address(params.swapSourceToken) != position.token1 &&
             params.amountIn0 + params.amountIn1 > params.amount2
         ) {
             revert AmountError();
         }
 
         _prepareSwap(
-            weth,
-            IERC20(token0),
-            IERC20(token1),
+            IERC20(position.token0),
+            IERC20(position.token1),
             params.swapSourceToken,
             params.amount0,
             params.amount1,
@@ -550,15 +527,15 @@ contract V3Utils is IERC721Receiver, Common {
                     address(params.nfpm),
                     params.tokenId,
                     params.recipient,
-                    token0,
-                    token1,
+                    position.token0,
+                    position.token1,
                     address(params.swapSourceToken)
                 ),
                 true
             );
         }
 
-        result = _swapAndIncrease(_params, IERC20(token0), IERC20(token1), msg.value != 0);
+        result = _swapAndIncrease(_params, IERC20(position.token0), IERC20(position.token1), msg.value != 0);
     }
 
     // needed for WETH unwrapping
