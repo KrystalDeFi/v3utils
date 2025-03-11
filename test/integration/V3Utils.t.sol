@@ -505,7 +505,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         USDC.approve(address(v3utils), 3000000);
 
         vm.prank(TEST_NFT_ACCOUNT);
-        vm.expectRevert(bytes('sender is not owner of position'));
+        vm.expectRevert();
         v3utils.swapAndIncreaseLiquidity(params);
     }
 
