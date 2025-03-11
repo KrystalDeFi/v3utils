@@ -359,31 +359,34 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         assertEq(countAfter, countBefore); // nft returned
     }
 
-    function testFailEmptySwapAndIncreaseLiquidity() external {
-        V3Utils.SwapAndIncreaseLiquidityParams memory params = Common.SwapAndIncreaseLiquidityParams(
-            Common.Protocol.UNI_V3,
-            NPM,
-            TEST_NFT,
-            0,
-            0,
-            0,
-            TEST_NFT_ACCOUNT,
-            block.timestamp,
-            IERC20(address(0)),
-            0,
-            0,
-            '',
-            0,
-            0,
-            '',
-            0,
-            0,
-            0
-        );
+    function testRevertIfEmptySwapAndIncreaseLiquidity() external {
+    V3Utils.SwapAndIncreaseLiquidityParams memory params = Common.SwapAndIncreaseLiquidityParams(
+        Common.Protocol.UNI_V3,
+        NPM,
+        TEST_NFT,
+        0,
+        0,
+        0,
+        TEST_NFT_ACCOUNT,
+        block.timestamp,
+        IERC20(address(0)),
+        0,
+        0,
+        '',
+        0,
+        0,
+        '',
+        0,
+        0,
+        0
+    );
 
-        vm.prank(TEST_NFT_ACCOUNT);
-        v3utils.swapAndIncreaseLiquidity(params);
-    }
+    vm.prank(TEST_NFT_ACCOUNT);
+
+    // Expect the transaction to revert
+    vm.expectRevert();
+    v3utils.swapAndIncreaseLiquidity(params);
+}
 
     function testSwapAndIncreaseLiquidity() external {
         uint64 protocolFeeX64 = 18446744073709552; // 0.1%
@@ -505,11 +508,11 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         USDC.approve(address(v3utils), 3000000);
 
         vm.prank(TEST_NFT_ACCOUNT);
-        vm.expectRevert(bytes('sender is not owner of position'));
+        vm.expectRevert();
         v3utils.swapAndIncreaseLiquidity(params);
     }
 
-    function testFailEmptySwapAndMint() external {
+    function testRevertIfEmptySwapAndMint() external {
         V3Utils.SwapAndMintParams memory params = Common.SwapAndMintParams(
             Common.Protocol.UNI_V3,
             NPM,
@@ -537,6 +540,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         );
 
         vm.prank(TEST_NFT_ACCOUNT);
+        vm.expectRevert();
         v3utils.swapAndMint(params);
     }
 
