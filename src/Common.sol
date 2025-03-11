@@ -65,6 +65,28 @@ interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
 
     /// @return Returns the address of WNativeToken
     function WNativeToken() external view returns (address);
+
+
+    /// @notice mintParams for aerodrome
+    struct AerodromeMintParams {
+        address token0;
+        address token1;
+        int24 tickSpacing;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        address recipient;
+        uint256 deadline;
+        uint160 sqrtPriceX96;
+    }
+
+    function mint(
+        AerodromeMintParams calldata params
+    ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+
 }
 
 abstract contract Common is AccessControl, Pausable {
@@ -186,7 +208,8 @@ abstract contract Common is AccessControl, Pausable {
     enum Protocol {
         UNI_V3,
         ALGEBRA_V1,
-        RAMSES_V3
+        RAMSES_V3,
+        AERODROME
     }
 
     enum FeeType {
@@ -483,6 +506,25 @@ abstract contract Common is AccessControl, Pausable {
                     params.deadline
                 )
             );
+        } else if (params.protocol == Protocol.AERODROME) {
+            // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
+            (result.tokenId, result.liquidity, result.added0, result.added1) = _mintAerodrome(
+                params.nfpm,
+                INonfungiblePositionManager.AerodromeMintParams(
+                    address(params.token0),
+                    address(params.token1),
+                    params.tickSpacing,
+                    params.tickLower,
+                    params.tickUpper,
+                    total0,
+                    total1,
+                    params.amountAddMin0,
+                    params.amountAddMin1,
+                    address(this), // is sent to real recipient afterwards
+                    params.deadline,
+                    0 // sqrtPriceX96 == 0 for created pool
+                )
+            );
         } else {
             revert NotSupportedProtocol();
         }
@@ -536,6 +578,14 @@ abstract contract Common is AccessControl, Pausable {
     function _mintRamsesV3(
         INonfungiblePositionManager nfpm,
         INonfungiblePositionManager.RamsesV3MintParams memory params
+    ) internal returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) {
+        // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
+        return nfpm.mint(params);
+    }
+
+    function _mintAerodrome(
+        INonfungiblePositionManager nfpm,
+        INonfungiblePositionManager.AerodromeMintParams memory params
     ) internal returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) {
         // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
         return nfpm.mint(params);
@@ -858,6 +908,11 @@ abstract contract Common is AccessControl, Pausable {
             (position.token0, position.token1, position.tickSpacing, position.tickLower, position.tickUpper, position.liquidity, , , , ) = abi.decode(
                 data,
                 (address, address, int24, int24, int24, uint128, uint256, uint256, uint128, uint128)
+            );
+        } else if (protocol == Protocol.AERODROME) {
+            (, , position.token0, position.token1, position.tickSpacing, position.tickLower, position.tickUpper, position.liquidity, , , , ) = abi.decode(
+                data,
+                (uint96, address, address, address, int24, int24, int24, uint128, uint256, uint256, uint128, uint128)
             );
         }
     }
