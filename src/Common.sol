@@ -24,14 +24,7 @@ interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
         uint256 deadline;
     }
 
-    /// @notice Creates a new position wrapped in a NFT
-    /// @dev Call this when the pool does exist and is initialized. Note that if the pool is created but not initialized
-    /// a method does not exist, i.e. the pool is assumed to be initialized.
-    /// @param params The params necessary to mint a position, encoded as `MintParams` in calldata
-    /// @return tokenId The ID of the token that represents the minted position
-    /// @return liquidity The amount of liquidity for this position
-    /// @return amount0 The amount of token0
-    /// @return amount1 The amount of token1
+
     function mint(
         AlgebraV1MintParams calldata params
     ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
@@ -122,7 +115,6 @@ abstract contract Common is AccessControl, Pausable {
         uint256 token1Added
     );
     event WithdrawAndCollectAndSwap(address indexed nfpm, uint256 indexed tokenId, address token, uint256 amount);
-    // event Swap(address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut);
     event SwapAndMint(
         address indexed nfpm,
         uint256 indexed tokenId,
@@ -191,7 +183,6 @@ abstract contract Common is AccessControl, Pausable {
         PERFORMANCE_FEE
     }
 
-    /// @notice Params for swapAndMint() function
     struct SwapAndMintParams {
         Protocol protocol;
         INonfungiblePositionManager nfpm;
@@ -447,17 +438,16 @@ abstract contract Common is AccessControl, Pausable {
             // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
             (result.tokenId, result.liquidity, result.added0, result.added1) = _mintAlgebraV1(
                 params.nfpm,
-                IUniV3NonfungiblePositionManager.MintParams(
+                INonfungiblePositionManager.AlgebraV1MintParams(
                     address(params.token0),
                     address(params.token1),
-                    params.fee,
                     params.tickLower,
                     params.tickUpper,
                     total0,
                     total1,
                     params.amountAddMin0,
                     params.amountAddMin1,
-                    address(this), // is sent to real recipient afterwards
+                    address(this), // is sent to real recipient aftwards
                     params.deadline
                 )
             );
@@ -510,24 +500,10 @@ abstract contract Common is AccessControl, Pausable {
 
     function _mintAlgebraV1(
         INonfungiblePositionManager nfpm,
-        INonfungiblePositionManager.MintParams memory params
+        INonfungiblePositionManager.AlgebraV1MintParams memory params
     ) internal returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) {
-        INonfungiblePositionManager.AlgebraV1MintParams memory mintParams = INonfungiblePositionManager
-            .AlgebraV1MintParams(
-                params.token0,
-                params.token1,
-                params.tickLower,
-                params.tickUpper,
-                params.amount0Desired,
-                params.amount1Desired,
-                params.amount0Min,
-                params.amount1Min,
-                address(this), // is sent to real recipient aftwards
-                params.deadline
-            );
-
         // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
-        return nfpm.mint(mintParams);
+        return nfpm.mint(params);
     }
 
     function _mintAerodrome(

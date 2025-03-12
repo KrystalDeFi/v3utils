@@ -54,3 +54,10 @@ Run script below to get verify contract script
 ```
 make verify-v3utils
 ```
+
+# Init Contract
+
+Run script below to get init contract script
+```
+make init-v3utils
+```
