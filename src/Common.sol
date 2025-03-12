@@ -444,7 +444,7 @@ abstract contract Common is AccessControl, Pausable {
                     total1,
                     params.amountAddMin0,
                     params.amountAddMin1,
-                    address(this), // is sent to real recipient aftwards
+                    address(this), // is sent to real recipient afterwards
                     params.deadline
                 )
             );
