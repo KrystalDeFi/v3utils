@@ -29,9 +29,6 @@ interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
         AlgebraV1MintParams calldata params
     ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 
-    /// @return Returns the address of WNativeToken
-    function WNativeToken() external view returns (address);
-
 
     /// @notice mintParams for aerodrome
     struct AerodromeMintParams {
