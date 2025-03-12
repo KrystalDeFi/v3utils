@@ -7,7 +7,6 @@ import './Common.sol';
 /// @title v3Utils v1.0
 /// @notice Utility functions for Uniswap V3 positions
 /// This is a completely ownerless/stateless contract - does not hold any ERC20 or NFTs.
-/// It can be simply redeployed when new / better functionality is implemented
 contract V3Utils is IERC721Receiver, Common {
     /// @notice Action which should be executed on provided NFT
     enum WhatToDo {
@@ -417,7 +416,6 @@ contract V3Utils is IERC721Receiver, Common {
     }
 
     /// @notice Does 1 or 2 swaps from swapSourceToken to token0 and token1 and adds as much as possible liquidity to a newly minted position.
-    /// @param params Swap and mint configuration
     /// Newly minted NFT and leftover tokens are returned to recipient
     function swapAndMint(
         SwapAndMintParams calldata params
@@ -487,7 +485,6 @@ contract V3Utils is IERC721Receiver, Common {
     }
 
     /// @notice Does 1 or 2 swaps from swapSourceToken to token0 and token1 and adds as much as possible liquidity to any existing position (no need to be position owner).
-    /// @param params Swap and increase liquidity configuration
     // Sends any leftover tokens to recipient.
     function swapAndIncreaseLiquidity(
         SwapAndIncreaseLiquidityParams calldata params
