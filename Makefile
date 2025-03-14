@@ -38,4 +38,4 @@ verify-v3automation: v3automation-check v3automation
 init-v3utils:
 init-v3automation:
 init-%: %
-	forge script script/Init.s.sol:$(CONTRACT)InitializeScript --rpc-url $(RPC_URL) --broadcast
+	forge script script/Init.s.sol:$(CONTRACT)InitializeScript --rpc-url $(RPC_URL) --broadcast --legacy --gas-price 0
