@@ -8,9 +8,7 @@ contract V3UtilsScript is CommonScript {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
 
-        V3Utils v3Utils = new V3Utils{
-            salt: salt
-        }();
+        createXFactory.deployCreate2(salt, type(V3Utils).creationCode);
 
         vm.stopBroadcast();
     }

@@ -5,6 +5,7 @@ import "forge-std/Script.sol";
 import "../src/V3Automation.sol";
 import "../src/V3Utils.sol";
 import "@openzeppelin/contracts/utils/Create2.sol";
+import "./ICreateX.sol";
 
 abstract contract CommonScript is Script {
     bytes16 private constant HEX_DIGITS = "0123456789abcdef";
@@ -14,6 +15,7 @@ abstract contract CommonScript is Script {
     address withdrawer;
     bytes32 salt;
     address factory = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+    ICreateX createXFactory = ICreateX(0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed);
 
     function toHexString(uint256 value, uint256 length) internal pure returns (string memory) {
         uint256 localValue = value;
@@ -32,38 +34,38 @@ abstract contract CommonScript is Script {
     }
 
     function getV3UtilsDeploymentAddress() internal view returns(address) {
-        return Create2.computeAddress(
-            salt,
+        bytes32 _salt = keccak256(abi.encode(salt));
+        return createXFactory.computeCreate2Address(
+            _salt,
             keccak256(
                 abi.encodePacked(
                     type(V3Utils).creationCode
                 )
-            ),
-            factory
+            )
         );
     }
 
     function getV3AutomationDeploymentAddress() internal view returns(address) {
-        return Create2.computeAddress(
-            salt,
+        bytes32 _salt = keccak256(abi.encode(salt));
+        return createXFactory.computeCreate2Address(
+            _salt,
             keccak256(
                 abi.encodePacked(
                     type(V3Automation).creationCode
                 )
-            ),
-            factory
+            )
         );
     }
 
     function getStructHashDeploymentAddress() internal view returns(address) {
-        return Create2.computeAddress(
-            salt,
+        bytes32 _salt = keccak256(abi.encode(salt));
+        return createXFactory.computeCreate2Address(
+            _salt,
             keccak256(
                 abi.encodePacked(
                     type(StructHash).creationCode
                 )
-            ),
-            factory
+            )
         );
     }
 

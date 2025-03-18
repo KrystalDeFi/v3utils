@@ -27,9 +27,7 @@ contract V3AutomationScript is CommonScript {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
-        V3Automation v3automation = new V3Automation{
-            salt: salt
-        }();
+        createXFactory.deployCreate2(salt, type(V3Automation).creationCode);
         vm.stopBroadcast();
     }
 
