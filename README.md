@@ -35,6 +35,9 @@ forge test --gas-report
 ```
 
 # Remember to check smart wallet address
+
+Contracts are deployed using [CreateX](https://github.com/pcaversaccio/createx)
+
 # Deploy
 ```
 source .env

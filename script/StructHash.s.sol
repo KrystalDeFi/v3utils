@@ -6,7 +6,7 @@ contract StructHashScript is CommonScript {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
-        address deploymentAddress = getStructHashDeploymentAddress();
+        address deploymentAddress = createXFactory.deployCreate2(salt, type(StructHash).creationCode);
         console.logAddress(deploymentAddress);
         vm.stopBroadcast();
     }
