@@ -4,7 +4,6 @@ pragma solidity ^0.8.0;
 import "forge-std/Script.sol";
 import "../src/V3Automation.sol";
 import "../src/V3Utils.sol";
-import "@openzeppelin/contracts/utils/Create2.sol";
 import "./ICreateX.sol";
 
 abstract contract CommonScript is Script {
