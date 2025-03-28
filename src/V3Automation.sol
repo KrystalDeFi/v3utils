@@ -101,7 +101,7 @@ contract V3Automation is Pausable, Common, EIP712 {
         state.tickSpacing = position.tickSpacing;
         state.tickLower = position.tickLower;
         state.tickUpper = position.tickUpper;
-        state.liquidity = params.liquidity;
+        state.liquidity = position.liquidity;
 
         require(state.liquidity != params.liquidity || params.liquidity != 0);
 
