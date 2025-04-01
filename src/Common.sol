@@ -138,7 +138,7 @@ abstract contract Common is AccessControl, Pausable {
     constructor() {
         _maxFeeX64[FeeType.GAS_FEE] = 5534023222112865280; // 30%
         _maxFeeX64[FeeType.LIQUIDITY_FEE] = 5534023222112865280; // 30%
-        _maxFeeX64[FeeType.PERFORMANCE_FEE] = 3689348814741910528; // 20%
+        _maxFeeX64[FeeType.PERFORMANCE_FEE] = 5902958103587057000; // 32% = 30% gas for auto compound + 2% protocol fee
         _initializer = tx.origin;
     }
 
