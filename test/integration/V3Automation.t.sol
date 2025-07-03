@@ -237,8 +237,6 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
 
         bytes memory signature = _signOrder(emptyUserConfig, privateKey);
 
-        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT);
-
         V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
             V3Automation.Action.AUTO_HARVEST,
             Common.Protocol.UNI_V3,
