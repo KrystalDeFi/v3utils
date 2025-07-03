@@ -227,6 +227,56 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
         assertGt(balanceUSDCAfter, balanceUSDCBefore + minDestAmount);
     }
 
+    function testAutoHarvest() external {
+        _increaseLiquidity();
+
+        (address userAddress, uint256 privateKey) = makeAddrAndKey('positionOwnerAddress');
+        vm.startPrank(TEST_NFT_ACCOUNT);
+        NPM.safeTransferFrom(TEST_NFT_ACCOUNT, userAddress, TEST_NFT);
+        vm.stopPrank();
+
+        bytes memory signature = _signOrder(emptyUserConfig, privateKey);
+
+        (, , , , , , , uint128 liquidityBefore, , , , ) = NPM.positions(TEST_NFT);
+
+        V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
+            V3Automation.Action.AUTO_HARVEST,
+            Common.Protocol.UNI_V3,
+            NPM,
+            TEST_NFT,
+            0,
+            address(0),
+            0,
+            0,
+            '',
+            0,
+            0,
+            '',
+            0,
+            0,
+            block.timestamp,
+            0,
+            0,
+            0,
+            0,
+            0,
+            true,
+            0,
+            0,
+            abi.encode(emptyUserConfig),
+            signature
+        );
+
+        // using approve / execute pattern
+        vm.prank(userAddress);
+        NPM.setApprovalForAll(address(v3automation), true);
+
+        vm.prank(TEST_OWNER_ACCOUNT);
+
+        // Execute auto harvest
+        v3automation.execute(params);
+    }
+
     function testAutoCompound() external {
         _increaseLiquidity();
 
