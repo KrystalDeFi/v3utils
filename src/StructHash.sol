@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 pragma abicoder v2;
 
 library StructHash {
-  function _hash(bytes memory abiEncodedUserOrder) internal pure returns (bytes32) {
+  function _hash(bytes memory abiEncodedUserOrder) external pure returns (bytes32) {
     return _hash(abi.decode(abiEncodedUserOrder, (Order)));
   }
 
