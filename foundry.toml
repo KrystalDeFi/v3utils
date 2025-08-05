@@ -17,5 +17,5 @@ optimizer_runs = 200
 solc-version = "0.8.15"
 
 libraries = [
-    'src/StructHash.sol:StructHash:0xFE91F3398E66a80FBE54152A21aB5855aF362598'
+    'src/StructHash.sol:StructHash:0x11F5813BC3A0E4d97B24878f6bD2601dF9A682eD'
 ]
