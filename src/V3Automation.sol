@@ -10,7 +10,7 @@ contract V3Automation is Pausable, Common, EIP712 {
     bytes32 public constant OPERATOR_ROLE = keccak256('OPERATOR_ROLE');
     mapping(bytes32 => bool) _cancelledOrder;
 
-    constructor() EIP712('V3AutomationOrder', '4.0') {}
+    constructor() EIP712('V3AutomationOrder', '5.0') {}
 
     function initialize(
         address _swapRouter,
@@ -26,7 +26,8 @@ contract V3Automation is Pausable, Common, EIP712 {
     enum Action {
         AUTO_ADJUST,
         AUTO_EXIT,
-        AUTO_COMPOUND
+        AUTO_COMPOUND,
+        AUTO_HARVEST
     }
 
     struct ExecuteState {
@@ -301,7 +302,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                 result.added0,
                 result.added1
             );
-        } else if (params.action == Action.AUTO_EXIT) {
+        } else if (params.action == Action.AUTO_EXIT || params.action == Action.AUTO_HARVEST) {
             IWETH9 weth = _getWeth9(params.nfpm, params.protocol);
             uint256 targetAmount;
             if (state.token0 != params.targetToken) {
