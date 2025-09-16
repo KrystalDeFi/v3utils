@@ -28,11 +28,11 @@ interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
         AlgebraV1MintParams calldata params
     ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 
-    /// @notice mintParams for aerodrome
-    struct AerodromeMintParams {
+    /// @notice mintParams for algebra integral
+    struct AlgebraIntegralMintParams {
         address token0;
         address token1;
-        int24 tickSpacing;
+        address deployer;
         int24 tickLower;
         int24 tickUpper;
         uint256 amount0Desired;
@@ -41,13 +41,11 @@ interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
         uint256 amount1Min;
         address recipient;
         uint256 deadline;
-        uint160 sqrtPriceX96;
     }
 
     function mint(
-        AerodromeMintParams calldata params
+        AlgebraIntegralMintParams calldata params
     ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
-
 }
 
 abstract contract Common is AccessControl, Pausable {
@@ -169,7 +167,8 @@ abstract contract Common is AccessControl, Pausable {
         UNI_V3,
         ALGEBRA_V1,
         RAMSES_V3,
-        AERODROME
+        AERODROME,
+        ALGEBRA_INTEGRAL
     }
 
     enum FeeType {
@@ -208,6 +207,7 @@ abstract contract Common is AccessControl, Pausable {
         // min amount to be added after swap
         uint256 amountAddMin0;
         uint256 amountAddMin1;
+        address poolDeployer; // used for Algebra Integral
     }
 
     /// @notice Params for swapAndIncreaseLiquidity() function
@@ -280,6 +280,7 @@ abstract contract Common is AccessControl, Pausable {
     struct Position {
         address token0;
         address token1;
+        address deployer;
         uint24 fee;
         int24 tickSpacing;
         int24 tickLower;
@@ -446,14 +447,14 @@ abstract contract Common is AccessControl, Pausable {
                     params.deadline
                 )
             );
-        } else if (params.protocol == Protocol.AERODROME) {
+        } else if (params.protocol == Protocol.ALGEBRA_INTEGRAL) {
             // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
-            (result.tokenId, result.liquidity, result.added0, result.added1) = _mintAerodrome(
+            (result.tokenId, result.liquidity, result.added0, result.added1) = _mintAlgebraIntegral(
                 params.nfpm,
-                INonfungiblePositionManager.AerodromeMintParams(
+                INonfungiblePositionManager.AlgebraIntegralMintParams(
                     address(params.token0),
                     address(params.token1),
-                    params.tickSpacing,
+                    address(params.poolDeployer),
                     params.tickLower,
                     params.tickUpper,
                     total0,
@@ -461,8 +462,7 @@ abstract contract Common is AccessControl, Pausable {
                     params.amountAddMin0,
                     params.amountAddMin1,
                     address(this), // is sent to real recipient afterwards
-                    params.deadline,
-                    0 // sqrtPriceX96 == 0 for created pool
+                    params.deadline
                 )
             );
         } else {
@@ -501,9 +501,9 @@ abstract contract Common is AccessControl, Pausable {
         return nfpm.mint(params);
     }
 
-    function _mintAerodrome(
+    function _mintAlgebraIntegral(
         INonfungiblePositionManager nfpm,
-        INonfungiblePositionManager.AerodromeMintParams memory params
+        INonfungiblePositionManager.AlgebraIntegralMintParams memory params
     ) internal returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) {
         // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
         return nfpm.mint(params);
@@ -547,7 +547,8 @@ abstract contract Common is AccessControl, Pausable {
                 params.amountOut1Min,
                 params.swapData1,
                 params.amountAddMin0,
-                params.amountAddMin1
+                params.amountAddMin1,
+                address(0)
             ),
             unwrap
         );
@@ -803,29 +804,64 @@ abstract contract Common is AccessControl, Pausable {
         INonfungiblePositionManager nfpm,
         Protocol protocol,
         uint256 tokenId
-    )
-        internal
-        returns (Position memory position)
-    {
+    ) internal returns (Position memory position) {
         (bool success, bytes memory data) = address(nfpm).call(abi.encodeWithSignature('positions(uint256)', tokenId));
         if (!success) {
             revert GetPositionFailed();
         }
 
         if (protocol == Protocol.UNI_V3) {
-            (, , position.token0, position.token1, position.fee, position.tickLower, position.tickUpper, position.liquidity, , , , ) = abi.decode(
+            (
+                ,
+                ,
+                position.token0,
+                position.token1,
+                position.fee,
+                position.tickLower,
+                position.tickUpper,
+                position.liquidity,
+                ,
+                ,
+                ,
+
+            ) = abi.decode(
                 data,
                 (uint96, address, address, address, uint24, int24, int24, uint128, uint256, uint256, uint128, uint128)
             );
         } else if (protocol == Protocol.ALGEBRA_V1) {
-            (, , position.token0, position.token1, position.tickLower, position.tickUpper, position.liquidity, , , , ) = abi.decode(
+            (
+                ,
+                ,
+                position.token0,
+                position.token1,
+                position.tickLower,
+                position.tickUpper,
+                position.liquidity,
+                ,
+                ,
+                ,
+
+            ) = abi.decode(
                 data,
                 (uint96, address, address, address, int24, int24, uint128, uint256, uint256, uint128, uint128)
             );
-        } else if (protocol == Protocol.AERODROME) {
-            (, , position.token0, position.token1, position.tickSpacing, position.tickLower, position.tickUpper, position.liquidity, , , , ) = abi.decode(
+        } else if (protocol == Protocol.ALGEBRA_INTEGRAL) {
+            (
+                ,
+                ,
+                position.token0,
+                position.token1,
+                position.deployer,
+                position.tickLower,
+                position.tickUpper,
+                position.liquidity,
+                ,
+                ,
+                ,
+
+            ) = abi.decode(
                 data,
-                (uint96, address, address, address, int24, int24, int24, uint128, uint256, uint256, uint128, uint128)
+                (uint88, address, address, address, address, int24, int24, uint128, uint256, uint256, uint128, uint128)
             );
         }
     }

@@ -33,6 +33,7 @@ contract V3Automation is Pausable, Common, EIP712 {
     struct ExecuteState {
         address token0;
         address token1;
+        address deployer;
         uint24 fee;
         int24 tickSpacing;
         int24 tickLower;
@@ -103,6 +104,7 @@ contract V3Automation is Pausable, Common, EIP712 {
         state.tickLower = position.tickLower;
         state.tickUpper = position.tickUpper;
         state.liquidity = position.liquidity;
+        state.deployer = position.deployer;
 
         require(state.liquidity != params.liquidity || params.liquidity != 0);
 
@@ -238,7 +240,8 @@ contract V3Automation is Pausable, Common, EIP712 {
                         0,
                         bytes(''),
                         params.amountAddMin0,
-                        params.amountAddMin1
+                        params.amountAddMin1,
+                        state.deployer
                     ),
                     false
                 );
@@ -267,7 +270,8 @@ contract V3Automation is Pausable, Common, EIP712 {
                         params.amountOut0Min,
                         params.swapData0,
                         params.amountAddMin0,
-                        params.amountAddMin1
+                        params.amountAddMin1,
+                        state.deployer
                     ),
                     false
                 );
@@ -297,7 +301,8 @@ contract V3Automation is Pausable, Common, EIP712 {
                         0,
                         bytes(''),
                         params.amountAddMin0,
-                        params.amountAddMin1
+                        params.amountAddMin1,
+                        state.deployer
                     ),
                     false
                 );
