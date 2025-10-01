@@ -20,7 +20,7 @@ contract V3Utils is IERC721Receiver, Common {
         // what action to perform on provided Uniswap v3 position
         WhatToDo whatToDo;
         // protocol to provide lp
-        Protocol protocol;
+        Nfpm.Protocol protocol;
         // target token for swaps (if this is address(0) no swaps are executed)
         address targetToken;
         // for removing liquidity slippage

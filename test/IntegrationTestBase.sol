@@ -80,7 +80,7 @@ abstract contract IntegrationTestBase is Test {
 
         Common.SwapAndIncreaseLiquidityParams memory params = Common
             .SwapAndIncreaseLiquidityParams(
-                Common.Protocol.UNI_V3,
+                Nfpm.Protocol.UNI_V3,
                 NPM,
                 TEST_NFT,
                 1000000000000000000,
