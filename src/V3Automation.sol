@@ -49,7 +49,7 @@ contract V3Automation is Pausable, Common, EIP712 {
 
     struct ExecuteParams {
         Action action;
-        Protocol protocol;
+        Nfpm.Protocol protocol;
         INonfungiblePositionManager nfpm;
         uint256 tokenId;
         uint128 liquidity; // liquidity the calculations are based on

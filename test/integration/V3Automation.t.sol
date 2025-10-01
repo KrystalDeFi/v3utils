@@ -27,7 +27,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
 
         V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
             V3Automation.Action.AUTO_ADJUST,
-            Common.Protocol.UNI_V3,
+            Nfpm.Protocol.UNI_V3,
             NPM,
             TEST_NFT,
             liquidityBefore,
@@ -77,7 +77,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
 
         V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
             V3Automation.Action.AUTO_ADJUST,
-            Common.Protocol.UNI_V3,
+            Nfpm.Protocol.UNI_V3,
             NPM,
             TEST_NFT,
             liquidityBefore,
@@ -120,7 +120,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
 
         V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
             V3Automation.Action.AUTO_ADJUST,
-            Common.Protocol.UNI_V3,
+            Nfpm.Protocol.UNI_V3,
             invalidNfpm,
             TEST_NFT,
             0,
@@ -183,7 +183,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
 
         V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
             V3Automation.Action.AUTO_EXIT,
-            Common.Protocol.UNI_V3,
+            Nfpm.Protocol.UNI_V3,
             NPM,
             TEST_NFT,
             liquidityBefore,
@@ -239,7 +239,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
 
         V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
             V3Automation.Action.AUTO_HARVEST,
-            Common.Protocol.UNI_V3,
+            Nfpm.Protocol.UNI_V3,
             NPM,
             TEST_NFT,
             0,
@@ -288,7 +288,7 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
 
         V3Automation.ExecuteParams memory params = V3Automation.ExecuteParams(
             V3Automation.Action.AUTO_COMPOUND,
-            Common.Protocol.UNI_V3,
+            Nfpm.Protocol.UNI_V3,
             NPM,
             TEST_NFT,
             liquidityBefore,
