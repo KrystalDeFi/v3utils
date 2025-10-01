@@ -48,6 +48,51 @@ interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
         AerodromeMintParams calldata params
     ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 
+    /// @notice mintParams for Ramses v3
+    struct RamsesV3MintParams {
+        address token0;
+        address token1;
+        int24 tickSpacing;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        address recipient;
+        uint256 deadline;
+    }
+
+    /// @notice Creates a new position wrapped in a NFT
+    /// @dev Call this when the pool does exist and is initialized. Note that if the pool is created but not initialized
+    /// a method does not exist, i.e. the pool is assumed to be initialized.
+    /// @param params The params necessary to mint a position, encoded as `MintParams` in calldata
+    /// @return tokenId The ID of the token that represents the minted position
+    /// @return liquidity The amount of liquidity for this position
+    /// @return amount0 The amount of token0
+    /// @return amount1 The amount of token1
+    function mint(
+        RamsesV3MintParams calldata params
+    ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+
+    /// @notice mintParams for algebra integral
+    struct AlgebraIntegralMintParams {
+        address token0;
+        address token1;
+        address deployer;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        address recipient;
+        uint256 deadline;
+    }
+
+    function mint(
+        AlgebraIntegralMintParams calldata params
+    ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 }
 
 abstract contract Common is AccessControl, Pausable {
@@ -169,7 +214,8 @@ abstract contract Common is AccessControl, Pausable {
         UNI_V3,
         ALGEBRA_V1,
         RAMSES_V3,
-        AERODROME
+        AERODROME,
+        ALGEBRA_INTEGRAL
     }
 
     enum FeeType {
@@ -208,6 +254,7 @@ abstract contract Common is AccessControl, Pausable {
         // min amount to be added after swap
         uint256 amountAddMin0;
         uint256 amountAddMin1;
+        address poolDeployer; // only for algebra integral
     }
 
     /// @notice Params for swapAndIncreaseLiquidity() function
@@ -280,6 +327,7 @@ abstract contract Common is AccessControl, Pausable {
     struct Position {
         address token0;
         address token1;
+        address deployer;
         uint24 fee;
         int24 tickSpacing;
         int24 tickLower;
@@ -446,6 +494,23 @@ abstract contract Common is AccessControl, Pausable {
                     params.deadline
                 )
             );
+        } else if (params.protocol == Protocol.RAMSES_V3) {
+            (result.tokenId, result.liquidity, result.added0, result.added1) = _mintRamsesV3(
+                params.nfpm,
+                INonfungiblePositionManager.RamsesV3MintParams(
+                    address(params.token0),
+                    address(params.token1),
+                    params.tickSpacing,
+                    params.tickLower,
+                    params.tickUpper,
+                    total0,
+                    total1,
+                    params.amountAddMin0,
+                    params.amountAddMin1,
+                    address(this), // is sent to real recipient afterwards
+                    params.deadline
+                )
+            );
         } else if (params.protocol == Protocol.AERODROME) {
             // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
             (result.tokenId, result.liquidity, result.added0, result.added1) = _mintAerodrome(
@@ -463,6 +528,23 @@ abstract contract Common is AccessControl, Pausable {
                     address(this), // is sent to real recipient afterwards
                     params.deadline,
                     0 // sqrtPriceX96 == 0 for created pool
+                )
+            );
+        } else if (params.protocol == Protocol.ALGEBRA_INTEGRAL) {
+            (result.tokenId, result.liquidity, result.added0, result.added1) = _mintAlgebraIntegral(
+                params.nfpm,
+                INonfungiblePositionManager.AlgebraIntegralMintParams(
+                    address(params.token0),
+                    address(params.token1),
+                    params.poolDeployer,
+                    params.tickLower,
+                    params.tickUpper,
+                    total0,
+                    total1,
+                    params.amountAddMin0,
+                    params.amountAddMin1,
+                    address(this), // is sent to real recipient afterwards
+                    params.deadline
                 )
             );
         } else {
@@ -509,6 +591,21 @@ abstract contract Common is AccessControl, Pausable {
         return nfpm.mint(params);
     }
 
+    function _mintRamsesV3(
+        INonfungiblePositionManager nfpm,
+        INonfungiblePositionManager.RamsesV3MintParams memory params
+    ) internal returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) {
+        // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
+        return nfpm.mint(params);
+    }
+
+    function _mintAlgebraIntegral(
+        INonfungiblePositionManager nfpm,
+        INonfungiblePositionManager.AlgebraIntegralMintParams memory params
+    ) internal returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) {
+        return nfpm.mint(params);
+    }
+
     struct SwapAndIncreaseLiquidityResult {
         uint128 liquidity;
         uint256 added0;
@@ -547,7 +644,8 @@ abstract contract Common is AccessControl, Pausable {
                 params.amountOut1Min,
                 params.swapData1,
                 params.amountAddMin0,
-                params.amountAddMin1
+                params.amountAddMin1,
+                address(0)
             ),
             unwrap
         );
@@ -822,11 +920,23 @@ abstract contract Common is AccessControl, Pausable {
                 data,
                 (uint96, address, address, address, int24, int24, uint128, uint256, uint256, uint128, uint128)
             );
+        } else if (protocol == Protocol.RAMSES_V3) {
+            (position.token0, position.token1, position.tickSpacing, position.tickLower, position.tickUpper, position.liquidity, , , , ) = abi.decode(
+                data,
+                (address, address, int24, int24, int24, uint128, uint256, uint256, uint128, uint128)
+            );
         } else if (protocol == Protocol.AERODROME) {
             (, , position.token0, position.token1, position.tickSpacing, position.tickLower, position.tickUpper, position.liquidity, , , , ) = abi.decode(
                 data,
                 (uint96, address, address, address, int24, int24, int24, uint128, uint256, uint256, uint128, uint128)
             );
+        } else if (protocol == Protocol.ALGEBRA_INTEGRAL) {
+            (, , position.token0, position.token1, position.deployer, position.tickLower, position.tickUpper, position.liquidity, , , , ) = abi.decode(
+                data,
+                (uint88, address, address, address, address, int24, int24, uint128, uint256, uint256, uint128, uint128)
+            );
+        } else {
+            revert NotSupportedProtocol();
         }
     }
 

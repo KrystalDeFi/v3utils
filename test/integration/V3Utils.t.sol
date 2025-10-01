@@ -536,7 +536,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             0,
             '',
             0,
-            0
+            0,
+            address(0)
         );
 
         vm.prank(TEST_NFT_ACCOUNT);
@@ -596,7 +597,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             0,
             '',
             0,
-            0
+            0,
+            address(0)
         );
 
         vm.prank(TEST_NFT_ACCOUNT);
@@ -643,7 +645,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             661794703,
             _get05ETHToUSDCSwapData(),
             0,
-            0
+            0,
+            address(0)
         );
 
         hoax(TEST_NFT_ACCOUNT);
@@ -779,7 +782,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             661794703,
             _get05ETHToUSDCSwapData(),
             0,
-            0
+            0,
+            address(0)
         );
         v3utils.swapAndMint{ value: 1 ether }(params);
     }
@@ -813,7 +817,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             661794703,
             _get05ETHToUSDCSwapData(),
             0,
-            0
+            0,
+            address(0)
         );
 
         hoax(TEST_NFT_ACCOUNT, 1.1 ether);
