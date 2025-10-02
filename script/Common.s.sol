@@ -66,6 +66,18 @@ abstract contract CommonScript is Script {
         );
     }
 
+    function getNfpmDeploymentAddress() internal view returns(address) {
+        return Create2.computeAddress(
+            salt,
+            keccak256(
+                abi.encodePacked(
+                    type(Nfpm).creationCode
+                )
+            ),
+            factory
+        );
+    }
+
     constructor() {
         salt = keccak256(bytes(vm.envString("SALT_SEED")));
         krystalRouter = vm.envAddress("KRYSTAL_ROUTER");
