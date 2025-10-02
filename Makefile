@@ -14,6 +14,7 @@ test: src/V3Utils.sol test/*
 clean:
 	forge clean && rm -rf cache
 v3utils:
+	$(eval FOUNDRY_PROFILE=v3utilslinker)
 	$(eval CONTRACT=V3Utils)
 v3automation:
 	$(eval FOUNDRY_PROFILE=linker)
@@ -23,19 +24,25 @@ v3automation-check:
 	@if [[ $$(cast co $(STRUCT_HASH_ADDRESS) --rpc-url $(RPC_URL) | wc -m) -eq 3 ]]; then echo 'structhash not deployed yet. =>> `make deploy-structhash` first'; exit 1; fi
 structhash:
 	$(eval CONTRACT=StructHash)
+nfpm:
+	$(eval CONTRACT=Nfpm)
 deploy-%: %
 	$(DEPLOY_CMD)
 deploy-v3utils:
 deploy-structhash:
+deploy-nfpm:
 deploy-v3automation:
 
 verify-%: %
 	$(VERIFY_CMD)
 verify-v3utils:
 verify-structhash:
+verify-nfpm:
 verify-v3automation: v3automation-check v3automation
 	$(VERIFY_CMD)
 init-v3utils:
 init-v3automation:
 init-%: %
 	forge script script/Init.s.sol:$(CONTRACT)InitializeScript --rpc-url $(RPC_URL) --broadcast --legacy --gas-price 0
+grant-role:
+	forge script script/GrantRole.s.sol:V3AutomationGrantRoleScript --rpc-url $(RPC_URL) --broadcast
