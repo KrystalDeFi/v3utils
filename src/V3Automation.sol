@@ -436,7 +436,10 @@ contract V3Automation is Pausable, Common, EIP712 {
         } else {
             revert NotSupportedAction();
         }
-        params.nfpm.transferFrom(address(this), positionOwner, params.tokenId);
+
+        address(params.nfpm).call(
+            abi.encodeWithSelector(params.nfpm.transferFrom.selector, address(this), positionOwner, params.tokenId)
+        );
     }
 
     function _validateOrder(
