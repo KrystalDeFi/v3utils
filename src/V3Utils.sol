@@ -413,7 +413,9 @@ contract V3Utils is IERC721Receiver, Common {
         }
 
         // return token to owner (this line guarantees that token is returned to originating owner)
-        nfpm.transferFrom(address(this), from, tokenId);
+        address(nfpm).call(
+            abi.encodeWithSelector(nfpm.transferFrom.selector, address(this), from, tokenId)
+        );
 
         return IERC721Receiver.onERC721Received.selector;
     }
