@@ -14,7 +14,15 @@ contract BeforeV3AutomationScript is CommonScript {
             }
             console.log("STRUCT_HASH_ADDRESS set!");
         } catch {
-            console.log(string(abi.encodePacked("env STRUCT_HASH_ADDRESS not set. set `STRUCT_HASH_ADDRESS=", toHexString(structHashAddress), "`first")));
+            console.log(
+                string(
+                    abi.encodePacked(
+                        "env STRUCT_HASH_ADDRESS not set. set `STRUCT_HASH_ADDRESS=",
+                        toHexString(structHashAddress),
+                        "`first"
+                    )
+                )
+            );
             revert();
         }
 
@@ -27,22 +35,25 @@ contract BeforeV3AutomationScript is CommonScript {
             }
             console.log("NFPM_LIB_ADDRESS set!");
         } catch {
-            console.log(string(abi.encodePacked("env NFPM_LIB_ADDRESS not set. set `NFPM_LIB_ADDRESS=", toHexString(nfpmAddress), "`first")));
+            console.log(
+                string(
+                    abi.encodePacked(
+                        "env NFPM_LIB_ADDRESS not set. set `NFPM_LIB_ADDRESS=", toHexString(nfpmAddress), "`first"
+                    )
+                )
+            );
             revert();
         }
     }
 
     function test() external {}
-
 }
 
 contract V3AutomationScript is CommonScript {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
-        V3Automation v3automation = new V3Automation{
-            salt: salt
-        }();
+        V3Automation v3automation = new V3Automation{salt: salt}();
         vm.stopBroadcast();
     }
 

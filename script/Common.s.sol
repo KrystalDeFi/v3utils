@@ -30,52 +30,20 @@ abstract contract CommonScript is Script {
         return toHexString(uint256(uint160(addr)), 20);
     }
 
-    function getV3UtilsDeploymentAddress() internal view returns(address) {
-        return Create2.computeAddress(
-            salt,
-            keccak256(
-                abi.encodePacked(
-                    type(V3Utils).creationCode
-                )
-            ),
-            factory
-        );
+    function getV3UtilsDeploymentAddress() internal view returns (address) {
+        return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(V3Utils).creationCode)), factory);
     }
 
-    function getV3AutomationDeploymentAddress() internal view returns(address) {
-        return Create2.computeAddress(
-            salt,
-            keccak256(
-                abi.encodePacked(
-                    type(V3Automation).creationCode
-                )
-            ),
-            factory
-        );
+    function getV3AutomationDeploymentAddress() internal view returns (address) {
+        return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(V3Automation).creationCode)), factory);
     }
 
-    function getStructHashDeploymentAddress() internal view returns(address) {
-        return Create2.computeAddress(
-            salt,
-            keccak256(
-                abi.encodePacked(
-                    type(StructHash).creationCode
-                )
-            ),
-            factory
-        );
+    function getStructHashDeploymentAddress() internal view returns (address) {
+        return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(StructHash).creationCode)), factory);
     }
 
-    function getNfpmDeploymentAddress() internal view returns(address) {
-        return Create2.computeAddress(
-            salt,
-            keccak256(
-                abi.encodePacked(
-                    type(Nfpm).creationCode
-                )
-            ),
-            factory
-        );
+    function getNfpmDeploymentAddress() internal view returns (address) {
+        return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(Nfpm).creationCode)), factory);
     }
 
     constructor() {
