@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
-import 'v3-periphery/interfaces/external/IWETH9.sol';
-import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
-import 'v3-core/libraries/FullMath.sol';
-import '@openzeppelin/contracts/access/AccessControl.sol';
-import '@openzeppelin/contracts/utils/structs/EnumerableSet.sol';
-import '@openzeppelin/contracts/security/Pausable.sol';
-import './Nfpm.sol';
+import "v3-periphery/interfaces/external/IWETH9.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "v3-core/libraries/FullMath.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+import "./Nfpm.sol";
 
 abstract contract Common is AccessControl, Pausable {
     using Address for address;
 
-    bytes32 public constant WITHDRAWER_ROLE = keccak256('WITHDRAWER_ROLE');
-    bytes32 public constant ADMIN_ROLE = keccak256('ADMIN_ROLE');
+    bytes32 public constant WITHDRAWER_ROLE = keccak256("WITHDRAWER_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     // error types
     error SelfSend();
@@ -48,17 +48,10 @@ abstract contract Common is AccessControl, Pausable {
 
     // events
     event CompoundFees(
-        address indexed nfpm,
-        uint256 indexed tokenId,
-        uint128 liquidity,
-        uint256 amount0,
-        uint256 amount1
+        address indexed nfpm, uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1
     );
     event DeductFees(
-        address indexed nfpm,
-        uint256 indexed tokenId,
-        address indexed userAddress,
-        DeductFeesEventData data
+        address indexed nfpm, uint256 indexed tokenId, address indexed userAddress, DeductFeesEventData data
     );
     event ChangeRange(
         address indexed nfpm,
@@ -70,18 +63,10 @@ abstract contract Common is AccessControl, Pausable {
     );
     event WithdrawAndCollectAndSwap(address indexed nfpm, uint256 indexed tokenId, address token, uint256 amount);
     event SwapAndMint(
-        address indexed nfpm,
-        uint256 indexed tokenId,
-        uint128 liquidity,
-        uint256 amount0,
-        uint256 amount1
+        address indexed nfpm, uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1
     );
     event SwapAndIncreaseLiquidity(
-        address indexed nfpm,
-        uint256 indexed tokenId,
-        uint128 liquidity,
-        uint256 amount0,
-        uint256 amount1
+        address indexed nfpm, uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1
     );
 
     EnumerableSet.AddressSet private _whitelistedNfpm;
@@ -92,6 +77,7 @@ abstract contract Common is AccessControl, Pausable {
     address public WETH;
 
     mapping(FeeType => uint64) private _maxFeeX64;
+
     constructor() {
         _maxFeeX64[FeeType.GAS_FEE] = 5534023222112865280; // 30%
         _maxFeeX64[FeeType.LIQUIDITY_FEE] = 5534023222112865280; // 30%
@@ -100,6 +86,7 @@ abstract contract Common is AccessControl, Pausable {
     }
 
     bool private _initialized = false;
+
     function initialize(
         address router,
         address admin,
@@ -274,11 +261,10 @@ abstract contract Common is AccessControl, Pausable {
      * @param tokenId tokenId of erc721 tokens to withdraw
      * @param to Address to send to
      */
-    function withdrawERC721(
-        INonfungiblePositionManager nfpm,
-        uint256 tokenId,
-        address to
-    ) external onlyRole(WITHDRAWER_ROLE) {
+    function withdrawERC721(INonfungiblePositionManager nfpm, uint256 tokenId, address to)
+        external
+        onlyRole(WITHDRAWER_ROLE)
+    {
         nfpm.transferFrom(address(this), to, tokenId);
     }
 
@@ -299,7 +285,7 @@ abstract contract Common is AccessControl, Pausable {
 
         // wrap ether sent
         if (msg.value != 0) {
-            weth.deposit{ value: msg.value }();
+            weth.deposit{value: msg.value}();
 
             if (address(weth) == address(token0)) {
                 amountAdded0 = msg.value;
@@ -339,10 +325,8 @@ abstract contract Common is AccessControl, Pausable {
             }
         }
         if (
-            amountOther > amountAddedOther &&
-            address(otherToken) != address(0) &&
-            token0 != otherToken &&
-            token1 != otherToken
+            amountOther > amountAddedOther && address(otherToken) != address(0) && token0 != otherToken
+                && token1 != otherToken
         ) {
             uint256 balanceBefore = otherToken.balanceOf(address(this));
             SafeERC20.safeTransferFrom(otherToken, msg.sender, address(this), amountOther - amountAddedOther);
@@ -360,14 +344,16 @@ abstract contract Common is AccessControl, Pausable {
         uint256 added1;
     }
     // swap and mint logic
-    function _swapAndMint(
-        SwapAndMintParams memory params,
-        bool unwrap
-    ) internal returns (SwapAndMintResult memory result) {
+
+    function _swapAndMint(SwapAndMintParams memory params, bool unwrap)
+        internal
+        returns (SwapAndMintResult memory result)
+    {
         (uint256 total0, uint256 total1) = _swapAndPrepareAmounts(params, unwrap);
 
         (result.tokenId, result.liquidity, result.added0, result.added1) = Nfpm.mint(
-            params.nfpm, params.protocol,
+            params.nfpm,
+            params.protocol,
             Nfpm.MintParams(
                 address(params.token0),
                 address(params.token1),
@@ -391,14 +377,7 @@ abstract contract Common is AccessControl, Pausable {
 
         _returnLeftoverTokens(
             ReturnLeftoverTokensParams(
-                params.recipient,
-                params.token0,
-                params.token1,
-                total0,
-                total1,
-                result.added0,
-                result.added1,
-                unwrap
+                params.recipient, params.token0, params.token1, total0, total1, result.added0, result.added1, unwrap
             )
         );
     }
@@ -411,12 +390,11 @@ abstract contract Common is AccessControl, Pausable {
         uint256 feeAmount1;
     }
     // swap and increase logic
-    function _swapAndIncrease(
-        SwapAndIncreaseLiquidityParams memory params,
-        IERC20 token0,
-        IERC20 token1,
-        bool unwrap
-    ) internal returns (SwapAndIncreaseLiquidityResult memory result) {
+
+    function _swapAndIncrease(SwapAndIncreaseLiquidityParams memory params, IERC20 token0, IERC20 token1, bool unwrap)
+        internal
+        returns (SwapAndIncreaseLiquidityResult memory result)
+    {
         (uint256 total0, uint256 total1) = _swapAndPrepareAmounts(
             SwapAndMintParams(
                 params.protocol,
@@ -447,85 +425,49 @@ abstract contract Common is AccessControl, Pausable {
             ),
             unwrap
         );
-        INonfungiblePositionManager.IncreaseLiquidityParams
-            memory increaseLiquidityParams = IUniV3NonfungiblePositionManager.IncreaseLiquidityParams(
-                params.tokenId,
-                total0,
-                total1,
-                params.amountAddMin0,
-                params.amountAddMin1,
-                params.deadline
-            );
+        INonfungiblePositionManager.IncreaseLiquidityParams memory increaseLiquidityParams =
+        IUniV3NonfungiblePositionManager.IncreaseLiquidityParams(
+            params.tokenId, total0, total1, params.amountAddMin0, params.amountAddMin1, params.deadline
+        );
 
         (result.liquidity, result.added0, result.added1) = params.nfpm.increaseLiquidity(increaseLiquidityParams);
 
         emit SwapAndIncreaseLiquidity(
-            address(params.nfpm),
-            params.tokenId,
-            result.liquidity,
-            result.added0,
-            result.added1
+            address(params.nfpm), params.tokenId, result.liquidity, result.added0, result.added1
         );
         _returnLeftoverTokens(
             ReturnLeftoverTokensParams(
-                params.recipient,
-                token0,
-                token1,
-                total0,
-                total1,
-                result.added0,
-                result.added1,
-                unwrap
+                params.recipient, token0, token1, total0, total1, result.added0, result.added1, unwrap
             )
         );
     }
 
     // swaps available tokens and prepares max amounts to be added to nfpm
-    function _swapAndPrepareAmounts(
-        SwapAndMintParams memory params,
-        bool unwrap
-    ) internal returns (uint256 total0, uint256 total1) {
+    function _swapAndPrepareAmounts(SwapAndMintParams memory params, bool unwrap)
+        internal
+        returns (uint256 total0, uint256 total1)
+    {
         if (params.swapSourceToken == params.token0) {
             if (params.amount0 < params.amountIn1) {
                 revert AmountError();
             }
-            (uint256 amountInDelta, uint256 amountOutDelta) = _swap(
-                params.token0,
-                params.token1,
-                params.amountIn1,
-                params.amountOut1Min,
-                params.swapData1
-            );
+            (uint256 amountInDelta, uint256 amountOutDelta) =
+                _swap(params.token0, params.token1, params.amountIn1, params.amountOut1Min, params.swapData1);
             total0 = params.amount0 - amountInDelta;
             total1 = params.amount1 + amountOutDelta;
         } else if (params.swapSourceToken == params.token1) {
             if (params.amount1 < params.amountIn0) {
                 revert AmountError();
             }
-            (uint256 amountInDelta, uint256 amountOutDelta) = _swap(
-                params.token1,
-                params.token0,
-                params.amountIn0,
-                params.amountOut0Min,
-                params.swapData0
-            );
+            (uint256 amountInDelta, uint256 amountOutDelta) =
+                _swap(params.token1, params.token0, params.amountIn0, params.amountOut0Min, params.swapData0);
             total1 = params.amount1 - amountInDelta;
             total0 = params.amount0 + amountOutDelta;
         } else if (address(params.swapSourceToken) != address(0)) {
-            (uint256 amountInDelta0, uint256 amountOutDelta0) = _swap(
-                params.swapSourceToken,
-                params.token0,
-                params.amountIn0,
-                params.amountOut0Min,
-                params.swapData0
-            );
-            (uint256 amountInDelta1, uint256 amountOutDelta1) = _swap(
-                params.swapSourceToken,
-                params.token1,
-                params.amountIn1,
-                params.amountOut1Min,
-                params.swapData1
-            );
+            (uint256 amountInDelta0, uint256 amountOutDelta0) =
+                _swap(params.swapSourceToken, params.token0, params.amountIn0, params.amountOut0Min, params.swapData0);
+            (uint256 amountInDelta1, uint256 amountOutDelta1) =
+                _swap(params.swapSourceToken, params.token1, params.amountIn1, params.amountOut1Min, params.swapData1);
             total0 = params.amount0 + amountOutDelta0;
             total1 = params.amount1 + amountOutDelta1;
 
@@ -570,7 +512,7 @@ abstract contract Common is AccessControl, Pausable {
         IWETH9 weth = _getWeth9();
         if (address(weth) == address(token) && unwrap) {
             weth.withdraw(amount);
-            (bool sent, ) = to.call{ value: amount }('');
+            (bool sent,) = to.call{value: amount}("");
             if (!sent) {
                 revert EtherSendFailed();
             }
@@ -582,13 +524,10 @@ abstract contract Common is AccessControl, Pausable {
     // general swap function which uses external router with off-chain calculated swap instructions
     // does slippage check with amountOutMin param
     // returns token amounts deltas after swap
-    function _swap(
-        IERC20 tokenIn,
-        IERC20 tokenOut,
-        uint256 amountIn,
-        uint256 amountOutMin,
-        bytes memory swapData
-    ) internal returns (uint256 amountInDelta, uint256 amountOutDelta) {
+    function _swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 amountOutMin, bytes memory swapData)
+        internal
+        returns (uint256 amountInDelta, uint256 amountOutDelta)
+    {
         if (amountIn != 0 && swapData.length != 0 && address(tokenOut) != address(0)) {
             uint256 balanceInBefore = tokenIn.balanceOf(address(this));
             uint256 balanceOutBefore = tokenOut.balanceOf(address(this));
@@ -596,9 +535,9 @@ abstract contract Common is AccessControl, Pausable {
             // approve needed amount
             _safeApprove(tokenIn, swapRouter, amountIn);
             // execute swap
-            (bool success, ) = swapRouter.call(swapData);
+            (bool success,) = swapRouter.call(swapData);
             if (!success) {
-                revert('swap failed!');
+                revert("swap failed!");
             }
 
             // reset approval
@@ -633,11 +572,7 @@ abstract contract Common is AccessControl, Pausable {
             (amount0, amount1) = Nfpm.decreaseLiquidity(
                 nfpm,
                 IUniV3NonfungiblePositionManager.DecreaseLiquidityParams(
-                    tokenId,
-                    liquidity,
-                    token0Min,
-                    token1Min,
-                    deadline
+                    tokenId, liquidity, token0Min, token1Min, deadline
                 )
             );
         }
@@ -655,8 +590,7 @@ abstract contract Common is AccessControl, Pausable {
         uint256 balanceBefore0 = token0.balanceOf(address(this));
         uint256 balanceBefore1 = token1.balanceOf(address(this));
         (amount0, amount1) = Nfpm.collect(
-            nfpm,
-            IUniV3NonfungiblePositionManager.CollectParams(tokenId, address(this), collectAmount0, collectAmount1)
+            nfpm, IUniV3NonfungiblePositionManager.CollectParams(tokenId, address(this), collectAmount0, collectAmount1)
         );
         uint256 balanceAfter0 = token0.balanceOf(address(this));
         uint256 balanceAfter1 = token1.balanceOf(address(this));
@@ -670,24 +604,17 @@ abstract contract Common is AccessControl, Pausable {
         }
     }
 
-    function _decreaseLiquidityAndCollectFees(
-        DecreaseAndCollectFeesParams memory params
-    ) internal returns (uint256 collectedAmount0, uint256 collectedAmount1, uint256 feeAmount0, uint256 feeAmount1) {
+    function _decreaseLiquidityAndCollectFees(DecreaseAndCollectFeesParams memory params)
+        internal
+        returns (uint256 collectedAmount0, uint256 collectedAmount1, uint256 feeAmount0, uint256 feeAmount1)
+    {
         (uint256 amount0, uint256 amount1) = _decreaseLiquidity(
-            params.nfpm,
-            params.tokenId,
-            params.liquidity,
-            params.deadline,
-            params.token0Min,
-            params.token1Min
+            params.nfpm, params.tokenId, params.liquidity, params.deadline, params.token0Min, params.token1Min
         );
         (collectedAmount0, collectedAmount1) = Nfpm.collect(
             params.nfpm,
             IUniV3NonfungiblePositionManager.CollectParams(
-                params.tokenId,
-                address(this),
-                type(uint128).max,
-                type(uint128).max
+                params.tokenId, address(this), type(uint128).max, type(uint128).max
             )
         );
         feeAmount0 = collectedAmount0 - amount0;
@@ -698,11 +625,10 @@ abstract contract Common is AccessControl, Pausable {
         return IWETH9(WETH);
     }
 
-    function _getPosition(
-        INonfungiblePositionManager nfpm,
-        Nfpm.Protocol protocol,
-        uint256 tokenId
-    ) internal returns (Position memory position) {
+    function _getPosition(INonfungiblePositionManager nfpm, Nfpm.Protocol protocol, uint256 tokenId)
+        internal
+        returns (Position memory position)
+    {
         (
             position.token0,
             position.token1,
@@ -720,10 +646,7 @@ abstract contract Common is AccessControl, Pausable {
      * @param emitEvent: whether to emit event or not. Since swap and mint have not had token id yet.
      * we need to emit event latter
      */
-    function _deductFees(
-        DeductFeesParams memory params,
-        bool emitEvent
-    )
+    function _deductFees(DeductFeesParams memory params, bool emitEvent)
         internal
         returns (
             uint256 amount0Left,
@@ -818,14 +741,13 @@ abstract contract Common is AccessControl, Pausable {
     }
 
     function _safeApprove(IERC20 token, address _spender, uint256 _value) internal {
-        (bool success, bytes memory returnData) = address(token).call(
-            abi.encodeWithSelector(token.approve.selector, _spender, _value)
-        );
+        (bool success, bytes memory returnData) =
+            address(token).call(abi.encodeWithSelector(token.approve.selector, _spender, _value));
         if (_value == 0) {
             // some token does not allow approve(0) so we skip check for this case
             return;
         }
-        require(success && (returnData.length == 0 || abi.decode(returnData, (bool))), 'SA');
+        require(success && (returnData.length == 0 || abi.decode(returnData, (bool))), "SA");
     }
 
     function _isWhitelistedNfpm(address nfpm) internal view returns (bool) {

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 // modified version of @openzeppelin
 pragma solidity ^0.8.0;
-import './StructHash.sol';
-import '@openzeppelin/contracts/utils/cryptography/ECDSA.sol';
+
+import "./StructHash.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 abstract contract EIP712 {
     bytes32 private constant TYPE_HASH =
-        keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)');
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
 
     bytes32 public immutable DOMAIN_SEPARATOR;
 
@@ -38,7 +39,7 @@ abstract contract EIP712 {
         /// @solidity memory-safe-assembly
         assembly {
             let ptr := mload(0x40)
-            mstore(ptr, hex'19_01')
+            mstore(ptr, hex"1901")
             mstore(add(ptr, 0x02), domainSeparator)
             mstore(add(ptr, 0x22), structHash)
             digest := keccak256(ptr, 0x42)

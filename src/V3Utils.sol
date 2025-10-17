@@ -444,7 +444,8 @@ contract V3Utils is IERC721Receiver, Common {
         );
         SwapAndMintParams memory _params = params;
 
-        DeductFeesEventData memory eventData;
+        DeductFeesEventData memory liquidityFeeEventData;
+        DeductFeesEventData memory gasFeeEventData;
 
         uint256 feeAmount0;
         uint256 feeAmount1;
@@ -467,8 +468,7 @@ contract V3Utils is IERC721Receiver, Common {
                 ),
                 false
             );
-
-            eventData = DeductFeesEventData({
+            liquidityFeeEventData = DeductFeesEventData({
                 token0: address(params.token0),
                 token1: address(params.token1),
                 token2: address(params.swapSourceToken),
@@ -481,10 +481,10 @@ contract V3Utils is IERC721Receiver, Common {
                 feeX64: params.protocolFeeX64,
                 feeType: FeeType.LIQUIDITY_FEE
             });
+
             _params.amount0 -= feeAmount0;
             _params.amount1 -= feeAmount1;
             _params.amount2 -= feeAmount2;
-            emit DeductFees(address(params.nfpm), result.tokenId, params.recipient, eventData);
         }
         if (params.gasFeeX64 > 0) {
             // since we do not have the tokenId here, we need to emit event later
@@ -505,7 +505,7 @@ contract V3Utils is IERC721Receiver, Common {
                 false
             );
 
-            eventData = DeductFeesEventData({
+            gasFeeEventData = DeductFeesEventData({
                 token0: address(params.token0),
                 token1: address(params.token1),
                 token2: address(params.swapSourceToken),
@@ -521,10 +521,15 @@ contract V3Utils is IERC721Receiver, Common {
             _params.amount0 -= feeAmount0;
             _params.amount1 -= feeAmount1;
             _params.amount2 -= feeAmount2;
-            emit DeductFees(address(params.nfpm), result.tokenId, params.recipient, eventData);
         }
 
         result = _swapAndMint(_params, msg.value != 0);
+        if (params.protocolFeeX64 > 0) {
+            emit DeductFees(address(params.nfpm), result.tokenId, params.recipient, liquidityFeeEventData);
+        }
+        if (params.gasFeeX64 > 0) {
+            emit DeductFees(address(params.nfpm), result.tokenId, params.recipient, gasFeeEventData);
+        }
     }
 
     /// @notice Does 1 or 2 swaps from swapSourceToken to token0 and token1 and adds as much as possible liquidity to any existing position (no need to be position owner).
