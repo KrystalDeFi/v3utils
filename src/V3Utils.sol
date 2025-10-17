@@ -201,6 +201,7 @@ contract V3Utils is IERC721Receiver, Common {
                         "",
                         instructions.amountAddMin0,
                         instructions.amountAddMin1,
+                        0,
                         0
                     ),
                     IERC20(position.token0),
@@ -227,6 +228,7 @@ contract V3Utils is IERC721Receiver, Common {
                         instructions.swapData0,
                         instructions.amountAddMin0,
                         instructions.amountAddMin1,
+                        0,
                         0
                     ),
                     IERC20(position.token0),
@@ -254,6 +256,7 @@ contract V3Utils is IERC721Receiver, Common {
                         "",
                         instructions.amountAddMin0,
                         instructions.amountAddMin1,
+                        0,
                         0
                     ),
                     IERC20(position.token0),
@@ -275,6 +278,7 @@ contract V3Utils is IERC721Receiver, Common {
                         position.tickSpacing,
                         instructions.tickLower,
                         instructions.tickUpper,
+                        0,
                         0,
                         amount0,
                         amount1,
@@ -306,6 +310,7 @@ contract V3Utils is IERC721Receiver, Common {
                         instructions.tickLower,
                         instructions.tickUpper,
                         0,
+                        0,
                         amount0,
                         amount1,
                         0,
@@ -336,6 +341,7 @@ contract V3Utils is IERC721Receiver, Common {
                         position.tickSpacing,
                         instructions.tickLower,
                         instructions.tickUpper,
+                        0,
                         0,
                         amount0,
                         amount1,
@@ -439,12 +445,13 @@ contract V3Utils is IERC721Receiver, Common {
         SwapAndMintParams memory _params = params;
 
         DeductFeesEventData memory eventData;
+
+        uint256 feeAmount0;
+        uint256 feeAmount1;
+        uint256 feeAmount2;
         if (params.protocolFeeX64 > 0) {
-            uint256 feeAmount0;
-            uint256 feeAmount1;
-            uint256 feeAmount2;
             // since we do not have the tokenId here, we need to emit event later
-            (_params.amount0, _params.amount1, _params.amount2, feeAmount0, feeAmount1, feeAmount2) = _deductFees(
+            (,,, feeAmount0, feeAmount1, feeAmount2) = _deductFees(
                 DeductFeesParams(
                     params.amount0,
                     params.amount1,
@@ -474,7 +481,47 @@ contract V3Utils is IERC721Receiver, Common {
                 feeX64: params.protocolFeeX64,
                 feeType: FeeType.LIQUIDITY_FEE
             });
+            _params.amount0 -= feeAmount0;
+            _params.amount1 -= feeAmount1;
+            _params.amount2 -= feeAmount2;
         }
+        if (params.gasFeeX64 > 0) {
+            // since we do not have the tokenId here, we need to emit event later
+            (,,, feeAmount0, feeAmount1, feeAmount2) = _deductFees(
+                DeductFeesParams(
+                    params.amount0,
+                    params.amount1,
+                    params.amount2,
+                    params.gasFeeX64,
+                    FeeType.GAS_FEE,
+                    address(params.nfpm),
+                    0,
+                    params.recipient,
+                    address(params.token0),
+                    address(params.token1),
+                    address(params.swapSourceToken)
+                ),
+                false
+            );
+
+            eventData = DeductFeesEventData({
+                token0: address(params.token0),
+                token1: address(params.token1),
+                token2: address(params.swapSourceToken),
+                amount0: params.amount0,
+                amount1: params.amount1,
+                amount2: params.amount2,
+                feeAmount0: feeAmount0,
+                feeAmount1: feeAmount1,
+                feeAmount2: feeAmount2,
+                feeX64: params.protocolFeeX64,
+                feeType: FeeType.LIQUIDITY_FEE
+            });
+            _params.amount0 -= feeAmount0;
+            _params.amount1 -= feeAmount1;
+            _params.amount2 -= feeAmount2;
+        }
+
         result = _swapAndMint(_params, msg.value != 0);
         emit DeductFees(address(params.nfpm), result.tokenId, params.recipient, eventData);
     }
@@ -510,8 +557,11 @@ contract V3Utils is IERC721Receiver, Common {
             params.amount2
         );
         SwapAndIncreaseLiquidityParams memory _params = params;
+        uint256 feeAmount0;
+        uint256 feeAmount1;
+        uint256 feeAmount2;
         if (params.protocolFeeX64 > 0) {
-            (_params.amount0, _params.amount1, _params.amount2,,,) = _deductFees(
+            (,,, feeAmount0, feeAmount1, feeAmount2) = _deductFees(
                 DeductFeesParams(
                     params.amount0,
                     params.amount1,
@@ -527,6 +577,30 @@ contract V3Utils is IERC721Receiver, Common {
                 ),
                 true
             );
+            _params.amount0 -= feeAmount0;
+            _params.amount1 -= feeAmount1;
+            _params.amount2 -= feeAmount2;
+        }
+        if (params.gasFeeX64 > 0) {
+            (,,, feeAmount0, feeAmount1, feeAmount2) = _deductFees(
+                DeductFeesParams(
+                    params.amount0,
+                    params.amount1,
+                    params.amount2,
+                    params.gasFeeX64,
+                    FeeType.GAS_FEE,
+                    address(params.nfpm),
+                    params.tokenId,
+                    params.recipient,
+                    position.token0,
+                    position.token1,
+                    address(params.swapSourceToken)
+                ),
+                true
+            );
+            _params.amount0 -= feeAmount0;
+            _params.amount1 -= feeAmount1;
+            _params.amount2 -= feeAmount2;
         }
 
         result = _swapAndIncrease(_params, IERC20(position.token0), IERC20(position.token1), msg.value != 0);

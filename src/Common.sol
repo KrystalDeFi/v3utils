@@ -139,6 +139,7 @@ abstract contract Common is AccessControl, Pausable {
         int24 tickLower;
         int24 tickUpper;
         uint64 protocolFeeX64;
+        uint64 gasFeeX64;
         // how much is provided of token0 and token1
         uint256 amount0;
         uint256 amount1;
@@ -188,6 +189,7 @@ abstract contract Common is AccessControl, Pausable {
         uint256 amountAddMin0;
         uint256 amountAddMin1;
         uint64 protocolFeeX64;
+        uint64 gasFeeX64;
     }
 
     struct ReturnLeftoverTokensParams {
@@ -421,6 +423,7 @@ abstract contract Common is AccessControl, Pausable {
                 params.nfpm,
                 token0,
                 token1,
+                0,
                 0,
                 0,
                 0,
