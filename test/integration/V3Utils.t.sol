@@ -386,6 +386,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             "",
             0,
             0,
+            0,
             0
         );
 
@@ -397,7 +398,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
     }
 
     function testSwapAndIncreaseLiquidity() external {
-        uint64 protocolFeeX64 = 18446744073709552; // 0.1%
+        uint64 protocolFeeX64 = 9223372036854776; // 0.05%
+        uint64 gasFeeX64 = 9223372036854776; // 0.05%
 
         uint256 balanceUSDC = 1001001;
         _writeTokenBalance(TEST_NFT_ACCOUNT, address(USDC), balanceUSDC);
@@ -419,7 +421,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             "",
             0,
             0,
-            protocolFeeX64
+            protocolFeeX64,
+            gasFeeX64
         );
 
         vm.prank(TEST_NFT_ACCOUNT);
@@ -457,6 +460,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             0,
             0,
             "",
+            0,
             0,
             0,
             0
@@ -509,6 +513,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             "",
             0,
             0,
+            0,
             0
         );
 
@@ -530,6 +535,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             0,
             MIN_TICK_500,
             -MIN_TICK_500,
+            0,
             0,
             0,
             0,
@@ -585,6 +591,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             upper,
             0,
             0,
+            0,
             2000000,
             0,
             TEST_NFT_ACCOUNT,
@@ -617,7 +624,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
     }
 
     function testSwapAndMintWithETH() public {
-        uint64 protocolFeeX64 = 18446744073709552; // 0.1%
+        uint64 protocolFeeX64 = 9223372036854776; // 0.05%
+        uint64 gasFeeX64 = 9223372036854776; // 0.05%
         uint256 feeBalanceBefore = WETH_ERC20.balanceOf(TEST_FEE_ACCOUNT);
 
         uint256 feeTakerBalanceBefore = WETH_ERC20.balanceOf(TEST_OWNER_ACCOUNT);
@@ -632,6 +640,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             MIN_TICK_500,
             -MIN_TICK_500,
             protocolFeeX64,
+            gasFeeX64,
             0,
             0,
             1.1 ether,
@@ -664,7 +673,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
     }
 
     function testSwapAndIncreaseLiquidityAndCollectFees() external {
-        uint64 protocolFeeX64 = 18446744073709552; // 0.1%
+        uint64 protocolFeeX64 = 9223372036854776; // 0.05%
+        uint64 gasFeeX64 = 9223372036854776; // 0.05%
 
         uint256 feeTakerBalanceBefore = WETH_ERC20.balanceOf(TEST_OWNER_ACCOUNT);
         (,,,,,,, uint128 liquidityBefore,,,,) = NPM.positions(TEST_NFT);
@@ -689,7 +699,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             _get05ETHToUSDCSwapData(),
             0,
             0,
-            protocolFeeX64
+            protocolFeeX64,
+            gasFeeX64
         );
 
         vm.startPrank(TEST_NFT_ACCOUNT);
@@ -820,6 +831,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             0,
             0,
             0,
+            0,
             1 ether,
             TEST_NFT_ACCOUNT,
             block.timestamp,
@@ -838,7 +850,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
     }
 
     function testSwapAndMintWithETHAlgebra() external {
-        uint64 protocolFeeX64 = 18446744073709552; // 0.1%
+        uint64 protocolFeeX64 = 9223372036854776; // 0.05%
+        uint64 gasFeeX64 = 9223372036854776; // 0.05%
         uint256 feeBalanceBefore = WETH_ERC20.balanceOf(TEST_FEE_ACCOUNT);
 
         uint256 feeTakerBalanceBefore = WETH_ERC20.balanceOf(TEST_OWNER_ACCOUNT);
@@ -853,6 +866,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
             -887220,
             887220,
             protocolFeeX64,
+            gasFeeX64,
             0,
             0,
             1.1 ether,

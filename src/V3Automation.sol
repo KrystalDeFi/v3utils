@@ -227,6 +227,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         params.newTickLower,
                         params.newTickUpper,
                         0,
+                        0,
                         state.amount0,
                         state.amount1,
                         0,
@@ -256,6 +257,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         state.tickSpacing,
                         params.newTickLower,
                         params.newTickUpper,
+                        0,
                         0,
                         state.amount0,
                         state.amount1,
@@ -287,6 +289,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         state.tickSpacing,
                         params.newTickLower,
                         params.newTickUpper,
+                        0,
                         0,
                         state.amount0,
                         state.amount1,
@@ -373,6 +376,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         bytes(''),
                         params.amountAddMin0,
                         params.amountAddMin1,
+                        0,
                         0
                     ),
                     IERC20(state.token0),
@@ -399,6 +403,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         params.swapData0,
                         params.amountAddMin0,
                         params.amountAddMin1,
+                        0,
                         0
                     ),
                     IERC20(state.token0),
@@ -426,6 +431,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         bytes(''),
                         params.amountAddMin0,
                         params.amountAddMin1,
+                        0,
                         0
                     ),
                     IERC20(state.token0),
