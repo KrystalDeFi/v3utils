@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
-import '@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol';
-import './Common.sol';
+import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import "./Common.sol";
 
 /// @title v3Utils v1.0
 /// @notice Utility functions for Uniswap V3 positions
@@ -54,28 +54,28 @@ contract V3Utils is IERC721Receiver, Common {
         // protocol fees
         uint64 liquidityFeeX64;
         uint64 performanceFeeX64;
+        uint64 gasFeeX64;
     }
 
     /// @notice Execute instruction by pulling approved NFT instead of direct safeTransferFrom call from owner
     /// @param tokenId Token to process
     /// @param instructions Instructions to execute
-    function execute(
-        INonfungiblePositionManager _nfpm,
-        uint256 tokenId,
-        Instructions calldata instructions
-    ) external whenNotPaused {
+    function execute(INonfungiblePositionManager _nfpm, uint256 tokenId, Instructions calldata instructions)
+        external
+        whenNotPaused
+    {
         // must be approved beforehand
         _nfpm.safeTransferFrom(msg.sender, address(this), tokenId, abi.encode(instructions));
     }
 
     /// @notice ERC721 callback function. Called on safeTransferFrom and does manipulation as configured in encoded Instructions parameter.
     /// At the end the NFT (and any newly minted NFT) is returned to sender. The leftover tokens are sent to instructions.recipient.
-    function onERC721Received(
-        address,
-        address from,
-        uint256 tokenId,
-        bytes calldata data
-    ) external override whenNotPaused returns (bytes4) {
+    function onERC721Received(address, address from, uint256 tokenId, bytes calldata data)
+        external
+        override
+        whenNotPaused
+        returns (bytes4)
+    {
         // not allowed to send to itself
         if (from == address(this)) {
             revert SelfSend();
@@ -86,11 +86,7 @@ contract V3Utils is IERC721Receiver, Common {
 
         Instructions memory instructions = abi.decode(data, (Instructions));
 
-        Position memory position = _getPosition(
-            nfpm,
-            instructions.protocol,
-            tokenId
-        );
+        Position memory position = _getPosition(nfpm, instructions.protocol, tokenId);
 
         uint256 amount0;
         uint256 amount1;
@@ -118,8 +114,8 @@ contract V3Utils is IERC721Receiver, Common {
                     amount0 - feeAmount0, // only liquidity tokens, not including fees
                     amount1 - feeAmount1,
                     0,
-                    instructions.liquidityFeeX64,
-                    FeeType.LIQUIDITY_FEE,
+                    instructions.gasFeeX64,
+                    FeeType.GAS_FEE,
                     msg.sender,
                     tokenId,
                     instructions.recipient,
@@ -127,10 +123,18 @@ contract V3Utils is IERC721Receiver, Common {
                     position.token1,
                     address(0)
                 );
+                uint256 gasFeeAmount0;
+                uint256 gasFeeAmount1;
+                if (instructions.gasFeeX64 > 0) {
+                    (,,, gasFeeAmount0, gasFeeAmount1,) = _deductFees(_deductFeesParams, true);
+                }
+
+                _deductFeesParams.feeX64 = instructions.liquidityFeeX64;
+                _deductFeesParams.feeType = FeeType.LIQUIDITY_FEE;
                 uint256 liquidityFeeAmount0;
                 uint256 liquidityFeeAmount1;
                 if (instructions.liquidityFeeX64 > 0) {
-                    (, , , liquidityFeeAmount0, liquidityFeeAmount1, ) = _deductFees(_deductFeesParams, true);
+                    (,,, liquidityFeeAmount0, liquidityFeeAmount1,) = _deductFees(_deductFeesParams, true);
                 }
 
                 _deductFeesParams.amount0 = feeAmount0;
@@ -140,11 +144,11 @@ contract V3Utils is IERC721Receiver, Common {
                 uint256 performanceFeeAmount0;
                 uint256 performanceFeeAmount1;
                 if (instructions.performanceFeeX64 > 0) {
-                    (, , , performanceFeeAmount0, performanceFeeAmount1, ) = _deductFees(_deductFeesParams, true);
+                    (,,, performanceFeeAmount0, performanceFeeAmount1,) = _deductFees(_deductFeesParams, true);
                 }
 
-                amount0 -= liquidityFeeAmount0;
-                amount1 -= liquidityFeeAmount1;
+                amount0 -= (liquidityFeeAmount0 + gasFeeAmount0);
+                amount1 -= (liquidityFeeAmount1 + gasFeeAmount1);
 
                 // if compound fees, amount for next action is deducted from performance fees
                 // otherwise, we exclude collected fees from the amounts
@@ -194,7 +198,7 @@ contract V3Utils is IERC721Receiver, Common {
                         instructions.swapData1,
                         0,
                         0,
-                        '',
+                        "",
                         instructions.amountAddMin0,
                         instructions.amountAddMin1,
                         0
@@ -217,7 +221,7 @@ contract V3Utils is IERC721Receiver, Common {
                         IERC20(position.token0),
                         0,
                         0,
-                        '',
+                        "",
                         instructions.amountIn0,
                         instructions.amountOut0Min,
                         instructions.swapData0,
@@ -244,10 +248,10 @@ contract V3Utils is IERC721Receiver, Common {
                         IERC20(address(0)),
                         0,
                         0,
-                        '',
+                        "",
                         0,
                         0,
-                        '',
+                        "",
                         instructions.amountAddMin0,
                         instructions.amountAddMin1,
                         0
@@ -283,7 +287,7 @@ contract V3Utils is IERC721Receiver, Common {
                         instructions.swapData1,
                         0,
                         0,
-                        '',
+                        "",
                         instructions.amountAddMin0,
                         instructions.amountAddMin1,
                         position.deployer
@@ -310,7 +314,7 @@ contract V3Utils is IERC721Receiver, Common {
                         IERC20(position.token0),
                         0,
                         0,
-                        '',
+                        "",
                         instructions.amountIn0,
                         instructions.amountOut0Min,
                         instructions.swapData0,
@@ -341,10 +345,10 @@ contract V3Utils is IERC721Receiver, Common {
                         IERC20(address(0)),
                         0,
                         0,
-                        '',
+                        "",
                         0,
                         0,
-                        '',
+                        "",
                         instructions.amountAddMin0,
                         instructions.amountAddMin1,
                         position.deployer
@@ -366,10 +370,7 @@ contract V3Utils is IERC721Receiver, Common {
                 );
                 if (amountInDelta < amount0) {
                     _transferToken(
-                        instructions.recipient,
-                        IERC20(position.token0),
-                        amount0 - amountInDelta,
-                        instructions.unwrap
+                        instructions.recipient, IERC20(position.token0), amount0 - amountInDelta, instructions.unwrap
                     );
                 }
                 targetAmount += amountOutDelta;
@@ -386,10 +387,7 @@ contract V3Utils is IERC721Receiver, Common {
                 );
                 if (amountInDelta < amount1) {
                     _transferToken(
-                        instructions.recipient,
-                        IERC20(position.token1),
-                        amount1 - amountInDelta,
-                        instructions.unwrap
+                        instructions.recipient, IERC20(position.token1), amount1 - amountInDelta, instructions.unwrap
                     );
                 }
                 targetAmount += amountOutDelta;
@@ -400,10 +398,7 @@ contract V3Utils is IERC721Receiver, Common {
             // send complete target amount
             if (targetAmount != 0 && instructions.targetToken != address(0)) {
                 _transferToken(
-                    instructions.recipient,
-                    IERC20(instructions.targetToken),
-                    targetAmount,
-                    instructions.unwrap
+                    instructions.recipient, IERC20(instructions.targetToken), targetAmount, instructions.unwrap
                 );
             }
 
@@ -413,18 +408,19 @@ contract V3Utils is IERC721Receiver, Common {
         }
 
         // return token to owner (this line guarantees that token is returned to originating owner)
-        address(nfpm).call(
-            abi.encodeWithSelector(nfpm.transferFrom.selector, address(this), from, tokenId)
-        );
+        address(nfpm).call(abi.encodeWithSelector(nfpm.transferFrom.selector, address(this), from, tokenId));
 
         return IERC721Receiver.onERC721Received.selector;
     }
 
     /// @notice Does 1 or 2 swaps from swapSourceToken to token0 and token1 and adds as much as possible liquidity to a newly minted position.
     /// Newly minted NFT and leftover tokens are returned to recipient
-    function swapAndMint(
-        SwapAndMintParams calldata params
-    ) external payable whenNotPaused returns (SwapAndMintResult memory result) {
+    function swapAndMint(SwapAndMintParams calldata params)
+        external
+        payable
+        whenNotPaused
+        returns (SwapAndMintResult memory result)
+    {
         if (params.token0 == params.token1) {
             revert SameToken();
         }
@@ -432,19 +428,13 @@ contract V3Utils is IERC721Receiver, Common {
 
         // validate if amount2 is enough for action
         if (
-            params.swapSourceToken != params.token0 &&
-            params.swapSourceToken != params.token1 &&
-            params.amountIn0 + params.amountIn1 > params.amount2
+            params.swapSourceToken != params.token0 && params.swapSourceToken != params.token1
+                && params.amountIn0 + params.amountIn1 > params.amount2
         ) {
             revert AmountError();
         }
         _prepareSwap(
-            params.token0,
-            params.token1,
-            params.swapSourceToken,
-            params.amount0,
-            params.amount1,
-            params.amount2
+            params.token0, params.token1, params.swapSourceToken, params.amount0, params.amount1, params.amount2
         );
         SwapAndMintParams memory _params = params;
 
@@ -491,9 +481,12 @@ contract V3Utils is IERC721Receiver, Common {
 
     /// @notice Does 1 or 2 swaps from swapSourceToken to token0 and token1 and adds as much as possible liquidity to any existing position (no need to be position owner).
     // Sends any leftover tokens to recipient.
-    function swapAndIncreaseLiquidity(
-        SwapAndIncreaseLiquidityParams calldata params
-    ) external payable whenNotPaused returns (SwapAndIncreaseLiquidityResult memory result) {
+    function swapAndIncreaseLiquidity(SwapAndIncreaseLiquidityParams calldata params)
+        external
+        payable
+        whenNotPaused
+        returns (SwapAndIncreaseLiquidityResult memory result)
+    {
         require(_isWhitelistedNfpm(address(params.nfpm)));
         address owner = params.nfpm.ownerOf(params.tokenId);
         require(owner == msg.sender);
@@ -502,9 +495,8 @@ contract V3Utils is IERC721Receiver, Common {
 
         // validate if amount2 is enough for action
         if (
-            address(params.swapSourceToken) != position.token0 &&
-            address(params.swapSourceToken) != position.token1 &&
-            params.amountIn0 + params.amountIn1 > params.amount2
+            address(params.swapSourceToken) != position.token0 && address(params.swapSourceToken) != position.token1
+                && params.amountIn0 + params.amountIn1 > params.amount2
         ) {
             revert AmountError();
         }
@@ -519,7 +511,7 @@ contract V3Utils is IERC721Receiver, Common {
         );
         SwapAndIncreaseLiquidityParams memory _params = params;
         if (params.protocolFeeX64 > 0) {
-            (_params.amount0, _params.amount1, _params.amount2, , , ) = _deductFees(
+            (_params.amount0, _params.amount1, _params.amount2,,,) = _deductFees(
                 DeductFeesParams(
                     params.amount0,
                     params.amount1,
