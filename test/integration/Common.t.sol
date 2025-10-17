@@ -12,7 +12,7 @@ contract CommonTest is IntegrationTestBase {
         (address userAddress,) = makeAddrAndKey("random user 1");
         vm.prank(userAddress);
         vm.expectRevert();
-       address[] memory nfpms = new address[](1);
+        address[] memory nfpms = new address[](1);
         nfpms[0] = userAddress;
         v3utils.setWhitelistNfpm(nfpms, true);
     }

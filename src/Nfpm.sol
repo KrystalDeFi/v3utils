@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
-import { INonfungiblePositionManager as IUniV3NonfungiblePositionManager } from 'v3-periphery/interfaces/INonfungiblePositionManager.sol';
+import {INonfungiblePositionManager as IUniV3NonfungiblePositionManager} from
+    "v3-periphery/interfaces/INonfungiblePositionManager.sol";
 
 interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
     /// @notice mintParams for algebra v1
@@ -18,9 +19,10 @@ interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
         uint256 deadline;
     }
 
-    function mint(
-        AlgebraV1MintParams calldata params
-    ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+    function mint(AlgebraV1MintParams calldata params)
+        external
+        payable
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 
     /// @notice mintParams for aerodrome
     struct AerodromeMintParams {
@@ -38,9 +40,10 @@ interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
         uint160 sqrtPriceX96;
     }
 
-    function mint(
-        AerodromeMintParams calldata params
-    ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+    function mint(AerodromeMintParams calldata params)
+        external
+        payable
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 
     /// @notice mintParams for Ramses v3
     struct RamsesV3MintParams {
@@ -65,9 +68,10 @@ interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
     /// @return liquidity The amount of liquidity for this position
     /// @return amount0 The amount of token0
     /// @return amount1 The amount of token1
-    function mint(
-        RamsesV3MintParams calldata params
-    ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+    function mint(RamsesV3MintParams calldata params)
+        external
+        payable
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 
     /// @notice mintParams for algebra integral
     struct AlgebraIntegralMintParams {
@@ -84,9 +88,10 @@ interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
         uint256 deadline;
     }
 
-    function mint(
-        AlgebraIntegralMintParams calldata params
-    ) external payable returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+    function mint(AlgebraIntegralMintParams calldata params)
+        external
+        payable
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 }
 
 library Nfpm {
@@ -115,11 +120,10 @@ library Nfpm {
         address deployer;
     }
 
-    function mint(
-        INonfungiblePositionManager nfpm,
-        Protocol protocol,
-        MintParams memory params
-    ) external returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) {
+    function mint(INonfungiblePositionManager nfpm, Protocol protocol, MintParams memory params)
+        external
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
+    {
         if (protocol == Protocol.UNI_V3) {
             return mintUniv3(
                 nfpm,
@@ -206,14 +210,14 @@ library Nfpm {
                 )
             );
         } else {
-            revert('unsupported protocol');
+            revert("unsupported protocol");
         }
     }
 
-    function mintUniv3(
-        INonfungiblePositionManager nfpm,
-        INonfungiblePositionManager.MintParams memory params
-    ) internal returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1) {
+    function mintUniv3(INonfungiblePositionManager nfpm, INonfungiblePositionManager.MintParams memory params)
+        internal
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
+    {
         // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
         return nfpm.mint(params);
     }
@@ -256,18 +260,14 @@ library Nfpm {
         return nfpm.decreaseLiquidity(params);
     }
 
-    function collect(
-        INonfungiblePositionManager nfpm,
-        IUniV3NonfungiblePositionManager.CollectParams memory params
-    ) external returns (uint256 amount0, uint256 amount1) {
+    function collect(INonfungiblePositionManager nfpm, IUniV3NonfungiblePositionManager.CollectParams memory params)
+        external
+        returns (uint256 amount0, uint256 amount1)
+    {
         return nfpm.collect(params);
     }
 
-    function getPosition(
-        INonfungiblePositionManager nfpm,
-        Protocol protocol,
-        uint256 tokenId
-    )
+    function getPosition(INonfungiblePositionManager nfpm, Protocol protocol, uint256 tokenId)
         external
         returns (
             address token0,
@@ -280,38 +280,35 @@ library Nfpm {
             uint128 liquidity
         )
     {
-        (bool success, bytes memory data) = address(nfpm).call(abi.encodeWithSignature('positions(uint256)', tokenId));
+        (bool success, bytes memory data) = address(nfpm).call(abi.encodeWithSignature("positions(uint256)", tokenId));
         if (!success) {
-            revert('getPosition failed');
+            revert("getPosition failed");
         }
 
         if (protocol == Protocol.UNI_V3) {
-            (, , token0, token1, fee, tickLower, tickUpper, liquidity, , , , ) = abi.decode(
+            (,, token0, token1, fee, tickLower, tickUpper, liquidity,,,,) = abi.decode(
                 data,
                 (uint96, address, address, address, uint24, int24, int24, uint128, uint256, uint256, uint128, uint128)
             );
         } else if (protocol == Protocol.ALGEBRA_V1) {
-            (, , token0, token1, tickLower, tickUpper, liquidity, , , , ) = abi.decode(
-                data,
-                (uint96, address, address, address, int24, int24, uint128, uint256, uint256, uint128, uint128)
+            (,, token0, token1, tickLower, tickUpper, liquidity,,,,) = abi.decode(
+                data, (uint96, address, address, address, int24, int24, uint128, uint256, uint256, uint128, uint128)
             );
         } else if (protocol == Protocol.RAMSES_V3) {
-            (token0, token1, tickSpacing, tickLower, tickUpper, liquidity, , , , ) = abi.decode(
-                data,
-                (address, address, int24, int24, int24, uint128, uint256, uint256, uint128, uint128)
-            );
+            (token0, token1, tickSpacing, tickLower, tickUpper, liquidity,,,,) =
+                abi.decode(data, (address, address, int24, int24, int24, uint128, uint256, uint256, uint128, uint128));
         } else if (protocol == Protocol.AERODROME) {
-            (, , token0, token1, tickSpacing, tickLower, tickUpper, liquidity, , , , ) = abi.decode(
+            (,, token0, token1, tickSpacing, tickLower, tickUpper, liquidity,,,,) = abi.decode(
                 data,
                 (uint96, address, address, address, int24, int24, int24, uint128, uint256, uint256, uint128, uint128)
             );
         } else if (protocol == Protocol.ALGEBRA_INTEGRAL) {
-            (, , token0, token1, deployer, tickLower, tickUpper, liquidity, , , , ) = abi.decode(
+            (,, token0, token1, deployer, tickLower, tickUpper, liquidity,,,,) = abi.decode(
                 data,
                 (uint88, address, address, address, address, int24, int24, uint128, uint256, uint256, uint128, uint128)
             );
         } else {
-            revert('invalid protocol');
+            revert("invalid protocol");
         }
     }
 }

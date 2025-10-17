@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
-import './Common.sol';
-import './EIP712.sol';
+import "./Common.sol";
+import "./EIP712.sol";
 
 contract V3Automation is Pausable, Common, EIP712 {
     event CancelOrder(address user, bytes order, bytes signature);
 
-    bytes32 public constant OPERATOR_ROLE = keccak256('OPERATOR_ROLE');
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     mapping(bytes32 => bool) _cancelledOrder;
 
-    constructor() EIP712('V3AutomationOrder', '5.0') {}
+    constructor() EIP712("V3AutomationOrder", "5.0") {}
 
     function initialize(
         address _swapRouter,
@@ -128,7 +128,7 @@ contract V3Automation is Pausable, Common, EIP712 {
             uint256 gasFeeAmount0;
             uint256 gasFeeAmount1;
             if (params.gasFeeX64 > 0) {
-                (, , , gasFeeAmount0, gasFeeAmount1, ) = _deductFees(
+                (,,, gasFeeAmount0, gasFeeAmount1,) = _deductFees(
                     DeductFeesParams(
                         state.amount0 - state.feeAmount0, // only liquidity tokens, not including fees
                         state.amount1 - state.feeAmount1,
@@ -148,7 +148,7 @@ contract V3Automation is Pausable, Common, EIP712 {
             uint256 liquidityFeeAmount0;
             uint256 liquidityFeeAmount1;
             if (params.liquidityFeeX64 > 0) {
-                (, , , liquidityFeeAmount0, liquidityFeeAmount1, ) = _deductFees(
+                (,,, liquidityFeeAmount0, liquidityFeeAmount1,) = _deductFees(
                     DeductFeesParams(
                         state.amount0 - state.feeAmount0, // only liquidity tokens, not including fees
                         state.amount1 - state.feeAmount1,
@@ -168,7 +168,7 @@ contract V3Automation is Pausable, Common, EIP712 {
             uint256 performanceFeeAmount0;
             uint256 performanceFeeAmount1;
             if (params.performanceFeeX64 > 0) {
-                (, , , performanceFeeAmount0, performanceFeeAmount1, ) = _deductFees(
+                (,,, performanceFeeAmount0, performanceFeeAmount1,) = _deductFees(
                     DeductFeesParams(
                         state.feeAmount0, // only fees
                         state.feeAmount1, // only fees
@@ -239,7 +239,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         params.swapData1,
                         0,
                         0,
-                        bytes(''),
+                        bytes(""),
                         params.amountAddMin0,
                         params.amountAddMin1,
                         state.deployer
@@ -267,7 +267,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         IERC20(state.token0),
                         0,
                         0,
-                        bytes(''),
+                        bytes(""),
                         params.amountIn0,
                         params.amountOut0Min,
                         params.swapData0,
@@ -299,10 +299,10 @@ contract V3Automation is Pausable, Common, EIP712 {
                         IERC20(address(0)),
                         0,
                         0,
-                        bytes(''),
+                        bytes(""),
                         0,
                         0,
-                        bytes(''),
+                        bytes(""),
                         params.amountAddMin0,
                         params.amountAddMin1,
                         state.deployer
@@ -311,12 +311,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                 );
             }
             emit ChangeRange(
-                address(params.nfpm),
-                params.tokenId,
-                result.tokenId,
-                result.liquidity,
-                result.added0,
-                result.added1
+                address(params.nfpm), params.tokenId, result.tokenId, result.liquidity, result.added0, result.added1
             );
         } else if (params.action == Action.AUTO_EXIT || params.action == Action.AUTO_HARVEST) {
             uint256 targetAmount;
@@ -373,7 +368,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         params.swapData1,
                         0,
                         0,
-                        bytes(''),
+                        bytes(""),
                         params.amountAddMin0,
                         params.amountAddMin1,
                         0,
@@ -397,7 +392,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                         IERC20(state.token0),
                         0,
                         0,
-                        bytes(''),
+                        bytes(""),
                         params.amountIn0,
                         params.amountOut0Min,
                         params.swapData0,
@@ -425,10 +420,10 @@ contract V3Automation is Pausable, Common, EIP712 {
                         IERC20(address(0)),
                         0,
                         0,
-                        bytes(''),
+                        bytes(""),
                         0,
                         0,
-                        bytes(''),
+                        bytes(""),
                         params.amountAddMin0,
                         params.amountAddMin1,
                         0,
@@ -448,11 +443,10 @@ contract V3Automation is Pausable, Common, EIP712 {
         );
     }
 
-    function _validateOrder(
-        bytes memory abiEncodedUserOrder,
-        bytes memory orderSignature,
-        address actor
-    ) internal view {
+    function _validateOrder(bytes memory abiEncodedUserOrder, bytes memory orderSignature, address actor)
+        internal
+        view
+    {
         address userAddress = _recover(abiEncodedUserOrder, orderSignature);
         require(userAddress == actor);
         require(!_cancelledOrder[keccak256(orderSignature)]);
