@@ -7,7 +7,13 @@ import "../src/V3Automation.sol";
 // NOTE: This script is use when deploy transaction is made but initialization is not
 
 interface IV3Initializer {
-    function initialize(address _swapRouter, address admin, address withdrawer, address feeTaker, address[] calldata nfpms) external;
+    function initialize(
+        address _swapRouter,
+        address admin,
+        address withdrawer,
+        address feeTaker,
+        address[] calldata nfpms
+    ) external;
     function grantRole(bytes32 role, address account) external;
     function OPERATOR_ROLE() external view returns (bytes32);
     function ADMIN_ROLE() external view returns (bytes32);
