@@ -367,7 +367,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         assertEq(countAfter, countBefore); // nft returned
     }
 
-    function testRevertEmptySwapAndIncreaseLiquidity() external {
+    function testRevertIfEmptySwapAndIncreaseLiquidity() external {
         V3Utils.SwapAndIncreaseLiquidityParams memory params = Common.SwapAndIncreaseLiquidityParams(
             Nfpm.Protocol.UNI_V3,
             NPM,
@@ -391,6 +391,8 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         );
 
         vm.prank(TEST_NFT_ACCOUNT);
+
+        // Expect the transaction to revert
         vm.expectRevert();
         v3utils.swapAndIncreaseLiquidity(params);
     }
@@ -523,7 +525,7 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         v3utils.swapAndIncreaseLiquidity(params);
     }
 
-    function testRevertEmptySwapAndMint() external {
+    function testRevertIfEmptySwapAndMint() external {
         V3Utils.SwapAndMintParams memory params = Common.SwapAndMintParams(
             Nfpm.Protocol.UNI_V3,
             NPM,

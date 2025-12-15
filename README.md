@@ -55,6 +55,13 @@ Run script below to get verify contract script
 ```
 make verify-v3utils
 ```
+
+# Init Contract
+
+Run script below to get init contract script
+```
+make init-v3utils
+```
 # Notes
 If StructHash is updated or deployed to a new chain, update its address in `foundry.toml`
 ```toml
