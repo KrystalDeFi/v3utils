@@ -2,12 +2,45 @@
 pragma solidity ^0.8.0;
 
 import "v3-periphery/interfaces/external/IWETH9.sol";
+import {INonfungiblePositionManager as IUniV3NonfungiblePositionManager} from
+    "v3-periphery/interfaces/INonfungiblePositionManager.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "v3-core/libraries/FullMath.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
-import "./Nfpm.sol";
+
+interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
+    /// @notice mintParams for algebra v1
+    struct AlgebraV1MintParams {
+        address token0;
+        address token1;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        address recipient;
+        uint256 deadline;
+    }
+
+    /// @notice Creates a new position wrapped in a NFT
+    /// @dev Call this when the pool does exist and is initialized. Note that if the pool is created but not initialized
+    /// a method does not exist, i.e. the pool is assumed to be initialized.
+    /// @param params The params necessary to mint a position, encoded as `MintParams` in calldata
+    /// @return tokenId The ID of the token that represents the minted position
+    /// @return liquidity The amount of liquidity for this position
+    /// @return amount0 The amount of token0
+    /// @return amount1 The amount of token1
+    function mint(AlgebraV1MintParams calldata params)
+        external
+        payable
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+
+    /// @return Returns the address of WNativeToken
+    function WNativeToken() external view returns (address);
+}
 
 abstract contract Common is AccessControl, Pausable {
     using Address for address;
@@ -31,6 +64,7 @@ abstract contract Common is AccessControl, Pausable {
     error TooMuchFee();
     error GetPositionFailed();
     error NoFees();
+    error SwapFailed(bytes swapData);
 
     struct DeductFeesEventData {
         address token0;
@@ -382,6 +416,36 @@ abstract contract Common is AccessControl, Pausable {
         );
     }
 
+    function _mintUniv3(INonfungiblePositionManager nfpm, INonfungiblePositionManager.MintParams memory params)
+        internal
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
+    {
+        // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
+        return nfpm.mint(params);
+    }
+
+    function _mintAlgebraV1(INonfungiblePositionManager nfpm, INonfungiblePositionManager.MintParams memory params)
+        internal
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
+    {
+        INonfungiblePositionManager.AlgebraV1MintParams memory mintParams = INonfungiblePositionManager
+            .AlgebraV1MintParams(
+            params.token0,
+            params.token1,
+            params.tickLower,
+            params.tickUpper,
+            params.amount0Desired,
+            params.amount1Desired,
+            params.amount0Min,
+            params.amount1Min,
+            address(this), // is sent to real recipient aftwards
+            params.deadline
+        );
+
+        // mint is done to address(this) because it is not a safemint and safeTransferFrom needs to be done manually afterwards
+        return nfpm.mint(mintParams);
+    }
+
     struct SwapAndIncreaseLiquidityResult {
         uint128 liquidity;
         uint256 added0;
@@ -437,7 +501,7 @@ abstract contract Common is AccessControl, Pausable {
         );
         _returnLeftoverTokens(
             ReturnLeftoverTokensParams(
-                params.recipient, token0, token1, total0, total1, result.added0, result.added1, unwrap
+                weth, params.recipient, token0, token1, total0, total1, result.added0, result.added1, unwrap
             )
         );
     }
@@ -537,7 +601,7 @@ abstract contract Common is AccessControl, Pausable {
             // execute swap
             (bool success,) = swapRouter.call(swapData);
             if (!success) {
-                revert("swap failed!");
+                revert SwapFailed(swapData);
             }
 
             // reset approval
@@ -625,20 +689,24 @@ abstract contract Common is AccessControl, Pausable {
         return IWETH9(WETH);
     }
 
-    function _getPosition(INonfungiblePositionManager nfpm, Nfpm.Protocol protocol, uint256 tokenId)
+    function _getPosition(INonfungiblePositionManager nfpm, Protocol protocol, uint256 tokenId)
         internal
         returns (Position memory position)
     {
-        (
-            position.token0,
-            position.token1,
-            position.deployer,
-            position.fee,
-            position.tickSpacing,
-            position.tickLower,
-            position.tickUpper,
-            position.liquidity
-        ) = Nfpm.getPosition(nfpm, protocol, tokenId);
+        (bool success, bytes memory data) = address(nfpm).call(abi.encodeWithSignature("positions(uint256)", tokenId));
+        if (!success) {
+            revert GetPositionFailed();
+        }
+        if (protocol == Protocol.UNI_V3) {
+            (,, token0, token1, fee, tickLower, tickUpper, liquidity,,,,) = abi.decode(
+                data,
+                (uint96, address, address, address, uint24, int24, int24, uint128, uint256, uint256, uint128, uint128)
+            );
+        } else if (protocol == Protocol.ALGEBRA_V1) {
+            (,, token0, token1, tickLower, tickUpper, liquidity,,,,) = abi.decode(
+                data, (uint96, address, address, address, int24, int24, uint128, uint256, uint256, uint128, uint128)
+            );
+        }
     }
 
     /**
@@ -747,7 +815,7 @@ abstract contract Common is AccessControl, Pausable {
             // some token does not allow approve(0) so we skip check for this case
             return;
         }
-        require(success && (returnData.length == 0 || abi.decode(returnData, (bool))), "SA");
+        require(success && (returnData.length == 0 || abi.decode(returnData, (bool))), "SafeERC20: approve failed");
     }
 
     function _isWhitelistedNfpm(address nfpm) internal view returns (bool) {
