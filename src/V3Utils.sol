@@ -372,7 +372,8 @@ contract V3Utils is IERC721Receiver, Common {
                     IERC20(instructions.targetToken),
                     amount0,
                     instructions.amountOut0Min,
-                    instructions.swapData0
+                    instructions.swapData0,
+                    0
                 );
                 if (amountInDelta < amount0) {
                     _transferToken(
@@ -389,7 +390,8 @@ contract V3Utils is IERC721Receiver, Common {
                     IERC20(instructions.targetToken),
                     amount1,
                     instructions.amountOut1Min,
-                    instructions.swapData1
+                    instructions.swapData1,
+                    1
                 );
                 if (amountInDelta < amount1) {
                     _transferToken(
