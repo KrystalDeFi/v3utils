@@ -11,9 +11,9 @@ contract CommonTest is IntegrationTestBase {
     function testSetWhitelistNfpmInvalidRole() external {
         (address userAddress,) = makeAddrAndKey("random user 1");
         vm.prank(userAddress);
-        vm.expectRevert();
         address[] memory nfpms = new address[](1);
         nfpms[0] = userAddress;
+        vm.expectRevert();
         v3utils.setWhitelistNfpm(nfpms, true);
     }
 

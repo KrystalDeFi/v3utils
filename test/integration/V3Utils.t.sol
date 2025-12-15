@@ -391,8 +391,6 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         );
 
         vm.prank(TEST_NFT_ACCOUNT);
-
-        // Expect the transaction to revert
         vm.expectRevert();
         v3utils.swapAndIncreaseLiquidity(params);
     }
