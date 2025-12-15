@@ -64,7 +64,7 @@ abstract contract Common is AccessControl, Pausable {
     error TooMuchFee();
     error GetPositionFailed();
     error NoFees();
-    error SwapFailed(bytes swapData);
+    error SwapFailed(bytes swapData, uint256 index);
 
     struct DeductFeesEventData {
         address token0;
@@ -535,7 +535,7 @@ abstract contract Common is AccessControl, Pausable {
                 revert AmountError();
             }
             (uint256 amountInDelta, uint256 amountOutDelta) =
-                _swap(params.token0, params.token1, params.amountIn1, params.amountOut1Min, params.swapData1);
+                _swap(params.token0, params.token1, params.amountIn1, params.amountOut1Min, params.swapData1, 1);
             total0 = params.amount0 - amountInDelta;
             total1 = params.amount1 + amountOutDelta;
         } else if (params.swapSourceToken == params.token1) {
@@ -543,14 +543,14 @@ abstract contract Common is AccessControl, Pausable {
                 revert AmountError();
             }
             (uint256 amountInDelta, uint256 amountOutDelta) =
-                _swap(params.token1, params.token0, params.amountIn0, params.amountOut0Min, params.swapData0);
+                _swap(params.token1, params.token0, params.amountIn0, params.amountOut0Min, params.swapData0, 0);
             total1 = params.amount1 - amountInDelta;
             total0 = params.amount0 + amountOutDelta;
         } else if (address(params.swapSourceToken) != address(0)) {
             (uint256 amountInDelta0, uint256 amountOutDelta0) =
-                _swap(params.swapSourceToken, params.token0, params.amountIn0, params.amountOut0Min, params.swapData0);
+                _swap(params.swapSourceToken, params.token0, params.amountIn0, params.amountOut0Min, params.swapData0, 0);
             (uint256 amountInDelta1, uint256 amountOutDelta1) =
-                _swap(params.swapSourceToken, params.token1, params.amountIn1, params.amountOut1Min, params.swapData1);
+                _swap(params.swapSourceToken, params.token1, params.amountIn1, params.amountOut1Min, params.swapData1, 1);
             total0 = params.amount0 + amountOutDelta0;
             total1 = params.amount1 + amountOutDelta1;
 
@@ -607,10 +607,14 @@ abstract contract Common is AccessControl, Pausable {
     // general swap function which uses external router with off-chain calculated swap instructions
     // does slippage check with amountOutMin param
     // returns token amounts deltas after swap
-    function _swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 amountOutMin, bytes memory swapData)
-        internal
-        returns (uint256 amountInDelta, uint256 amountOutDelta)
-    {
+    function _swap(
+        IERC20 tokenIn,
+        IERC20 tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        bytes memory swapData,
+        uint256 index
+    ) internal returns (uint256 amountInDelta, uint256 amountOutDelta) {
         if (amountIn != 0 && swapData.length != 0 && address(tokenOut) != address(0)) {
             uint256 balanceInBefore = tokenIn.balanceOf(address(this));
             uint256 balanceOutBefore = tokenOut.balanceOf(address(this));
@@ -620,7 +624,7 @@ abstract contract Common is AccessControl, Pausable {
             // execute swap
             (bool success,) = swapRouter.call(swapData);
             if (!success) {
-                revert SwapFailed(swapData);
+                revert SwapFailed(swapData, index);
             }
 
             // reset approval
