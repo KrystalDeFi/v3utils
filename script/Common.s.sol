@@ -11,7 +11,6 @@ abstract contract CommonScript is Script {
 
     address krystalRouter;
     address admin;
-    address withdrawer;
     bytes32 salt;
     address factory = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
@@ -31,47 +30,26 @@ abstract contract CommonScript is Script {
         return toHexString(uint256(uint160(addr)), 20);
     }
 
-    function getV3UtilsDeploymentAddress() internal view returns(address) {
-        return Create2.computeAddress(
-            salt,
-            keccak256(
-                abi.encodePacked(
-                    type(V3Utils).creationCode
-                )
-            ),
-            factory
-        );
+    function getV3UtilsDeploymentAddress() internal view returns (address) {
+        return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(V3Utils).creationCode)), factory);
     }
 
-    function getV3AutomationDeploymentAddress() internal view returns(address) {
-        return Create2.computeAddress(
-            salt,
-            keccak256(
-                abi.encodePacked(
-                    type(V3Automation).creationCode
-                )
-            ),
-            factory
-        );
+    function getV3AutomationDeploymentAddress() internal view returns (address) {
+        return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(V3Automation).creationCode)), factory);
     }
 
-    function getStructHashDeploymentAddress() internal view returns(address) {
-        return Create2.computeAddress(
-            salt,
-            keccak256(
-                abi.encodePacked(
-                    type(StructHash).creationCode
-                )
-            ),
-            factory
-        );
+    function getStructHashDeploymentAddress() internal view returns (address) {
+        return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(StructHash).creationCode)), factory);
+    }
+
+    function getNfpmDeploymentAddress() internal view returns (address) {
+        return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(Nfpm).creationCode)), factory);
     }
 
     constructor() {
         salt = keccak256(bytes(vm.envString("SALT_SEED")));
         krystalRouter = vm.envAddress("KRYSTAL_ROUTER");
         admin = vm.envAddress("WITHDRAWER"); // for now, admin is the withdrawer
-        withdrawer = vm.envAddress("WITHDRAWER");
     }
 
     // To ignore from test coverage

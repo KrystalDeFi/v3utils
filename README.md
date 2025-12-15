@@ -35,6 +35,7 @@ forge test --gas-report
 ```
 
 # Remember to check smart wallet address
+Note: If you need to deploy StructHash contract, you need to update its latest address in `foundry.toml`
 # Deploy
 ```
 source .env
