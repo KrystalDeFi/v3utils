@@ -321,7 +321,8 @@ contract V3Automation is Pausable, Common, EIP712 {
                     IERC20(params.targetToken),
                     state.amount0,
                     params.amountOut0Min,
-                    params.swapData0
+                    params.swapData0,
+                    0
                 );
                 if (amountInDelta < state.amount0) {
                     _transferToken(positionOwner, IERC20(state.token0), state.amount0 - amountInDelta, false);
@@ -336,7 +337,8 @@ contract V3Automation is Pausable, Common, EIP712 {
                     IERC20(params.targetToken),
                     state.amount1,
                     params.amountOut1Min,
-                    params.swapData1
+                    params.swapData1,
+                    1
                 );
                 if (amountInDelta < state.amount1) {
                     _transferToken(positionOwner, IERC20(state.token1), state.amount1 - amountInDelta, false);
