@@ -15,7 +15,8 @@ contract VerifyV3UtilsScript is CommonScript {
                 Strings.toHexString(deploymentAddress),
                 " src/V3Utils.sol:V3Utils",
                 " --libraries src/Nfpm.sol:Nfpm:",
-                vm.envString("NFPM_LIB_ADDRESS")
+                vm.envString("NFPM_LIB_ADDRESS"),
+                " --rpc-url ", vm.envString("RPC_URL")
             )
         );
     }

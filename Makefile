@@ -4,7 +4,7 @@ ifneq (,$(wildcard ./.env))
 endif
 
 DEPLOY_CMD = forge script script/$(CONTRACT).s.sol:$(CONTRACT)Script --rpc-url $(RPC_URL) --broadcast
-VERIFY_CMD = forge script script/Verify.s.sol:Verify$(CONTRACT)Script
+VERIFY_CMD = forge script script/Verify.s.sol:Verify$(CONTRACT)Script | awk 'END{print}' | bash
 
 build: src/V3Utils.sol clean
 	forge build
@@ -44,5 +44,5 @@ init-v3utils:
 init-v3automation:
 init-%: %
 	forge script script/Init.s.sol:$(CONTRACT)InitializeScript --rpc-url $(RPC_URL) --broadcast --legacy --gas-price 0
-grant-role:
-	forge script script/GrantRole.s.sol:V3AutomationGrantRoleScript --rpc-url $(RPC_URL) --broadcast
+grant-role: v3automation
+	forge script script/GrantRole.s.sol:V3AutomationGrantRoleScript --rpc-url $(RPC_URL) --broadcast --legacy --gas-price 0
