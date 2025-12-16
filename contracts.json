@@ -1,0 +1,8 @@
+{
+  "8453": {
+    "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
+    "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
+    "v3Automation": "0xfd0477d9b542facc4154e775f4936d11139686f4",
+    "v3Utils": "0xb0717286fca964cb7315a95a003e1c3f0313b6de"
+  }
+}

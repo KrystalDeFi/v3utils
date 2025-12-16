@@ -3,6 +3,8 @@ pragma solidity ^0.8.0;
 
 import "./Common.s.sol";
 import "../src/V3Automation.sol";
+import "../src/V3Utils.sol";
+import "@openzeppelin/contracts/utils/Create2.sol";
 
 // NOTE: This script is use when deploy transaction is made but initialization is not
 
@@ -22,7 +24,7 @@ interface IV3Initializer {
 contract V3AutomationGrantRoleScript is CommonScript {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deploymentAddress = 0x6a07438804d0d8e557607D864b7903CB948fabAF;
+        address deploymentAddress = getV3AutomationDeploymentAddress();
         // 0x84C4c905Fc18313f0A8e20855a067b7caaca5922;
 
         vm.startBroadcast(deployerPrivateKey);
