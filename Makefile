@@ -46,3 +46,15 @@ init-%: %
 	forge script script/Init.s.sol:$(CONTRACT)InitializeScript --rpc-url $(RPC_URL) --broadcast --legacy --gas-price 0
 grant-role: v3automation
 	forge script script/GrantRole.s.sol:V3AutomationGrantRoleScript --rpc-url $(RPC_URL) --broadcast --legacy --gas-price 0
+deploy-everything:
+	make deploy-nfpm
+	make deploy-structhash
+	make deploy-v3utils
+	make deploy-v3automation
+	make verify-nfpm
+	make verify-structhash
+	make verify-v3utils
+	make verify-v3automation
+	make init-v3utils
+	make init-v3automation
+	make grant-role
