@@ -5,7 +5,7 @@ libs = ['lib']
 optimizer = true
 optimizer_runs = 200
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
-solc-version = "0.8.15"
+solc = "0.8.15"
 
 [profile.v3utilslinker]
 src = 'src'
@@ -14,10 +14,10 @@ libs = ['lib']
 optimizer = true
 optimizer_runs = 200
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
-solc-version = "0.8.15"
+solc = "0.8.15"
 
 libraries = [
-    'src/Nfpm.sol:Nfpm:0xf2C5C597cfB0bd73F8042F2c3021Dd9FB5297f0E'
+    'src/Nfpm.sol:Nfpm:0x5306493CCF612bc8564B30B0CDB7ff8fbd719a95'
 ]
 
 [profile.linker]
@@ -27,9 +27,9 @@ libs = ['lib']
 optimizer = true
 optimizer_runs = 200
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
-solc-version = "0.8.15"
+solc = "0.8.15"
 
 libraries = [
-    'src/StructHash.sol:StructHash:0x11F5813BC3A0E4d97B24878f6bD2601dF9A682eD',
-    'src/Nfpm.sol:Nfpm:0xf2C5C597cfB0bd73F8042F2c3021Dd9FB5297f0E'
+    'src/StructHash.sol:StructHash:0xB486F83280F19cf652843b8F79e52572D589Bbf9',
+    'src/Nfpm.sol:Nfpm:0x5306493CCF612bc8564B30B0CDB7ff8fbd719a95'
 ]
