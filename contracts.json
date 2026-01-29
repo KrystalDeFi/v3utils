@@ -14,8 +14,8 @@
   "137": {
     "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
     "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
-    "v3Automation": "0xfd0477d9b542facc4154e775f4936d11139686f4",
-    "v3Utils": "0xb0717286fca964cb7315a95a003e1c3f0313b6de"
+    "v3Automation": "0xe25f3388771c94bd3f975523b01ee261efb6f7e8",
+    "v3Utils": "0x56fc6ac4af3007c4ae36f239cb0f8028ade73519"
   },
   "8453": {
     "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
