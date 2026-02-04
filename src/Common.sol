@@ -427,9 +427,9 @@ abstract contract Common is AccessControl, Pausable {
             unwrap
         );
         INonfungiblePositionManager.IncreaseLiquidityParams memory increaseLiquidityParams =
-        IUniV3NonfungiblePositionManager.IncreaseLiquidityParams(
-            params.tokenId, total0, total1, params.amountAddMin0, params.amountAddMin1, params.deadline
-        );
+            IUniV3NonfungiblePositionManager.IncreaseLiquidityParams(
+                params.tokenId, total0, total1, params.amountAddMin0, params.amountAddMin1, params.deadline
+            );
 
         (result.liquidity, result.added0, result.added1) = params.nfpm.increaseLiquidity(increaseLiquidityParams);
 
@@ -465,10 +465,12 @@ abstract contract Common is AccessControl, Pausable {
             total1 = params.amount1 - amountInDelta;
             total0 = params.amount0 + amountOutDelta;
         } else if (address(params.swapSourceToken) != address(0)) {
-            (uint256 amountInDelta0, uint256 amountOutDelta0) =
-                _swap(params.swapSourceToken, params.token0, params.amountIn0, params.amountOut0Min, params.swapData0, 0);
-            (uint256 amountInDelta1, uint256 amountOutDelta1) =
-                _swap(params.swapSourceToken, params.token1, params.amountIn1, params.amountOut1Min, params.swapData1, 1);
+            (uint256 amountInDelta0, uint256 amountOutDelta0) = _swap(
+                params.swapSourceToken, params.token0, params.amountIn0, params.amountOut0Min, params.swapData0, 0
+            );
+            (uint256 amountInDelta1, uint256 amountOutDelta1) = _swap(
+                params.swapSourceToken, params.token1, params.amountIn1, params.amountOut1Min, params.swapData1, 1
+            );
             total0 = params.amount0 + amountOutDelta0;
             total1 = params.amount1 + amountOutDelta1;
 
