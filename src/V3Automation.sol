@@ -440,9 +440,7 @@ contract V3Automation is Pausable, Common, EIP712 {
             revert NotSupportedAction();
         }
 
-        address(params.nfpm).call(
-            abi.encodeWithSelector(params.nfpm.transferFrom.selector, address(this), positionOwner, params.tokenId)
-        );
+        params.nfpm.transferFrom(address(this), positionOwner, params.tokenId);
     }
 
     function _validateOrder(bytes memory abiEncodedUserOrder, bytes memory orderSignature, address actor)

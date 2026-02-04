@@ -1,4 +1,10 @@
 {
+  "1": {
+    "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
+    "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
+    "v3Automation": "0xe25f3388771c94bd3f975523b01ee261efb6f7e8",
+    "v3Utils": "0x56fc6ac4af3007c4ae36f239cb0f8028ade73519"
+  },
   "10": {
     "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
     "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
