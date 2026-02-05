@@ -17,7 +17,19 @@
     "v3Automation": "0xf3dcf08ddce36387f176b9cfc56561287cfca6c6",
     "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
   },
+  "130": {
+    "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
+    "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
+    "v3Automation": "0xf3dcf08ddce36387f176b9cfc56561287cfca6c6",
+    "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
+  },
   "137": {
+    "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
+    "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
+    "v3Automation": "0xf3dcf08ddce36387f176b9cfc56561287cfca6c6",
+    "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
+  },
+  "999": {
     "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
     "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
     "v3Automation": "0xf3dcf08ddce36387f176b9cfc56561287cfca6c6",
@@ -30,6 +42,12 @@
     "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
   },
   "42161": {
+    "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
+    "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
+    "v3Automation": "0xf3dcf08ddce36387f176b9cfc56561287cfca6c6",
+    "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
+  },
+  "43114": {
     "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
     "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
     "v3Automation": "0xf3dcf08ddce36387f176b9cfc56561287cfca6c6",
