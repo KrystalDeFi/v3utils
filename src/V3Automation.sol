@@ -555,14 +555,31 @@ contract V3Automation is Pausable, Common, EIP712 {
         require(p.protocolFeeX64 == uint64(act.protocolFeeX64));
         require(uint64(block.timestamp) <= uint64(order.signatureTime) + act.deadlineWindowSeconds);
 
-        // Pull source token from the signer (the user). User must have approved this
-        // contract for at least p.sourceAmount of act.sourceToken.
+        // Pull source token from the signer (the user). For WETH source, msg.value
+        // may be supplied and gets wrapped here so the user can pay with native ETH
+        // and skip the prior wrap step. Any pre-existing WETH balance is also pulled
+        // up to (p.sourceAmount - msg.value).
         {
-            uint256 balanceBefore = IERC20(act.sourceToken).balanceOf(address(this));
-            SafeERC20.safeTransferFrom(IERC20(act.sourceToken), p.signer, address(this), p.sourceAmount);
-            uint256 balanceAfter = IERC20(act.sourceToken).balanceOf(address(this));
-            if (balanceAfter - balanceBefore != p.sourceAmount) {
-                revert TransferError(); // fee-on-transfer tokens not supported
+            address weth = WETH;
+            uint256 needed = p.sourceAmount;
+            if (act.sourceToken == weth && msg.value > 0) {
+                if (msg.value > needed) {
+                    revert TooMuchEtherSent();
+                }
+                IWETH9(weth).deposit{value: msg.value}();
+                needed -= msg.value;
+            } else if (msg.value != 0) {
+                // ETH attached but source isn't WETH — refuse rather than silently
+                // leaving ETH stuck.
+                revert NoEtherToken();
+            }
+            if (needed > 0) {
+                uint256 balanceBefore = IERC20(act.sourceToken).balanceOf(address(this));
+                SafeERC20.safeTransferFrom(IERC20(act.sourceToken), p.signer, address(this), needed);
+                uint256 balanceAfter = IERC20(act.sourceToken).balanceOf(address(this));
+                if (balanceAfter - balanceBefore != needed) {
+                    revert TransferError(); // fee-on-transfer tokens not supported
+                }
             }
         }
 
