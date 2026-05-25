@@ -7,10 +7,32 @@ import "./EIP712.sol";
 contract V3Automation is Pausable, Common, EIP712 {
     event CancelOrder(address user, bytes order, bytes signature);
 
+    // Auto-enter events (v6.0)
+    event AutoEnterExecuted(
+        bytes32 indexed orderHash,
+        address indexed signer,
+        uint256 indexed mintedTokenId,
+        address nfpm,
+        address sourceToken,
+        uint256 sourceAmount,
+        uint128 liquidity,
+        uint256 amount0,
+        uint256 amount1
+    );
+
+    event FollowUpExecuted(
+        bytes32 indexed parentOrderHash, uint8 followUpIndex, uint256 indexed mintedTokenId, Action indexed action
+    );
+
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     mapping(bytes32 => bool) _cancelledOrder;
 
-    constructor() EIP712("V3AutomationOrder", "5.0") {}
+    // Auto-enter storage (v6.0). Keyed by the EIP-712 typed-data digest of the parent
+    // AUTO_ENTER order. Populated by executeAutoEnter, consumed by executeFollowUp.
+    mapping(bytes32 => uint256) internal _mintedTokenIds;
+    mapping(bytes32 => address) internal _mintedSigner;
+
+    constructor() EIP712("V3AutomationOrder", "6.0") {}
 
     function initialize(
         address _swapRouter,
@@ -27,7 +49,42 @@ contract V3Automation is Pausable, Common, EIP712 {
         AUTO_ADJUST,
         AUTO_EXIT,
         AUTO_COMPOUND,
-        AUTO_HARVEST
+        AUTO_HARVEST,
+        AUTO_ENTER
+    }
+
+    struct ExecuteAutoEnterParams {
+        Nfpm.Protocol protocol;
+        INonfungiblePositionManager nfpm;
+        address signer; // expected signer; cross-checked against recovered address
+        address sourceToken;
+        uint256 sourceAmount; // actual amount to pull this execution; <= order.action.sourceAmount
+        int24 tickLower;
+        int24 tickUpper;
+        uint24 fee;
+        int24 tickSpacing;
+        address poolDeployer;
+        uint256 amountIn0;
+        uint256 amountOut0Min;
+        bytes swapData0;
+        uint256 amountIn1;
+        uint256 amountOut1Min;
+        bytes swapData1;
+        uint256 amountAddMin0;
+        uint256 amountAddMin1;
+        uint256 deadline;
+        uint64 gasFeeX64;
+        uint64 protocolFeeX64;
+        bytes abiEncodedUserOrder;
+        bytes orderSignature;
+    }
+
+    struct ExecuteFollowUpParams {
+        bytes parentOrder;
+        bytes parentSignature;
+        uint8 followUpIndex;
+        bytes followUpConfigEncoded;
+        ExecuteParams execute;
     }
 
     struct ExecuteState {
@@ -460,6 +517,203 @@ contract V3Automation is Pausable, Common, EIP712 {
 
     function isOrderCancelled(bytes calldata orderSignature) external view returns (bool) {
         return _cancelledOrder[keccak256(orderSignature)];
+    }
+
+    /// @notice Mints a new position when an auto-enter order's condition fires. Pulls source
+    /// tokens from the signer, swaps + mints inside this contract, and transfers the NFT to
+    /// the signer. Operator-gated.
+    function executeAutoEnter(ExecuteAutoEnterParams calldata p)
+        external
+        payable
+        onlyRole(OPERATOR_ROLE)
+        whenNotPaused
+    {
+        require(_isWhitelistedNfpm(address(p.nfpm)));
+
+        // Recover and cross-check signer
+        address recovered = _recover(p.abiEncodedUserOrder, p.orderSignature);
+        require(recovered == p.signer);
+
+        // Cancellation check (signature-based to match cancelOrder()'s key)
+        require(!_cancelledOrder[keccak256(p.orderSignature)]);
+
+        // Decode order + cross-check params against signed values
+        StructHash.Order memory order = abi.decode(p.abiEncodedUserOrder, (StructHash.Order));
+        require(keccak256(bytes(order.orderType)) == keccak256(bytes("ORDER_TYPE_AUTO_ENTER")));
+
+        StructHash.AutoEnterConfig memory cfg = order.config.autoEnterConfig;
+        StructHash.AutoEnterAction memory act = cfg.action;
+        StructHash.PoolSelection memory ps = cfg.poolSelection;
+
+        // v1: only static pool selection is permitted on-chain
+        require(ps.mode == 0);
+        require(act.sourceToken == p.sourceToken);
+        require(p.sourceAmount > 0 && p.sourceAmount <= act.sourceAmount);
+        require(p.tickLower == act.tickLower && p.tickUpper == act.tickUpper);
+        require(p.fee == ps.fee && p.tickSpacing == ps.tickSpacing);
+        require(p.gasFeeX64 == uint64(act.gasFeeX64));
+        require(p.protocolFeeX64 == uint64(act.protocolFeeX64));
+        require(uint64(block.timestamp) <= uint64(order.signatureTime) + act.deadlineWindowSeconds);
+
+        // Pull source token from the signer (the user). User must have approved this
+        // contract for at least p.sourceAmount of act.sourceToken.
+        {
+            uint256 balanceBefore = IERC20(act.sourceToken).balanceOf(address(this));
+            SafeERC20.safeTransferFrom(IERC20(act.sourceToken), p.signer, address(this), p.sourceAmount);
+            uint256 balanceAfter = IERC20(act.sourceToken).balanceOf(address(this));
+            if (balanceAfter - balanceBefore != p.sourceAmount) {
+                revert TransferError(); // fee-on-transfer tokens not supported
+            }
+        }
+
+        // Deduct fees from the source amount. The remaining amount funds the swap+mint.
+        uint256 effectiveAmount = _deductAutoEnterFees(p, ps, act);
+
+        SwapAndMintResult memory result =
+            _swapAndMint(_buildAutoEnterSwapMintParams(p, ps, effectiveAmount), false);
+
+        // Persist for follow-up authorization. Key = EIP-712 typed-data digest of the
+        // parent order (chain + contract + content).
+        bytes32 orderDigest = _hashTypedDataV4(StructHash._hash(p.abiEncodedUserOrder));
+        _mintedTokenIds[orderDigest] = result.tokenId;
+        _mintedSigner[orderDigest] = p.signer;
+
+        emit AutoEnterExecuted(
+            orderDigest,
+            p.signer,
+            result.tokenId,
+            address(p.nfpm),
+            p.sourceToken,
+            p.sourceAmount,
+            result.liquidity,
+            result.added0,
+            result.added1
+        );
+    }
+
+    function _deductAutoEnterFees(
+        ExecuteAutoEnterParams calldata p,
+        StructHash.PoolSelection memory ps,
+        StructHash.AutoEnterAction memory act
+    ) internal returns (uint256 effectiveAmount) {
+        effectiveAmount = p.sourceAmount;
+        if (p.protocolFeeX64 > 0) {
+            (,,,,, uint256 feeAmount2) = _deductFees(
+                DeductFeesParams(
+                    0,
+                    0,
+                    effectiveAmount,
+                    p.protocolFeeX64,
+                    FeeType.LIQUIDITY_FEE,
+                    address(p.nfpm),
+                    0,
+                    p.signer,
+                    ps.token0,
+                    ps.token1,
+                    act.sourceToken
+                ),
+                true
+            );
+            effectiveAmount -= feeAmount2;
+        }
+        if (p.gasFeeX64 > 0) {
+            (,,,,, uint256 feeAmount2) = _deductFees(
+                DeductFeesParams(
+                    0,
+                    0,
+                    effectiveAmount,
+                    p.gasFeeX64,
+                    FeeType.GAS_FEE,
+                    address(p.nfpm),
+                    0,
+                    p.signer,
+                    ps.token0,
+                    ps.token1,
+                    act.sourceToken
+                ),
+                true
+            );
+            effectiveAmount -= feeAmount2;
+        }
+    }
+
+    function _buildAutoEnterSwapMintParams(
+        ExecuteAutoEnterParams calldata p,
+        StructHash.PoolSelection memory ps,
+        uint256 effectiveAmount
+    ) internal pure returns (SwapAndMintParams memory) {
+        return SwapAndMintParams({
+            protocol: p.protocol,
+            nfpm: p.nfpm,
+            token0: IERC20(ps.token0),
+            token1: IERC20(ps.token1),
+            fee: p.fee,
+            tickSpacing: p.tickSpacing,
+            tickLower: p.tickLower,
+            tickUpper: p.tickUpper,
+            protocolFeeX64: 0, // already deducted above
+            gasFeeX64: 0, // already deducted above
+            amount0: 0,
+            amount1: 0,
+            amount2: effectiveAmount,
+            recipient: p.signer,
+            deadline: p.deadline,
+            swapSourceToken: IERC20(p.sourceToken),
+            amountIn0: p.amountIn0,
+            amountOut0Min: p.amountOut0Min,
+            swapData0: p.swapData0,
+            amountIn1: p.amountIn1,
+            amountOut1Min: p.amountOut1Min,
+            swapData1: p.swapData1,
+            amountAddMin0: p.amountAddMin0,
+            amountAddMin1: p.amountAddMin1,
+            poolDeployer: p.poolDeployer
+        });
+    }
+
+    /// @notice Executes a pre-authorized follow-up automation against the NFT minted by a
+    /// prior executeAutoEnter call. Authorization derives from the parent order's signature
+    /// — no separate per-follow-up signature is required.
+    function executeFollowUp(ExecuteFollowUpParams calldata p)
+        external
+        payable
+        onlyRole(OPERATOR_ROLE)
+        whenNotPaused
+    {
+        require(_isWhitelistedNfpm(address(p.execute.nfpm)));
+
+        bytes32 parentDigest = _hashTypedDataV4(StructHash._hash(p.parentOrder));
+        require(!_cancelledOrder[keccak256(p.parentSignature)]);
+
+        uint256 mintedTokenId = _mintedTokenIds[parentDigest];
+        require(mintedTokenId != 0);
+        require(p.execute.tokenId == mintedTokenId);
+
+        address parentSigner = _recover(p.parentOrder, p.parentSignature);
+        require(parentSigner == _mintedSigner[parentDigest]);
+
+        StructHash.Order memory parent = abi.decode(p.parentOrder, (StructHash.Order));
+        StructHash.FollowUpTemplate[] memory followUps = parent.config.autoEnterConfig.followUps;
+        require(p.followUpIndex < followUps.length);
+        StructHash.FollowUpTemplate memory tmpl = followUps[p.followUpIndex];
+
+        require(keccak256(p.followUpConfigEncoded) == tmpl.templateConfigHash);
+        require(_followUpActionMatch(tmpl.followUpType, p.execute.action));
+
+        // NFT must still be at the parent signer for _execute's transferFrom to succeed.
+        require(p.execute.nfpm.ownerOf(p.execute.tokenId) == parentSigner);
+
+        _execute(p.execute, parentSigner);
+
+        emit FollowUpExecuted(parentDigest, p.followUpIndex, mintedTokenId, p.execute.action);
+    }
+
+    function _followUpActionMatch(uint8 followUpType, Action action) internal pure returns (bool) {
+        if (followUpType == 1) return action == Action.AUTO_COMPOUND;
+        if (followUpType == 2) return action == Action.AUTO_ADJUST;
+        if (followUpType == 3) return action == Action.AUTO_EXIT;
+        if (followUpType == 4) return action == Action.AUTO_HARVEST;
+        return false;
     }
 
     receive() external payable {}

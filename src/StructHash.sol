@@ -452,32 +452,127 @@ library StructHash {
         );
     }
 
-    // keccak256(
-    //     "OrderConfig(RebalanceConfig rebalanceConfig,RangeOrderConfig rangeOrderConfig,AutoCompoundConfig
-    // autoCompoundConfig,AutoExitConfig autoExitConfig,AutoHarvestConfig autoHarvestConfig)AutoCompoundAction(int256
-    // maxGasProportionX64,int256 poolSlippageX64,int256 swapSlippageX64)AutoCompoundCondition(string
-    // type,FeeBasedCondition feeBasedCondition,TimeBasedCondition
-    // timeBasedCondition)AutoCompoundConfig(AutoCompoundCondition condition,AutoCompoundAction
-    // action)AutoExitAction(int256 maxGasProportionX64,int256 swapSlippageX64,int256 liquiditySlippageX64,address
-    // tokenOutAddress)AutoExitConfig(Condition condition,AutoExitAction action)AutoHarvestConfig(string
-    // type,AutoCompoundCondition condition,AutoExitAction action)Condition(string type,int160 sqrtPriceX96,int64
-    // timeBuffer,TickOffsetCondition tickOffsetCondition,PriceOffsetCondition priceOffsetCondition,TokenRatioCondition
-    // tokenRatioCondition)FeeBasedCondition(int256 minFeeEarnedUsdX64)PriceOffsetAction(uint32 baseToken,int160
-    // lowerOffsetSqrtPriceX96,int160 upperOffsetSqrtPriceX96)PriceOffsetCondition(uint32 baseToken,uint256
-    // gteOffsetSqrtPriceX96,uint256 lteOffsetSqrtPriceX96)RangeOrderAction(int256 maxGasProportionX64,int256
-    // swapSlippageX64,int256 withdrawSlippageX64)RangeOrderCondition(bool zeroToOne,int32 gteTickAbsolute,int32
-    // lteTickAbsolute)RangeOrderConfig(RangeOrderCondition condition,RangeOrderAction action)RebalanceAction(int256
-    // maxGasProportionX64,int256 swapSlippageX64,int256 liquiditySlippageX64,string gteType,TickOffsetAction
-    // tickOffsetGteAction,PriceOffsetAction priceOffsetGteAction,TokenRatioAction tokenRatioGteAction,string
-    // lteType,TickOffsetAction tickOffsetLteAction,PriceOffsetAction priceOffsetLteAction,TokenRatioAction
-    // tokenRatioLteAction)RebalanceAutoCompound(RebalanceAutoCompoundAction action)RebalanceAutoCompoundAction(int256
-    // maxGasProportionX64,int256 feeToPrincipalRatioThresholdX64)RebalanceConfig(Condition
-    // rebalanceCondition,RebalanceAction rebalanceAction,RebalanceAutoCompound autoCompound,bool
-    // recurring)TickOffsetAction(uint32 tickLowerOffset,uint32 tickUpperOffset)TickOffsetCondition(uint32
-    // gteTickOffset,uint32 lteTickOffset)TimeBasedCondition(int256 intervalInSecond)TokenRatioAction(uint32
-    // tickWidth,int256 token0RatioX64)TokenRatioCondition(int256 lteToken0RatioX64,int256 gteToken0RatioX64)"
-    // );
-    bytes32 constant OrderConfig_TYPEHASH = 0x5322f0e7ebcd51c97ec5a90f6f72372d960ae06fa718a29977e0970c6cba70aa;
+    // ============================================================
+    // Auto-Enter (v6.0) — new struct types
+    // ============================================================
+
+    bytes32 constant PoolSelection_TYPEHASH = keccak256(
+        "PoolSelection(uint8 mode,uint8 protocol,address token0,address token1,uint24 fee,int24 tickSpacing,address hooks,address poolManagerOrNfpm,bytes32 filterHash)"
+    );
+
+    struct PoolSelection {
+        uint8 mode;
+        uint8 protocol;
+        address token0;
+        address token1;
+        uint24 fee;
+        int24 tickSpacing;
+        address hooks;
+        address poolManagerOrNfpm;
+        bytes32 filterHash;
+    }
+
+    function _hash(PoolSelection memory obj) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                PoolSelection_TYPEHASH,
+                obj.mode,
+                obj.protocol,
+                obj.token0,
+                obj.token1,
+                obj.fee,
+                obj.tickSpacing,
+                obj.hooks,
+                obj.poolManagerOrNfpm,
+                obj.filterHash
+            )
+        );
+    }
+
+    bytes32 constant AutoEnterAction_TYPEHASH = keccak256(
+        "AutoEnterAction(address sourceToken,uint256 sourceAmount,int24 tickLower,int24 tickUpper,int256 swapSlippageX64,int256 liquiditySlippageX64,int256 maxGasProportionX64,uint64 gasFeeX64,uint64 protocolFeeX64,uint64 deadlineWindowSeconds)"
+    );
+
+    struct AutoEnterAction {
+        address sourceToken;
+        uint256 sourceAmount;
+        int24 tickLower;
+        int24 tickUpper;
+        int256 swapSlippageX64;
+        int256 liquiditySlippageX64;
+        int256 maxGasProportionX64;
+        uint64 gasFeeX64;
+        uint64 protocolFeeX64;
+        uint64 deadlineWindowSeconds;
+    }
+
+    function _hash(AutoEnterAction memory obj) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                AutoEnterAction_TYPEHASH,
+                obj.sourceToken,
+                obj.sourceAmount,
+                obj.tickLower,
+                obj.tickUpper,
+                obj.swapSlippageX64,
+                obj.liquiditySlippageX64,
+                obj.maxGasProportionX64,
+                obj.gasFeeX64,
+                obj.protocolFeeX64,
+                obj.deadlineWindowSeconds
+            )
+        );
+    }
+
+    bytes32 constant FollowUpTemplate_TYPEHASH =
+        keccak256("FollowUpTemplate(uint8 followUpType,bytes32 templateConfigHash)");
+
+    struct FollowUpTemplate {
+        uint8 followUpType;
+        bytes32 templateConfigHash;
+    }
+
+    function _hash(FollowUpTemplate memory obj) internal pure returns (bytes32) {
+        return keccak256(abi.encode(FollowUpTemplate_TYPEHASH, obj.followUpType, obj.templateConfigHash));
+    }
+
+    // AutoEnterConfig nests Condition + PoolSelection + AutoEnterAction + FollowUpTemplate[].
+    // The type string lists the primary type first, then all transitively referenced
+    // struct types in alphabetical order (Condition pulls in PriceOffset/TickOffset/TokenRatio).
+    bytes32 constant AutoEnterConfig_TYPEHASH = keccak256(
+        "AutoEnterConfig(Condition condition,PoolSelection poolSelection,AutoEnterAction action,FollowUpTemplate[] followUps)AutoEnterAction(address sourceToken,uint256 sourceAmount,int24 tickLower,int24 tickUpper,int256 swapSlippageX64,int256 liquiditySlippageX64,int256 maxGasProportionX64,uint64 gasFeeX64,uint64 protocolFeeX64,uint64 deadlineWindowSeconds)Condition(string type,int160 sqrtPriceX96,int64 timeBuffer,TickOffsetCondition tickOffsetCondition,PriceOffsetCondition priceOffsetCondition,TokenRatioCondition tokenRatioCondition)FollowUpTemplate(uint8 followUpType,bytes32 templateConfigHash)PoolSelection(uint8 mode,uint8 protocol,address token0,address token1,uint24 fee,int24 tickSpacing,address hooks,address poolManagerOrNfpm,bytes32 filterHash)PriceOffsetCondition(uint32 baseToken,uint256 gteOffsetSqrtPriceX96,uint256 lteOffsetSqrtPriceX96)TickOffsetCondition(uint32 gteTickOffset,uint32 lteTickOffset)TokenRatioCondition(int256 lteToken0RatioX64,int256 gteToken0RatioX64)"
+    );
+
+    struct AutoEnterConfig {
+        Condition condition;
+        PoolSelection poolSelection;
+        AutoEnterAction action;
+        FollowUpTemplate[] followUps;
+    }
+
+    function _hash(AutoEnterConfig memory obj) internal pure returns (bytes32) {
+        bytes32[] memory followUpHashes = new bytes32[](obj.followUps.length);
+        for (uint256 i = 0; i < obj.followUps.length; i++) {
+            followUpHashes[i] = _hash(obj.followUps[i]);
+        }
+        return keccak256(
+            abi.encode(
+                AutoEnterConfig_TYPEHASH,
+                _hash(obj.condition),
+                _hash(obj.poolSelection),
+                _hash(obj.action),
+                keccak256(abi.encodePacked(followUpHashes))
+            )
+        );
+    }
+
+    // ============================================================
+    // OrderConfig + Order — updated for v6.0 to include AutoEnterConfig
+    // ============================================================
+
+    bytes32 constant OrderConfig_TYPEHASH = keccak256(
+        "OrderConfig(RebalanceConfig rebalanceConfig,RangeOrderConfig rangeOrderConfig,AutoCompoundConfig autoCompoundConfig,AutoExitConfig autoExitConfig,AutoHarvestConfig autoHarvestConfig,AutoEnterConfig autoEnterConfig)AutoCompoundAction(int256 maxGasProportionX64,int256 poolSlippageX64,int256 swapSlippageX64)AutoCompoundCondition(string type,FeeBasedCondition feeBasedCondition,TimeBasedCondition timeBasedCondition)AutoCompoundConfig(AutoCompoundCondition condition,AutoCompoundAction action)AutoEnterAction(address sourceToken,uint256 sourceAmount,int24 tickLower,int24 tickUpper,int256 swapSlippageX64,int256 liquiditySlippageX64,int256 maxGasProportionX64,uint64 gasFeeX64,uint64 protocolFeeX64,uint64 deadlineWindowSeconds)AutoEnterConfig(Condition condition,PoolSelection poolSelection,AutoEnterAction action,FollowUpTemplate[] followUps)AutoExitAction(int256 maxGasProportionX64,int256 swapSlippageX64,int256 liquiditySlippageX64,address tokenOutAddress)AutoExitConfig(Condition condition,AutoExitAction action)AutoHarvestConfig(string type,AutoCompoundCondition condition,AutoExitAction action)Condition(string type,int160 sqrtPriceX96,int64 timeBuffer,TickOffsetCondition tickOffsetCondition,PriceOffsetCondition priceOffsetCondition,TokenRatioCondition tokenRatioCondition)FeeBasedCondition(int256 minFeeEarnedUsdX64)FollowUpTemplate(uint8 followUpType,bytes32 templateConfigHash)PoolSelection(uint8 mode,uint8 protocol,address token0,address token1,uint24 fee,int24 tickSpacing,address hooks,address poolManagerOrNfpm,bytes32 filterHash)PriceOffsetAction(uint32 baseToken,int160 lowerOffsetSqrtPriceX96,int160 upperOffsetSqrtPriceX96)PriceOffsetCondition(uint32 baseToken,uint256 gteOffsetSqrtPriceX96,uint256 lteOffsetSqrtPriceX96)RangeOrderAction(int256 maxGasProportionX64,int256 swapSlippageX64,int256 withdrawSlippageX64)RangeOrderCondition(bool zeroToOne,int32 gteTickAbsolute,int32 lteTickAbsolute)RangeOrderConfig(RangeOrderCondition condition,RangeOrderAction action)RebalanceAction(int256 maxGasProportionX64,int256 swapSlippageX64,int256 liquiditySlippageX64,string gteType,TickOffsetAction tickOffsetGteAction,PriceOffsetAction priceOffsetGteAction,TokenRatioAction tokenRatioGteAction,string lteType,TickOffsetAction tickOffsetLteAction,PriceOffsetAction priceOffsetLteAction,TokenRatioAction tokenRatioLteAction)RebalanceAutoCompound(RebalanceAutoCompoundAction action)RebalanceAutoCompoundAction(int256 maxGasProportionX64,int256 feeToPrincipalRatioThresholdX64)RebalanceConfig(Condition rebalanceCondition,RebalanceAction rebalanceAction,RebalanceAutoCompound autoCompound,bool recurring)TickOffsetAction(uint32 tickLowerOffset,uint32 tickUpperOffset)TickOffsetCondition(uint32 gteTickOffset,uint32 lteTickOffset)TimeBasedCondition(int256 intervalInSecond)TokenRatioAction(uint32 tickWidth,int256 token0RatioX64)TokenRatioCondition(int256 lteToken0RatioX64,int256 gteToken0RatioX64)"
+    );
 
     struct OrderConfig {
         RebalanceConfig rebalanceConfig;
@@ -485,6 +580,7 @@ library StructHash {
         AutoCompoundConfig autoCompoundConfig;
         AutoExitConfig autoExitConfig;
         AutoHarvestConfig autoHarvestConfig;
+        AutoEnterConfig autoEnterConfig;
     }
 
     function _hash(OrderConfig memory obj) internal pure returns (bytes32) {
@@ -495,38 +591,15 @@ library StructHash {
                 _hash(obj.rangeOrderConfig),
                 _hash(obj.autoCompoundConfig),
                 _hash(obj.autoExitConfig),
-                _hash(obj.autoHarvestConfig)
+                _hash(obj.autoHarvestConfig),
+                _hash(obj.autoEnterConfig)
             )
         );
     }
 
-    // keccak256(
-    //     "Order(int64 chainId,address nfpmAddress,uint256 tokenId,string orderType,OrderConfig config,int64
-    // signatureTime)AutoCompoundAction(int256 maxGasProportionX64,int256 poolSlippageX64,int256
-    // swapSlippageX64)AutoCompoundCondition(string type,FeeBasedCondition feeBasedCondition,TimeBasedCondition
-    // timeBasedCondition)AutoCompoundConfig(AutoCompoundCondition condition,AutoCompoundAction
-    // action)AutoExitAction(int256 maxGasProportionX64,int256 swapSlippageX64,int256 liquiditySlippageX64,address
-    // tokenOutAddress)AutoExitConfig(Condition condition,AutoExitAction action)AutoHarvestConfig(string
-    // type,AutoCompoundCondition condition,AutoExitAction action)Condition(string type,int160 sqrtPriceX96,int64
-    // timeBuffer,TickOffsetCondition tickOffsetCondition,PriceOffsetCondition priceOffsetCondition,TokenRatioCondition
-    // tokenRatioCondition)FeeBasedCondition(int256 minFeeEarnedUsdX64)OrderConfig(RebalanceConfig
-    // rebalanceConfig,RangeOrderConfig rangeOrderConfig,AutoCompoundConfig autoCompoundConfig,AutoExitConfig
-    // autoExitConfig,AutoHarvestConfig autoHarvestConfig)PriceOffsetAction(uint32 baseToken,int160
-    // lowerOffsetSqrtPriceX96,int160 upperOffsetSqrtPriceX96)PriceOffsetCondition(uint32 baseToken,uint256
-    // gteOffsetSqrtPriceX96,uint256 lteOffsetSqrtPriceX96)RangeOrderAction(int256 maxGasProportionX64,int256
-    // swapSlippageX64,int256 withdrawSlippageX64)RangeOrderCondition(bool zeroToOne,int32 gteTickAbsolute,int32
-    // lteTickAbsolute)RangeOrderConfig(RangeOrderCondition condition,RangeOrderAction action)RebalanceAction(int256
-    // maxGasProportionX64,int256 swapSlippageX64,int256 liquiditySlippageX64,string gteType,TickOffsetAction
-    // tickOffsetGteAction,PriceOffsetAction priceOffsetGteAction,TokenRatioAction tokenRatioGteAction,string
-    // lteType,TickOffsetAction tickOffsetLteAction,PriceOffsetAction priceOffsetLteAction,TokenRatioAction
-    // tokenRatioLteAction)RebalanceAutoCompound(RebalanceAutoCompoundAction action)RebalanceAutoCompoundAction(int256
-    // maxGasProportionX64,int256 feeToPrincipalRatioThresholdX64)RebalanceConfig(Condition
-    // rebalanceCondition,RebalanceAction rebalanceAction,RebalanceAutoCompound autoCompound,bool
-    // recurring)TickOffsetAction(uint32 tickLowerOffset,uint32 tickUpperOffset)TickOffsetCondition(uint32
-    // gteTickOffset,uint32 lteTickOffset)TimeBasedCondition(int256 intervalInSecond)TokenRatioAction(uint32
-    // tickWidth,int256 token0RatioX64)TokenRatioCondition(int256 lteToken0RatioX64,int256 gteToken0RatioX64)"
-    // );
-    bytes32 constant Order_TYPEHASH = 0xc656dbf48bfae7cacbfe27eb73a9a0e9d54fb5d4a0e0a56c9302f5216de62109;
+    bytes32 constant Order_TYPEHASH = keccak256(
+        "Order(int64 chainId,address nfpmAddress,uint256 tokenId,string orderType,OrderConfig config,int64 signatureTime)AutoCompoundAction(int256 maxGasProportionX64,int256 poolSlippageX64,int256 swapSlippageX64)AutoCompoundCondition(string type,FeeBasedCondition feeBasedCondition,TimeBasedCondition timeBasedCondition)AutoCompoundConfig(AutoCompoundCondition condition,AutoCompoundAction action)AutoEnterAction(address sourceToken,uint256 sourceAmount,int24 tickLower,int24 tickUpper,int256 swapSlippageX64,int256 liquiditySlippageX64,int256 maxGasProportionX64,uint64 gasFeeX64,uint64 protocolFeeX64,uint64 deadlineWindowSeconds)AutoEnterConfig(Condition condition,PoolSelection poolSelection,AutoEnterAction action,FollowUpTemplate[] followUps)AutoExitAction(int256 maxGasProportionX64,int256 swapSlippageX64,int256 liquiditySlippageX64,address tokenOutAddress)AutoExitConfig(Condition condition,AutoExitAction action)AutoHarvestConfig(string type,AutoCompoundCondition condition,AutoExitAction action)Condition(string type,int160 sqrtPriceX96,int64 timeBuffer,TickOffsetCondition tickOffsetCondition,PriceOffsetCondition priceOffsetCondition,TokenRatioCondition tokenRatioCondition)FeeBasedCondition(int256 minFeeEarnedUsdX64)FollowUpTemplate(uint8 followUpType,bytes32 templateConfigHash)OrderConfig(RebalanceConfig rebalanceConfig,RangeOrderConfig rangeOrderConfig,AutoCompoundConfig autoCompoundConfig,AutoExitConfig autoExitConfig,AutoHarvestConfig autoHarvestConfig,AutoEnterConfig autoEnterConfig)PoolSelection(uint8 mode,uint8 protocol,address token0,address token1,uint24 fee,int24 tickSpacing,address hooks,address poolManagerOrNfpm,bytes32 filterHash)PriceOffsetAction(uint32 baseToken,int160 lowerOffsetSqrtPriceX96,int160 upperOffsetSqrtPriceX96)PriceOffsetCondition(uint32 baseToken,uint256 gteOffsetSqrtPriceX96,uint256 lteOffsetSqrtPriceX96)RangeOrderAction(int256 maxGasProportionX64,int256 swapSlippageX64,int256 withdrawSlippageX64)RangeOrderCondition(bool zeroToOne,int32 gteTickAbsolute,int32 lteTickAbsolute)RangeOrderConfig(RangeOrderCondition condition,RangeOrderAction action)RebalanceAction(int256 maxGasProportionX64,int256 swapSlippageX64,int256 liquiditySlippageX64,string gteType,TickOffsetAction tickOffsetGteAction,PriceOffsetAction priceOffsetGteAction,TokenRatioAction tokenRatioGteAction,string lteType,TickOffsetAction tickOffsetLteAction,PriceOffsetAction priceOffsetLteAction,TokenRatioAction tokenRatioLteAction)RebalanceAutoCompound(RebalanceAutoCompoundAction action)RebalanceAutoCompoundAction(int256 maxGasProportionX64,int256 feeToPrincipalRatioThresholdX64)RebalanceConfig(Condition rebalanceCondition,RebalanceAction rebalanceAction,RebalanceAutoCompound autoCompound,bool recurring)TickOffsetAction(uint32 tickLowerOffset,uint32 tickUpperOffset)TickOffsetCondition(uint32 gteTickOffset,uint32 lteTickOffset)TimeBasedCondition(int256 intervalInSecond)TokenRatioAction(uint32 tickWidth,int256 token0RatioX64)TokenRatioCondition(int256 lteToken0RatioX64,int256 gteToken0RatioX64)"
+    );
 
     struct Order {
         int64 chainId;
