@@ -726,10 +726,17 @@ contract V3Automation is Pausable, Common, EIP712 {
     }
 
     function _followUpActionMatch(uint8 followUpType, Action action) internal pure returns (bool) {
-        if (followUpType == 1) return action == Action.AUTO_COMPOUND;
-        if (followUpType == 2) return action == Action.AUTO_ADJUST;
-        if (followUpType == 3) return action == Action.AUTO_EXIT;
-        if (followUpType == 4) return action == Action.AUTO_HARVEST;
+        // Tagged switch — followUpType integers are stable cross-repo (see plan
+        // §2.6's FollowUpType enum). Do not renumber without a version bump.
+        if (followUpType == 1) {
+            return action == Action.AUTO_COMPOUND;
+        } else if (followUpType == 2) {
+            return action == Action.AUTO_ADJUST;
+        } else if (followUpType == 3) {
+            return action == Action.AUTO_EXIT;
+        } else if (followUpType == 4) {
+            return action == Action.AUTO_HARVEST;
+        }
         return false;
     }
 
