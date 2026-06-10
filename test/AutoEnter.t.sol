@@ -191,6 +191,17 @@ contract AutoEnterTest is Test {
         automation.executeAutoEnter(_execParams(encoded, sig));
     }
 
+    // The caller-supplied p.protocol selects the Nfpm.mint branch; it must equal
+    // the signed UNI_V3 selection, not just ps.protocol being forced.
+    function test_AutoEnter_RejectsMintProtocolMismatch() public {
+        _initExec();
+        (bytes memory encoded, bytes memory sig) = _signOrder(_sampleOrder());
+        V3Automation.ExecuteAutoEnterParams memory p = _execParams(encoded, sig);
+        p.protocol = Nfpm.Protocol.AERODROME; // != UNI_V3
+        vm.expectRevert();
+        automation.executeAutoEnter(p);
+    }
+
     // ===== TODO (Foundry tests deferred — listed in plan §4.5) =====
     // test_AutoEnter_Wallet_V3_HappyPath
     // test_AutoEnter_Wallet_V3_WithSingleZap

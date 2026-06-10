@@ -565,6 +565,10 @@ contract V3Automation is Pausable, Common, EIP712 {
         require(order.nfpmAddress == address(p.nfpm));
         require(ps.poolManagerOrNfpm == address(p.nfpm));
         require(ps.protocol == 0); // 0 == UNI_V3 in the signed cross-repo vocabulary; v4/pancake belong on V4UtilsRouter
+        // Bind the mint branch too: _buildAutoEnterSwapMintParams forwards
+        // p.protocol into _swapAndMint, which selects the Nfpm.mint variant.
+        // The signed selection is UNI_V3, so the execution protocol must be too.
+        require(p.protocol == Nfpm.Protocol.UNI_V3);
         require(ps.hooks == address(0)); // v3 pools have no hooks
         require(ps.filterHash == bytes32(0)); // static mode carries no dynamic filter
         require(act.sourceToken == p.sourceToken);

@@ -41,6 +41,14 @@ contract V3AutomationV6Script is CommonScript {
         v3automation.initialize(swapRouter, admin, feeTaker, weth, nfpms);
         console.log("V3Automation v6 initialized");
 
+        // initialize() only grants WITHDRAWER_ROLE to admin. Grant it to the
+        // configured withdrawer too so a separate withdrawer can actually
+        // withdraw (otherwise the WITHDRAWER env var is a no-op and misleading).
+        if (withdrawer != admin) {
+            v3automation.grantRole(v3automation.WITHDRAWER_ROLE(), withdrawer);
+            console.log("WITHDRAWER_ROLE granted to:", withdrawer);
+        }
+
         bytes32 operatorRole = v3automation.OPERATOR_ROLE();
         for (uint256 i = 0; i < operators.length; i++) {
             v3automation.grantRole(operatorRole, operators[i]);
