@@ -109,6 +109,88 @@ contract AutoEnterTest is Test {
         assertTrue(h1 != h2, "follow-ups must be part of the signed digest");
     }
 
+    // ===== executeAutoEnter binding gates (fork-free; revert before the token pull) =====
+
+    address internal constant NFPM = address(0xC36442b4a4522E871399CD717aBDD847Ab11FE88);
+
+    // Fresh harness with NFPM whitelisted; admin (this test) receives OPERATOR_ROLE.
+    // Construct under a broadcast so tx.origin (which Common records as the sole
+    // allowed initializer) is this test contract.
+    function _initExec() internal {
+        address[] memory nfpms = new address[](1);
+        nfpms[0] = NFPM;
+        vm.startBroadcast(address(this));
+        automation = new V3AutomationHarness();
+        automation.initialize(address(0x1), address(this), address(this), address(0x2), nfpms);
+        vm.stopBroadcast();
+    }
+
+    function _signOrder(StructHash.Order memory order)
+        internal
+        view
+        returns (bytes memory encoded, bytes memory sig)
+    {
+        encoded = abi.encode(order);
+        bytes32 digest = automation.hashTypedDataV4(StructHash._hash(encoded));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(SIGNER_KEY, digest);
+        sig = abi.encodePacked(r, s, v);
+    }
+
+    // Minimal params that pass the whitelisted-NFPM + signer gates; binding
+    // failures below revert before any token transfer is attempted.
+    function _execParams(bytes memory encoded, bytes memory sig)
+        internal
+        view
+        returns (V3Automation.ExecuteAutoEnterParams memory)
+    {
+        return V3Automation.ExecuteAutoEnterParams({
+            protocol: Nfpm.Protocol.UNI_V3,
+            nfpm: INonfungiblePositionManager(NFPM),
+            signer: vm.addr(SIGNER_KEY),
+            sourceToken: address(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48),
+            sourceAmount: 1000e6,
+            tickLower: -202000,
+            tickUpper: -197000,
+            fee: 500,
+            tickSpacing: 10,
+            poolDeployer: address(0),
+            amountIn0: 0,
+            amountOut0Min: 0,
+            swapData0: bytes(""),
+            amountIn1: 0,
+            amountOut1Min: 0,
+            swapData1: bytes(""),
+            amountAddMin0: 0,
+            amountAddMin1: 0,
+            deadline: block.timestamp + 1 days,
+            gasFeeX64: 0,
+            protocolFeeX64: 0,
+            abiEncodedUserOrder: encoded,
+            orderSignature: sig
+        });
+    }
+
+    // A v4/pancake pool selection (protocol != 0) must not execute on V3Automation,
+    // even though the NFPM is whitelisted and the signature is valid.
+    function test_AutoEnter_RejectsNonV3Protocol() public {
+        _initExec();
+        StructHash.Order memory order = _sampleOrder();
+        order.config.autoEnterConfig.poolSelection.protocol = 1; // UNI_V4 selection
+        (bytes memory encoded, bytes memory sig) = _signOrder(order);
+        vm.expectRevert();
+        automation.executeAutoEnter(_execParams(encoded, sig));
+    }
+
+    // v3 pools have no hooks; a non-zero hooks field in the signed selection is rejected.
+    function test_AutoEnter_RejectsNonZeroHooks() public {
+        _initExec();
+        StructHash.Order memory order = _sampleOrder();
+        order.config.autoEnterConfig.poolSelection.hooks = address(0xBEEF);
+        (bytes memory encoded, bytes memory sig) = _signOrder(order);
+        vm.expectRevert();
+        automation.executeAutoEnter(_execParams(encoded, sig));
+    }
+
     // ===== TODO (Foundry tests deferred — listed in plan §4.5) =====
     // test_AutoEnter_Wallet_V3_HappyPath
     // test_AutoEnter_Wallet_V3_WithSingleZap

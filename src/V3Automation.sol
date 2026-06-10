@@ -31,6 +31,10 @@ contract V3Automation is Pausable, Common, EIP712 {
     // AUTO_ENTER order. Populated by executeAutoEnter, consumed by executeFollowUp.
     mapping(bytes32 => uint256) internal _mintedTokenIds;
     mapping(bytes32 => address) internal _mintedSigner;
+    // One-shot guard: an AUTO_ENTER order digest may be executed at most once.
+    // Without this a valid signature could be replayed to pull sourceAmount and
+    // mint again until the signer's allowance/balance is exhausted.
+    mapping(bytes32 => bool) internal _executedAutoEnter;
 
     constructor() EIP712("V3AutomationOrder", "6.0") {}
 
@@ -537,6 +541,13 @@ contract V3Automation is Pausable, Common, EIP712 {
         // Cancellation check (signature-based to match cancelOrder()'s key)
         require(!_cancelledOrder[keccak256(p.orderSignature)]);
 
+        // One-shot replay guard. Key = EIP-712 typed-data digest of the parent
+        // order; mark consumed before pulling any funds so a repeated call with
+        // the same signature reverts here rather than minting again.
+        bytes32 orderDigest = _hashTypedDataV4(StructHash._hash(p.abiEncodedUserOrder));
+        require(!_executedAutoEnter[orderDigest]);
+        _executedAutoEnter[orderDigest] = true;
+
         // Decode order + cross-check params against signed values
         StructHash.Order memory order = abi.decode(p.abiEncodedUserOrder, (StructHash.Order));
         require(keccak256(bytes(order.orderType)) == keccak256(bytes("ORDER_TYPE_AUTO_ENTER")));
@@ -547,6 +558,15 @@ contract V3Automation is Pausable, Common, EIP712 {
 
         // v1: only static pool selection is permitted on-chain
         require(ps.mode == 0);
+        // Bind execution to the signed order. The operator chooses swap legs, but
+        // the pool/manager/protocol and target must match what the user signed —
+        // a whitelisted-NFPM check alone would let an operator redirect the same
+        // signature to a different manager with matching pool params.
+        require(order.nfpmAddress == address(p.nfpm));
+        require(ps.poolManagerOrNfpm == address(p.nfpm));
+        require(ps.protocol == 0); // 0 == UNI_V3 in the signed cross-repo vocabulary; v4/pancake belong on V4UtilsRouter
+        require(ps.hooks == address(0)); // v3 pools have no hooks
+        require(ps.filterHash == bytes32(0)); // static mode carries no dynamic filter
         require(act.sourceToken == p.sourceToken);
         require(p.sourceAmount > 0 && p.sourceAmount <= act.sourceAmount);
         require(p.tickLower == act.tickLower && p.tickUpper == act.tickUpper);
@@ -589,9 +609,7 @@ contract V3Automation is Pausable, Common, EIP712 {
         SwapAndMintResult memory result =
             _swapAndMint(_buildAutoEnterSwapMintParams(p, ps, effectiveAmount), false);
 
-        // Persist for follow-up authorization. Key = EIP-712 typed-data digest of the
-        // parent order (chain + contract + content).
-        bytes32 orderDigest = _hashTypedDataV4(StructHash._hash(p.abiEncodedUserOrder));
+        // Persist for follow-up authorization (orderDigest computed above).
         _mintedTokenIds[orderDigest] = result.tokenId;
         _mintedSigner[orderDigest] = p.signer;
 
@@ -659,6 +677,21 @@ contract V3Automation is Pausable, Common, EIP712 {
         StructHash.PoolSelection memory ps,
         uint256 effectiveAmount
     ) internal pure returns (SwapAndMintParams memory) {
+        // _swapAndPrepareAmounts treats amount2 as a *third* (non-pool) token to
+        // zap in via both swap legs; it ignores amount2 when swapSourceToken is
+        // token0/token1 and instead reads amount0/amount1. So when the source
+        // token is one of the pool tokens the funding must sit in amount0/amount1,
+        // not amount2 — otherwise the mint runs with zero input (or reverts).
+        uint256 amount0;
+        uint256 amount1;
+        uint256 amount2;
+        if (p.sourceToken == ps.token0) {
+            amount0 = effectiveAmount;
+        } else if (p.sourceToken == ps.token1) {
+            amount1 = effectiveAmount;
+        } else {
+            amount2 = effectiveAmount;
+        }
         return SwapAndMintParams({
             protocol: p.protocol,
             nfpm: p.nfpm,
@@ -670,9 +703,9 @@ contract V3Automation is Pausable, Common, EIP712 {
             tickUpper: p.tickUpper,
             protocolFeeX64: 0, // already deducted above
             gasFeeX64: 0, // already deducted above
-            amount0: 0,
-            amount1: 0,
-            amount2: effectiveAmount,
+            amount0: amount0,
+            amount1: amount1,
+            amount2: amount2,
             recipient: p.signer,
             deadline: p.deadline,
             swapSourceToken: IERC20(p.sourceToken),
