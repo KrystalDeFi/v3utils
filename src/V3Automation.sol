@@ -572,7 +572,12 @@ contract V3Automation is Pausable, Common, EIP712 {
         require(ps.hooks == address(0)); // v3 pools have no hooks
         require(ps.filterHash == bytes32(0)); // static mode carries no dynamic filter
         require(act.sourceToken == p.sourceToken);
-        require(p.sourceAmount > 0 && p.sourceAmount <= act.sourceAmount);
+        // One-shot order: the _executedAutoEnter replay guard above permanently
+        // consumes this signature. Partial fills are not part of the signed schema
+        // (no min-amount / remaining-fill tracking), so pulling less than signed
+        // would burn the order while minting a smaller position than intended.
+        // Require the exact signed amount (mirrors V4UtilsRouter.executeAutoEnter).
+        require(p.sourceAmount == act.sourceAmount);
         require(p.tickLower == act.tickLower && p.tickUpper == act.tickUpper);
         require(p.fee == ps.fee && p.tickSpacing == ps.tickSpacing);
         require(p.gasFeeX64 == uint64(act.gasFeeX64));
@@ -747,6 +752,20 @@ contract V3Automation is Pausable, Common, EIP712 {
         require(parentSigner == _mintedSigner[parentDigest]);
 
         StructHash.Order memory parent = abi.decode(p.parentOrder, (StructHash.Order));
+
+        // Bind the execute NFPM/protocol to what the parent was minted against.
+        // _mintedTokenIds stores only the numeric id, so without this an operator
+        // could run this parent-authorized follow-up against an unrelated NFT of
+        // the same id on a different whitelisted NFPM that the signer also happens
+        // to own. The parent's signed selection records the minting NFPM/protocol
+        // (executeAutoEnter requires nfpmAddress == address(p.nfpm),
+        // poolSelection.poolManagerOrNfpm == address(p.nfpm) and protocol == UNI_V3).
+        StructHash.PoolSelection memory parentPs = parent.config.autoEnterConfig.poolSelection;
+        require(parentPs.poolManagerOrNfpm == address(p.execute.nfpm));
+        require(parent.nfpmAddress == address(p.execute.nfpm));
+        require(parentPs.protocol == 0); // 0 == UNI_V3 in the signed cross-repo vocabulary
+        require(p.execute.protocol == Nfpm.Protocol.UNI_V3);
+
         StructHash.FollowUpTemplate[] memory followUps = parent.config.autoEnterConfig.followUps;
         require(p.followUpIndex < followUps.length);
         StructHash.FollowUpTemplate memory tmpl = followUps[p.followUpIndex];

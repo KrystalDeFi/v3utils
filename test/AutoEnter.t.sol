@@ -202,6 +202,17 @@ contract AutoEnterTest is Test {
         automation.executeAutoEnter(p);
     }
 
+    // One-shot orders honor the exact signed amount — a partial pull is rejected
+    // so the _executedAutoEnter replay guard can't burn the order on a smaller mint.
+    function test_AutoEnter_RejectsPartialAmount() public {
+        _initExec();
+        (bytes memory encoded, bytes memory sig) = _signOrder(_sampleOrder());
+        V3Automation.ExecuteAutoEnterParams memory p = _execParams(encoded, sig);
+        p.sourceAmount = 999e6; // < signed act.sourceAmount (1000e6)
+        vm.expectRevert();
+        automation.executeAutoEnter(p);
+    }
+
     // ===== TODO (Foundry tests deferred — listed in plan §4.5) =====
     // test_AutoEnter_Wallet_V3_HappyPath
     // test_AutoEnter_Wallet_V3_WithSingleZap
@@ -212,7 +223,6 @@ contract AutoEnterTest is Test {
     // test_FollowUp_RejectsBeforeParentMint
     // test_AutoEnter_ExpiredOrder
     // test_AutoEnter_WrongSigner
-    // test_AutoEnter_SourceAmountExceeded
     // test_AutoEnter_TickMismatch
     // test_AutoEnter_SlippageFloorMissed
     // test_AutoEnter_Cancelled
