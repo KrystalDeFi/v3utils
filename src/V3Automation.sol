@@ -583,14 +583,6 @@ contract V3Automation is Pausable, Common, EIP712 {
         require(p.gasFeeX64 == uint64(act.gasFeeX64));
         require(p.protocolFeeX64 == uint64(act.protocolFeeX64));
         require(uint64(block.timestamp) <= uint64(order.signatureTime) + act.deadlineWindowSeconds);
-        // amountAddMin0/1 are operator-supplied liquidity floors (the backend derives
-        // them from the signed liquiditySlippageX64). They are not signed fields, so for
-        // a price-triggered order they cannot be bound to exact values on-chain — but
-        // both being zero turns V3Utils' mint slippage floor into a no-op, letting a
-        // buggy/malicious operator mint a dust position. Require at least one non-zero
-        // floor (a single-sided range legitimately has one zero side); full on-chain
-        // derivation is tracked separately. Mirrors V4UtilsRouter's minLiquidity > 0 guard.
-        require(p.amountAddMin0 > 0 || p.amountAddMin1 > 0);
 
         // Pull source token from the signer (the user). For WETH source, msg.value
         // may be supplied and gets wrapped here so the user can pay with native ETH
@@ -625,6 +617,13 @@ contract V3Automation is Pausable, Common, EIP712 {
 
         SwapAndMintResult memory result =
             _swapAndMint(_buildAutoEnterSwapMintParams(p, ps, effectiveAmount), false);
+
+        // Enforce the user-signed liquidity floor on the actual minted liquidity.
+        // The floor lives only in the signed order (act.minLiquidity), so the
+        // operator cannot weaken it — mirrors V4UtilsRouter using the signed
+        // act.minLiquidity as MintParams.minLiquidity. Operator-supplied
+        // amountAddMin0/1 remain as secondary per-token mins on the NFPM mint.
+        require(result.liquidity >= act.minLiquidity);
 
         // Persist for follow-up authorization (orderDigest computed above).
         _mintedTokenIds[orderDigest] = result.tokenId;

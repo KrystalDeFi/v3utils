@@ -160,8 +160,8 @@ contract AutoEnterTest is Test {
             amountIn1: 0,
             amountOut1Min: 0,
             swapData1: bytes(""),
-            amountAddMin0: 1, // non-zero so binding-gate tests pass the dust-floor guard
-            amountAddMin1: 1,
+            amountAddMin0: 0,
+            amountAddMin1: 0,
             deadline: block.timestamp + 1 days,
             gasFeeX64: 0,
             protocolFeeX64: 0,
@@ -213,17 +213,15 @@ contract AutoEnterTest is Test {
         automation.executeAutoEnter(p);
     }
 
-    // amountAddMin0/1 are operator-supplied liquidity floors; both being zero would
-    // disable V3Utils' mint slippage floor and allow a dust mint. At least one must
-    // be non-zero (mirrors V4UtilsRouter's minLiquidity > 0 guard).
-    function test_AutoEnter_RejectsZeroLiquidityFloor() public {
-        _initExec();
-        (bytes memory encoded, bytes memory sig) = _signOrder(_sampleOrder());
-        V3Automation.ExecuteAutoEnterParams memory p = _execParams(encoded, sig);
-        p.amountAddMin0 = 0;
-        p.amountAddMin1 = 0;
-        vm.expectRevert();
-        automation.executeAutoEnter(p);
+    // minLiquidity is part of the signed AutoEnterAction: changing it must change
+    // the action hash. This is the proof that the floor is bound to the user's
+    // signature — the contract enforces result.liquidity >= act.minLiquidity
+    // post-mint, so the operator cannot weaken it.
+    function test_MinLiquidityAffectsOrderHash() public {
+        StructHash.AutoEnterAction memory act = _sampleAction();
+        bytes32 h1 = StructHash._hash(act);
+        act.minLiquidity += 1;
+        assertTrue(StructHash._hash(act) != h1, "minLiquidity must affect the action hash");
     }
 
     // ===== TODO (Foundry tests deferred — listed in plan §4.5) =====
@@ -271,7 +269,8 @@ contract AutoEnterTest is Test {
             maxGasProportionX64: int256(uint256(1844674407370)), // ~10%
             gasFeeX64: 0,
             protocolFeeX64: 0,
-            deadlineWindowSeconds: 7 days
+            deadlineWindowSeconds: 7 days,
+            minLiquidity: 1e18 // user-signed liquidity floor (enforced post-mint)
         });
     }
 
