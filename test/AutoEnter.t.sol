@@ -160,8 +160,8 @@ contract AutoEnterTest is Test {
             amountIn1: 0,
             amountOut1Min: 0,
             swapData1: bytes(""),
-            amountAddMin0: 0,
-            amountAddMin1: 0,
+            amountAddMin0: 1, // non-zero so binding-gate tests pass the dust-floor guard
+            amountAddMin1: 1,
             deadline: block.timestamp + 1 days,
             gasFeeX64: 0,
             protocolFeeX64: 0,
@@ -209,6 +209,19 @@ contract AutoEnterTest is Test {
         (bytes memory encoded, bytes memory sig) = _signOrder(_sampleOrder());
         V3Automation.ExecuteAutoEnterParams memory p = _execParams(encoded, sig);
         p.sourceAmount = 999e6; // < signed act.sourceAmount (1000e6)
+        vm.expectRevert();
+        automation.executeAutoEnter(p);
+    }
+
+    // amountAddMin0/1 are operator-supplied liquidity floors; both being zero would
+    // disable V3Utils' mint slippage floor and allow a dust mint. At least one must
+    // be non-zero (mirrors V4UtilsRouter's minLiquidity > 0 guard).
+    function test_AutoEnter_RejectsZeroLiquidityFloor() public {
+        _initExec();
+        (bytes memory encoded, bytes memory sig) = _signOrder(_sampleOrder());
+        V3Automation.ExecuteAutoEnterParams memory p = _execParams(encoded, sig);
+        p.amountAddMin0 = 0;
+        p.amountAddMin1 = 0;
         vm.expectRevert();
         automation.executeAutoEnter(p);
     }
