@@ -30,6 +30,26 @@ abstract contract CommonScript is Script {
         return toHexString(uint256(uint160(addr)), 20);
     }
 
+    // Builds the verifier flags for `forge verify-contract`, sourced from env so the same
+    // scripts work across explorers (e.g. blockscout for chains Etherscan doesn't support).
+    // Defaults to etherscan when VERIFIER is unset. VERIFIER_URL is optional (Etherscan can
+    // infer it from the chain id, Blockscout needs the instance's /api/ endpoint).
+    // VERIFIER_API_KEY unifies the key for both verifiers (falls back to ETHERSCAN_API_KEY);
+    // `--etherscan-api-key` is forge's universal key flag regardless of the verifier.
+    function verifierFlags() internal view returns (string memory) {
+        string memory verifier = vm.envOr("VERIFIER", string("etherscan"));
+        string memory verifierUrl = vm.envOr("VERIFIER_URL", string(""));
+        string memory apiKey = vm.envOr("VERIFIER_API_KEY", vm.envOr("ETHERSCAN_API_KEY", string("")));
+        string memory flags = string.concat(" --verifier ", verifier);
+        if (bytes(verifierUrl).length > 0) {
+            flags = string.concat(flags, " --verifier-url ", verifierUrl);
+        }
+        if (bytes(apiKey).length > 0) {
+            flags = string.concat(flags, " --etherscan-api-key ", apiKey);
+        }
+        return flags;
+    }
+
     function getV3UtilsDeploymentAddress() internal view returns (address) {
         return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(V3Utils).creationCode)), factory);
     }
