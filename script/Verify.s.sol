@@ -16,7 +16,8 @@ contract VerifyV3UtilsScript is CommonScript {
                 " src/V3Utils.sol:V3Utils",
                 " --libraries src/Nfpm.sol:Nfpm:",
                 vm.envString("NFPM_LIB_ADDRESS"),
-                " --rpc-url ", vm.envString("RPC_URL")
+                " --rpc-url ", vm.envString("RPC_URL"),
+                verifierFlags()
             )
         );
     }
@@ -32,7 +33,10 @@ contract VerifyStructHashScript is CommonScript {
         console.log("\nrun script below to verify contract: \n");
         console.log(
             string.concat(
-                "forge verify-contract ", Strings.toHexString(deploymentAddress), " src/StructHash.sol:StructHash"
+                "forge verify-contract ",
+                Strings.toHexString(deploymentAddress),
+                " src/StructHash.sol:StructHash",
+                verifierFlags()
             )
         );
     }
@@ -46,7 +50,12 @@ contract VerifyNfpmScript is CommonScript {
         console.log("deployment address: ", deploymentAddress);
         console.log("\nrun script below to verify contract: \n");
         console.log(
-            string.concat("forge verify-contract ", Strings.toHexString(deploymentAddress), " src/Nfpm.sol:Nfpm")
+            string.concat(
+                "forge verify-contract ",
+                Strings.toHexString(deploymentAddress),
+                " src/Nfpm.sol:Nfpm",
+                verifierFlags()
+            )
         );
     }
 
@@ -66,7 +75,8 @@ contract VerifyV3AutomationScript is CommonScript {
                 " --libraries src/StructHash.sol:StructHash:",
                 vm.envString("STRUCT_HASH_ADDRESS"),
                 " --libraries src/Nfpm.sol:Nfpm:",
-                vm.envString("NFPM_LIB_ADDRESS")
+                vm.envString("NFPM_LIB_ADDRESS"),
+                verifierFlags()
             )
         );
     }

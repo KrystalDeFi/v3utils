@@ -31,7 +31,7 @@ contract V3AutomationGrantRoleScript is CommonScript {
         IV3Initializer v3automation = IV3Initializer(deploymentAddress);
         v3automation.grantRole(v3automation.OPERATOR_ROLE(), 0x4b82847C82087ea19418beD079966810f64f39f4);
         v3automation.grantRole(v3automation.OPERATOR_ROLE(), 0x9729585607568Dcbf1f5f3802AfBf5B221702932);
-        v3automation.grantRole(v3automation.ADMIN_ROLE(), 0x9A99252A76f7B40Cbf2002a8dB2977C85fA306DF);
+        // v3automation.grantRole(v3automation.ADMIN_ROLE(), 0x9A99252A76f7B40Cbf2002a8dB2977C85fA306DF);
 
         vm.stopBroadcast();
     }
