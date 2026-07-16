@@ -16,7 +16,8 @@ contract VerifyV3UtilsScript is CommonScript {
                 " src/V3Utils.sol:V3Utils",
                 " --libraries src/Nfpm.sol:Nfpm:",
                 vm.envString("NFPM_LIB_ADDRESS"),
-                " --rpc-url ", vm.envString("RPC_URL"),
+                " --rpc-url ",
+                vm.envString("RPC_URL"),
                 verifierFlags()
             )
         );
@@ -51,10 +52,7 @@ contract VerifyNfpmScript is CommonScript {
         console.log("\nrun script below to verify contract: \n");
         console.log(
             string.concat(
-                "forge verify-contract ",
-                Strings.toHexString(deploymentAddress),
-                " src/Nfpm.sol:Nfpm",
-                verifierFlags()
+                "forge verify-contract ", Strings.toHexString(deploymentAddress), " src/Nfpm.sol:Nfpm", verifierFlags()
             )
         );
     }

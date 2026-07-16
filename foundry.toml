@@ -33,3 +33,11 @@ libraries = [
     'src/StructHash.sol:StructHash:0xB486F83280F19cf652843b8F79e52572D589Bbf9',
     'src/Nfpm.sol:Nfpm:0x5306493CCF612bc8564B30B0CDB7ff8fbd719a95'
 ]
+
+# These two files are compiled to CREATE2-deployed libraries at the hardcoded
+# addresses above. Their deployed address depends on keccak256(creationCode),
+# and with bytecode_hash = "ipfs" (the default) the appended metadata hash
+# embeds a hash of the source bytes -- so ANY reformat changes the bytecode and
+# therefore the CREATE2 address. Keep them out of `forge fmt` to pin the source.
+[fmt]
+ignore = ["src/StructHash.sol", "src/Nfpm.sol"]
