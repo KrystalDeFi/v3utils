@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
-import {
-    INonfungiblePositionManager as IUniV3NonfungiblePositionManager
-} from "v3-periphery/interfaces/INonfungiblePositionManager.sol";
+import {INonfungiblePositionManager as IUniV3NonfungiblePositionManager} from
+    "v3-periphery/interfaces/INonfungiblePositionManager.sol";
 
 interface INonfungiblePositionManager is IUniV3NonfungiblePositionManager {
     /// @notice mintParams for algebra v1
