@@ -12,7 +12,8 @@ library StructHash {
     // action)RebalanceAutoCompoundAction(int256 maxGasProportionX64,int256
     // feeToPrincipalRatioThresholdX64)"
     // );
-    bytes32 constant RebalanceAutoCompound_TYPEHASH = 0x35d8f787f18def78c8e6fcafa2acf783916baed9dc692c38b4e8a97c853b7477;
+    bytes32 constant RebalanceAutoCompound_TYPEHASH =
+        0x35d8f787f18def78c8e6fcafa2acf783916baed9dc692c38b4e8a97c853b7477;
 
     struct RebalanceAutoCompound {
         RebalanceAutoCompoundAction action;
@@ -331,7 +332,8 @@ library StructHash {
     // timeBasedCondition)FeeBasedCondition(int256 minFeeEarnedUsdX64)TimeBasedCondition(int256
     // intervalInSecond)"
     // );
-    bytes32 constant AutoCompoundCondition_TYPEHASH = 0x8077238253cf3aae9fc43bae69ede107dc9ecfe05cc3947a0cac4f94212a6223;
+    bytes32 constant AutoCompoundCondition_TYPEHASH =
+        0x8077238253cf3aae9fc43bae69ede107dc9ecfe05cc3947a0cac4f94212a6223;
 
     struct AutoCompoundCondition {
         string _type;

@@ -29,7 +29,8 @@ contract V3AutomationGrantRoleScript is CommonScript {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployerAddress = vm.addr(deployerPrivateKey);
         address deploymentAddress = getV3AutomationDeploymentAddress();
-        address multisig = vm.envAddress("MULTISIG");
+        address multisig = vm.envOr("MULTISIG", address(0));
+        bool multisigValid = multisig != address(0) && multisig != deployerAddress;
         console.log("mutltisig :", multisig);
         console.log("deploymentAddress :", deploymentAddress);
         console.log("deployerAddress :", deployerAddress);
@@ -40,10 +41,16 @@ contract V3AutomationGrantRoleScript is CommonScript {
         v3automation.grantRole(v3automation.OPERATOR_ROLE(), 0x4b82847C82087ea19418beD079966810f64f39f4);
         v3automation.grantRole(v3automation.OPERATOR_ROLE(), 0x9729585607568Dcbf1f5f3802AfBf5B221702932);
 
-        v3automation.grantRole(v3automation.DEFAULT_ADMIN_ROLE(), multisig);
-        v3automation.grantRole(v3automation.ADMIN_ROLE(), multisig);
-        v3automation.revokeRole(v3automation.ADMIN_ROLE(), deployerAddress);
-        v3automation.revokeRole(v3automation.DEFAULT_ADMIN_ROLE(), deployerAddress);
+        if (multisigValid) {
+            v3automation.grantRole(v3automation.DEFAULT_ADMIN_ROLE(), multisig);
+            v3automation.grantRole(v3automation.ADMIN_ROLE(), multisig);
+            v3automation.revokeRole(v3automation.ADMIN_ROLE(), deployerAddress);
+            v3automation.revokeRole(v3automation.DEFAULT_ADMIN_ROLE(), deployerAddress);
+        } else {
+            console.log(
+                "WARNING: MULTISIG invalid (unset, zero, or equals deployer) - skipping admin transfer, deployer keeps admin"
+            );
+        }
 
         vm.stopBroadcast();
     }
@@ -56,7 +63,8 @@ contract V3UtilsGrantRoleScript is CommonScript {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployerAddress = vm.addr(deployerPrivateKey);
         address deploymentAddress = getV3UtilsDeploymentAddress();
-        address multisig = vm.envAddress("MULTISIG");
+        address multisig = vm.envOr("MULTISIG", address(0));
+        bool multisigValid = multisig != address(0) && multisig != deployerAddress;
         console.log("mutltisig :", multisig);
         console.log("deploymentAddress :", deploymentAddress);
         console.log("deployerAddress :", deployerAddress);
@@ -64,10 +72,16 @@ contract V3UtilsGrantRoleScript is CommonScript {
         vm.startBroadcast(deployerPrivateKey);
         // 0x84C4c905Fc18313f0A8e20855a067b7caaca5922;
         IV3Initializer v3utils = IV3Initializer(deploymentAddress);
-        v3utils.grantRole(v3utils.DEFAULT_ADMIN_ROLE(), multisig);
-        v3utils.grantRole(v3utils.ADMIN_ROLE(), multisig);
-        v3utils.revokeRole(v3utils.ADMIN_ROLE(), deployerAddress);
-        v3utils.revokeRole(v3utils.DEFAULT_ADMIN_ROLE(), deployerAddress);
+        if (multisigValid) {
+            v3utils.grantRole(v3utils.DEFAULT_ADMIN_ROLE(), multisig);
+            v3utils.grantRole(v3utils.ADMIN_ROLE(), multisig);
+            v3utils.revokeRole(v3utils.ADMIN_ROLE(), deployerAddress);
+            v3utils.revokeRole(v3utils.DEFAULT_ADMIN_ROLE(), deployerAddress);
+        } else {
+            console.log(
+                "WARNING: MULTISIG invalid (unset, zero, or equals deployer) - skipping admin transfer, deployer keeps admin"
+            );
+        }
 
         vm.stopBroadcast();
     }
