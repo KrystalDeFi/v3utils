@@ -40,4 +40,4 @@ libraries = [
 # embeds a hash of the source bytes -- so ANY reformat changes the bytecode and
 # therefore the CREATE2 address. Keep them out of `forge fmt` to pin the source.
 [fmt]
-ignore = ["src/StructHash.sol", "src/Nfpm.sol"]
+ignore = ["src/StructHash.sol", "src/Nfpm.sol", "src/SignatureValidator.sol"]
