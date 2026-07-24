@@ -3,9 +3,14 @@ pragma solidity ^0.8.0;
 
 import "./Common.sol";
 import "./EIP712.sol";
+import "./StructHash.sol";
+import { SignatureValidator } from "@krystal/util-contracts/contracts/SignatureValidator.sol";
 
 contract V3Automation is Pausable, Common, EIP712 {
-    event CancelOrder(address user, bytes order, bytes signature);
+    event CancelOrder(address user, bytes32 hash, bytes signature);
+
+    error InvalidSignature();
+    error OrderCancelled();
 
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     mapping(bytes32 => bool) _cancelledOrder;
@@ -443,23 +448,41 @@ contract V3Automation is Pausable, Common, EIP712 {
         params.nfpm.transferFrom(address(this), positionOwner, params.tokenId);
     }
 
+    /// @notice Validate a signed order against `actor` using dual-path verification (EOA + EIP-7702 +
+    ///         ERC-1271) and ensure it has not been cancelled.
+    /// @dev Cancellation is keyed on `_cancelKey(actor, digest)` (the EIP-712 digest, not the signature
+    ///      bytes): an order may have several valid signature encodings (65-byte (r,s,v) / 64-byte
+    ///      EIP-2098, and ERC-1271 wallets), so keying on `keccak256(signature)` would be bypassable.
     function _validateOrder(bytes memory abiEncodedUserOrder, bytes memory orderSignature, address actor)
         internal
         view
     {
-        address userAddress = _recover(abiEncodedUserOrder, orderSignature);
-        require(userAddress == actor);
-        require(!_cancelledOrder[keccak256(orderSignature)]);
+        bytes32 digest = _hashTypedDataV4(StructHash._hash(abiEncodedUserOrder));
+        if (!SignatureValidator.isValidSignatureNow(actor, digest, orderSignature)) revert InvalidSignature();
+        if (_cancelledOrder[_cancelKey(actor, digest)]) revert OrderCancelled();
     }
 
-    function cancelOrder(bytes calldata abiEncodedUserOrder, bytes calldata orderSignature) external {
-        _validateOrder(abiEncodedUserOrder, orderSignature, msg.sender);
-        _cancelledOrder[keccak256(orderSignature)] = true;
-        emit CancelOrder(msg.sender, abiEncodedUserOrder, orderSignature);
+    /// @notice Cancel an order (identified by its EIP-712 digest) signed by the caller
+    /// @param hash The EIP-712 digest that was signed
+    /// @param signature The signature over `hash`
+    function cancelOrder(bytes32 hash, bytes calldata signature) external {
+        if (!SignatureValidator.isValidSignatureNow(msg.sender, hash, signature)) revert InvalidSignature();
+        _cancelledOrder[_cancelKey(msg.sender, hash)] = true;
+        emit CancelOrder(msg.sender, hash, signature);
     }
 
-    function isOrderCancelled(bytes calldata orderSignature) external view returns (bool) {
-        return _cancelledOrder[keccak256(orderSignature)];
+    /// @notice Check whether an order (identified by its EIP-712 digest) has been cancelled by `actor`
+    /// @param actor Address that cancelled (or would cancel) the order
+    /// @param hash The EIP-712 digest of the order
+    /// @return bool True if the order is cancelled by `actor`, false otherwise
+    function isOrderCancelled(address actor, bytes32 hash) external view returns (bool) {
+        return _cancelledOrder[_cancelKey(actor, hash)];
+    }
+
+    /// @dev Cancellation key scoped to the order signer / canceller so cancellation is per-actor rather
+    ///      than global. `abi.encode` (not `encodePacked`) keeps the address and digest unambiguous.
+    function _cancelKey(address actor, bytes32 digest) private pure returns (bytes32) {
+        return keccak256(abi.encode(actor, digest));
     }
 
     receive() external payable {}

@@ -14,3 +14,6 @@
 	path = lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
 	branch = release-v4.9
+[submodule "lib/util-contracts"]
+	path = lib/util-contracts
+	url = https://github.com/KrystalDeFi/util-contracts
