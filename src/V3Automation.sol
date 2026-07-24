@@ -4,7 +4,7 @@ pragma solidity ^0.8.0;
 import "./Common.sol";
 import "./EIP712.sol";
 import "./StructHash.sol";
-import { SignatureValidator } from "./SignatureValidator.sol";
+import { SignatureValidator } from "@krystal/util-contracts/contracts/SignatureValidator.sol";
 
 contract V3Automation is Pausable, Common, EIP712 {
     event CancelOrder(address user, bytes32 hash, bytes signature);
