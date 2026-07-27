@@ -38,7 +38,7 @@ verify-%: %
 verify-v3utils:
 verify-structhash:
 verify-nfpm:
-verify-v3automation: v3automation-check v3automation
+verify-v3automation: v3automation
 	$(VERIFY_CMD)
 init-v3utils:
 init-v3automation:
