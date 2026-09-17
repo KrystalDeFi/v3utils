@@ -27,7 +27,8 @@ abstract contract Common is AccessControl, Pausable {
     error EtherSendFailed();
     error TooMuchEtherSent();
     error NoEtherToken();
-    error NotWETH();
+    error NativeDustNotAllowed();
+    error InvalidNativeConfig();
     error TooMuchFee();
     error GetPositionFailed();
     error NoFees();
@@ -75,7 +76,22 @@ abstract contract Common is AccessControl, Pausable {
     address public swapRouter;
     address public FEE_TAKER;
     address private _initializer;
+
+    /// @notice How native value relates to the `WETH` token on this chain.
+    /// WRAPPED:   `WETH` is a WETH9-style wrapper; native is wrapped/unwrapped 1:1 via deposit/withdraw.
+    /// ENSHRINED: `WETH` is an ERC20 *view* of the native asset sharing one balance with it, with no
+    ///            wrapper to call (e.g. Arc's USDC at 0x3600..., 6 decimals against 18-decimal native).
+    enum NativeMode {
+        WRAPPED,
+        ENSHRINED
+    }
+
+    /// @notice The token that represents native value on this chain.
     address public WETH;
+    /// @notice Which native model this deployment runs.
+    NativeMode public nativeMode;
+    /// @notice Units of native currency per 1 smallest unit of `WETH`. Always 1 when WRAPPED; 1e12 on Arc.
+    uint256 public nativeScale;
 
     mapping(FeeType => uint64) private _maxFeeX64;
 
@@ -93,10 +109,24 @@ abstract contract Common is AccessControl, Pausable {
         address admin,
         address feeTaker,
         address _weth,
+        NativeMode _nativeMode,
+        uint256 _nativeScale,
         address[] calldata whitelistedNfpms
     ) public virtual {
         require(!_initialized);
         require(msg.sender == _initializer);
+
+        // A WETH9 wrapper is always 1:1 with native, so any other scale is a misconfiguration.
+        // An enshrined native asset needs a token to denominate it in.
+        if (_nativeScale == 0) {
+            revert InvalidNativeConfig();
+        }
+        if (_nativeMode == NativeMode.WRAPPED && _nativeScale != 1) {
+            revert InvalidNativeConfig();
+        }
+        if (_nativeMode == NativeMode.ENSHRINED && _weth == address(0)) {
+            revert InvalidNativeConfig();
+        }
 
         _grantRole(ADMIN_ROLE, admin);
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -104,6 +134,8 @@ abstract contract Common is AccessControl, Pausable {
         swapRouter = router;
         FEE_TAKER = feeTaker;
         WETH = _weth;
+        nativeMode = _nativeMode;
+        nativeScale = _nativeScale;
         for (uint256 i = 0; i < whitelistedNfpms.length; i++) {
             EnumerableSet.add(_whitelistedNfpm, whitelistedNfpms[i]);
         }
@@ -252,7 +284,13 @@ abstract contract Common is AccessControl, Pausable {
     function withdrawNative(address to) external onlyRole(WITHDRAWER_ROLE) {
         uint256 nativeBalance = address(this).balance;
         if (nativeBalance > 0) {
-            payable(to).transfer(nativeBalance);
+            // `call` rather than `transfer`: the 2300 gas stipend is not enough on chains that do extra
+            // work on a native transfer (Arc enforces the USDC blocklist at runtime and emits EIP-7708
+            // Transfer logs), nor for Safe/multisig recipients.
+            (bool sent,) = to.call{value: nativeBalance}("");
+            if (!sent) {
+                revert EtherSendFailed();
+            }
         }
     }
 
@@ -269,7 +307,7 @@ abstract contract Common is AccessControl, Pausable {
         nfpm.transferFrom(address(this), to, tokenId);
     }
 
-    // checks if required amounts are provided and are exact - wraps any provided ETH as WETH
+    // checks if required amounts are provided and are exact - takes in any provided native value
     // if less or more provided reverts
     function _prepareSwap(
         IERC20 token0,
@@ -284,22 +322,22 @@ abstract contract Common is AccessControl, Pausable {
         uint256 amountAddedOther;
         IWETH9 weth = _getWeth9();
 
-        // wrap ether sent
+        // take in ether sent, credited in units of the native-representing token
         if (msg.value != 0) {
-            weth.deposit{value: msg.value}();
+            uint256 credited = _receiveNative(msg.value);
 
             if (address(weth) == address(token0)) {
-                amountAdded0 = msg.value;
+                amountAdded0 = credited;
                 if (amountAdded0 > amount0) {
                     revert TooMuchEtherSent();
                 }
             } else if (address(weth) == address(token1)) {
-                amountAdded1 = msg.value;
+                amountAdded1 = credited;
                 if (amountAdded1 > amount1) {
                     revert TooMuchEtherSent();
                 }
             } else if (address(weth) == address(otherToken)) {
-                amountAddedOther = msg.value;
+                amountAddedOther = credited;
                 if (amountAddedOther > amountOther) {
                     revert TooMuchEtherSent();
                 }
@@ -510,15 +548,12 @@ abstract contract Common is AccessControl, Pausable {
         }
     }
 
-    // transfers token (or unwraps WETH and sends ETH)
+    // transfers token (or delivers it as native value when it is the token representing native)
+    // the WETH != address(0) guard matters because callers may pass a zero token address here
     function _transferToken(address to, IERC20 token, uint256 amount, bool unwrap) internal {
         IWETH9 weth = _getWeth9();
-        if (address(weth) == address(token) && unwrap) {
-            weth.withdraw(amount);
-            (bool sent,) = to.call{value: amount}("");
-            if (!sent) {
-                revert EtherSendFailed();
-            }
+        if (WETH != address(0) && address(weth) == address(token) && unwrap) {
+            _sendNative(to, amount);
         } else {
             SafeERC20.safeTransfer(token, to, amount);
         }
@@ -527,6 +562,19 @@ abstract contract Common is AccessControl, Pausable {
     // general swap function which uses external router with off-chain calculated swap instructions
     // does slippage check with amountOutMin param
     // returns token amounts deltas after swap
+    //
+    // NOTE for ENSHRINED native chains (e.g. Arc): the deltas below are measured with `balanceOf`, and
+    // there the native balance and its ERC20 view are one and the same balance. Two consequences:
+    //  1. native value arriving at `receive()` during the router call also moves
+    //     `tokenOut.balanceOf(address(this))`, inflating amountOutDelta and weakening the amountOutMin
+    //     check. This is the same donation griefing already reachable via a plain ERC20 transfer on
+    //     every chain - the enshrined model just adds a second channel to it.
+    //  2. that ERC20 view truncates below one unit. Merely holding dust is harmless - adding an exact
+    //     multiple of nativeScale never shifts the truncated floor - but native moving in a
+    //     non-multiple of nativeScale during the measured window makes a delta read off by one unit.
+    //     An ERC20 transfer of this token always moves an exact multiple, so the only way in is a raw
+    //     native transfer; `_receiveNative` rejecting a non-exact msg.value closes the path this
+    //     contract controls. Do not relax that guard without revisiting this accounting.
     function _swap(
         IERC20 tokenIn,
         IERC20 tokenOut,
@@ -630,6 +678,34 @@ abstract contract Common is AccessControl, Pausable {
 
     function _getWeth9() internal view returns (IWETH9 weth) {
         return IWETH9(WETH);
+    }
+
+    /// @dev Takes `value` of native currency in, returning the equivalent amount denominated in units
+    /// of `WETH`. WRAPPED wraps 1:1 via WETH9. ENSHRINED has nothing to wrap - native and the ERC20
+    /// view already share one balance - so only the unit changes. That conversion truncates, so reject
+    /// any remainder rather than strand value only WITHDRAWER_ROLE could recover.
+    function _receiveNative(uint256 value) internal returns (uint256 tokenAmount) {
+        if (nativeMode == NativeMode.WRAPPED) {
+            _getWeth9().deposit{value: value}();
+            return value; // nativeScale is always 1 in this mode
+        }
+        tokenAmount = value / nativeScale;
+        if (tokenAmount * nativeScale != value) {
+            revert NativeDustNotAllowed();
+        }
+    }
+
+    /// @dev Sends `tokenAmount`, denominated in units of `WETH`, to `to` as native currency.
+    /// Unlike `_receiveNative` this direction is always exact, so it cannot strand dust.
+    function _sendNative(address to, uint256 tokenAmount) internal {
+        if (nativeMode == NativeMode.WRAPPED) {
+            _getWeth9().withdraw(tokenAmount);
+        }
+        // ENSHRINED: nothing to unwrap - the ERC20 balance IS the native balance
+        (bool sent,) = to.call{value: tokenAmount * nativeScale}("");
+        if (!sent) {
+            revert EtherSendFailed();
+        }
     }
 
     function _getPosition(INonfungiblePositionManager nfpm, Nfpm.Protocol protocol, uint256 tokenId)

@@ -46,10 +46,14 @@ contract V3UtilsIntegrationTest is IntegrationTestBase {
         NPM.safeTransferFrom(TEST_NFT_ACCOUNT, address(v3utils), TEST_NFT, abi.encode(true, false, 1, "test"));
     }
 
-    function testSendEtherNotAllowed() external {
-        bool success;
-        vm.expectRevert(Common.NotWETH.selector);
-        (success,) = address(v3utils).call{value: 123}("");
+    // receive() is deliberately unguarded (the NotWETH guard was dropped in dce30ed) so that WETH9
+    // can return native value during _sendNative. Stray ether is recoverable via withdrawNative.
+    function testSendEtherIsAccepted() external {
+        uint256 balanceBefore = address(v3utils).balance;
+        vm.deal(address(this), 123);
+        (bool success,) = address(v3utils).call{value: 123}("");
+        assertTrue(success);
+        assertEq(address(v3utils).balance, balanceBefore + 123);
     }
 
     function testTransferDecreaseSlippageError() external {

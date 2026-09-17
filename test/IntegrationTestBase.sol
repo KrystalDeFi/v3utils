@@ -58,10 +58,16 @@ abstract contract IntegrationTestBase is Test {
         vm.selectFork(mainnetFork);
         vm.startBroadcast(TEST_OWNER_ACCOUNT);
 
+        // Arbitrum has a normal WETH9 wrapper: WRAPPED mode, scale 1. With these values every
+        // native helper reduces to the pre-Arc code path, so this suite is the regression proof.
         v3utils = new V3Utils();
-        v3utils.initialize(KRYSTAL_ROUTER, TEST_OWNER_ACCOUNT, TEST_OWNER_ACCOUNT, WETH, _getNfpms());
+        v3utils.initialize(
+            KRYSTAL_ROUTER, TEST_OWNER_ACCOUNT, TEST_OWNER_ACCOUNT, WETH, Common.NativeMode.WRAPPED, 1, _getNfpms()
+        );
         v3automation = new V3AutomationHarness();
-        v3automation.initialize(KRYSTAL_ROUTER, TEST_OWNER_ACCOUNT, TEST_OWNER_ACCOUNT, WETH, _getNfpms());
+        v3automation.initialize(
+            KRYSTAL_ROUTER, TEST_OWNER_ACCOUNT, TEST_OWNER_ACCOUNT, WETH, Common.NativeMode.WRAPPED, 1, _getNfpms()
+        );
 
         vm.stopBroadcast();
     }

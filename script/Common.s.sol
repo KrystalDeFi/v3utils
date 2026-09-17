@@ -50,6 +50,18 @@ abstract contract CommonScript is Script {
         return flags;
     }
 
+    // Native-asset model for the target chain. Chains with a normal WETH9 wrapper set neither var,
+    // so both default to the wrapped 1:1 model and their existing .env blocks keep working as-is.
+    // nativeMode: 0 = WRAPPED, 1 = ENSHRINED (ERC20 view of native, e.g. Arc's USDC at 0x3600...).
+    // nativeScale: units of native per 1 smallest unit of WETH. 1 when WRAPPED, 1e12 on Arc.
+    function nativeMode() internal view returns (uint8) {
+        return uint8(vm.envOr("NATIVE_MODE", uint256(0)));
+    }
+
+    function nativeScale() internal view returns (uint256) {
+        return vm.envOr("NATIVE_SCALE", uint256(1));
+    }
+
     function getV3UtilsDeploymentAddress() internal view returns (address) {
         return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(V3Utils).creationCode)), factory);
     }
