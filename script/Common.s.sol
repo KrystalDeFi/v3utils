@@ -55,10 +55,18 @@ abstract contract CommonScript is Script {
     // nativeMode: 0 = WRAPPED, 1 = ENSHRINED (ERC20 view of native, e.g. Arc's USDC at 0x3600...).
     // nativeScale: units of native per 1 smallest unit of WETH. 1 when WRAPPED, 1e12 on Arc.
     function nativeMode() internal view returns (uint8) {
-        return uint8(vm.envOr("NATIVE_MODE", uint256(0)));
+        uint256 mode = vm.envOr("NATIVE_MODE", uint256(0));
+        // bound before the cast: uint8(256) would silently read back as WRAPPED
+        require(mode <= 1, "NATIVE_MODE must be 0 (WRAPPED) or 1 (ENSHRINED)");
+        return uint8(mode);
     }
 
     function nativeScale() internal view returns (uint256) {
+        // No default under ENSHRINED. Falling back to 1 there would deploy a contract that
+        // underpays every native transfer by the scale factor, and initialize cannot be redone.
+        if (nativeMode() != 0) {
+            return vm.envUint("NATIVE_SCALE");
+        }
         return vm.envOr("NATIVE_SCALE", uint256(1));
     }
 

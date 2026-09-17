@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import "v3-periphery/interfaces/external/IWETH9.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "v3-core/libraries/FullMath.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -124,8 +125,19 @@ abstract contract Common is AccessControl, Pausable {
         if (_nativeMode == NativeMode.WRAPPED && _nativeScale != 1) {
             revert InvalidNativeConfig();
         }
-        if (_nativeMode == NativeMode.ENSHRINED && _weth == address(0)) {
-            revert InvalidNativeConfig();
+        if (_nativeMode == NativeMode.ENSHRINED) {
+            if (_weth == address(0)) {
+                revert InvalidNativeConfig();
+            }
+            // nativeScale is not a free parameter: it is fixed by how many decimals the ERC20 view
+            // has against 18-decimal native. Deriving the expected value from the token itself is
+            // what stops an unset NATIVE_SCALE from initializing as a silent 1:1 - which this
+            // contract could not otherwise tell apart from a genuine 18-decimal enshrined asset,
+            // and which is unrecoverable because initialize is one-shot with no setter.
+            uint8 tokenDecimals = IERC20Metadata(_weth).decimals();
+            if (tokenDecimals > 18 || _nativeScale != 10 ** (18 - tokenDecimals)) {
+                revert InvalidNativeConfig();
+            }
         }
 
         _grantRole(ADMIN_ROLE, admin);

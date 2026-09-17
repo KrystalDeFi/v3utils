@@ -51,6 +51,19 @@ contract MockEnshrinedNative {
     }
 }
 
+/// @dev Only needs to answer decimals(): initialize's scale validation reads nothing else.
+contract MockDecimals {
+    uint8 private immutable _decimals;
+
+    constructor(uint8 d) {
+        _decimals = d;
+    }
+
+    function decimals() external view returns (uint8) {
+        return _decimals;
+    }
+}
+
 /// @dev Exposes Common's internal native helpers so the two conversion directions can be pinned
 /// independently of a full mint flow.
 contract NativeHarness is V3Utils {
@@ -118,6 +131,48 @@ contract EnshrinedNativeTest is Test {
         NativeHarness h = new NativeHarness();
         vm.expectRevert(Common.InvalidNativeConfig.selector);
         h.initialize(router, owner, owner, address(0), Common.NativeMode.ENSHRINED, SCALE, nfpms);
+        vm.stopBroadcast();
+    }
+
+    /// Regression for PR #61 review: an unset NATIVE_SCALE defaults to 1, which would otherwise
+    /// initialize ENSHRINED successfully and then underpay every native transfer by the scale factor.
+    /// initialize is one-shot with no setter, so this has to be caught here or not at all.
+    function testInitializeRejectsEnshrinedScaleMismatchingTokenDecimals() public {
+        address[] memory nfpms = new address[](0);
+        vm.startBroadcast(owner);
+        NativeHarness h = new NativeHarness();
+        vm.expectRevert(Common.InvalidNativeConfig.selector);
+        h.initialize(router, owner, owner, address(usdc), Common.NativeMode.ENSHRINED, 1, nfpms);
+        vm.stopBroadcast();
+    }
+
+    function testInitializeRejectsEnshrinedWithWrongNonUnitScale() public {
+        address[] memory nfpms = new address[](0);
+        vm.startBroadcast(owner);
+        NativeHarness h = new NativeHarness();
+        vm.expectRevert(Common.InvalidNativeConfig.selector);
+        h.initialize(router, owner, owner, address(usdc), Common.NativeMode.ENSHRINED, 1e6, nfpms);
+        vm.stopBroadcast();
+    }
+
+    /// The scale check must not outlaw a genuine 18-decimal enshrined asset, where 1:1 is correct.
+    function testInitializeAcceptsEnshrinedEighteenDecimalTokenAtScaleOne() public {
+        address token = address(new MockDecimals(18));
+        address[] memory nfpms = new address[](0);
+        vm.startBroadcast(owner);
+        NativeHarness h = new NativeHarness();
+        h.initialize(router, owner, owner, token, Common.NativeMode.ENSHRINED, 1, nfpms);
+        vm.stopBroadcast();
+        assertEq(h.nativeScale(), 1);
+    }
+
+    function testInitializeRejectsEnshrinedTokenOverEighteenDecimals() public {
+        address token = address(new MockDecimals(19));
+        address[] memory nfpms = new address[](0);
+        vm.startBroadcast(owner);
+        NativeHarness h = new NativeHarness();
+        vm.expectRevert(Common.InvalidNativeConfig.selector);
+        h.initialize(router, owner, owner, token, Common.NativeMode.ENSHRINED, 1, nfpms);
         vm.stopBroadcast();
     }
 
