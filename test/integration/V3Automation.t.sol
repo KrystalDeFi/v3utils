@@ -150,18 +150,19 @@ contract V3AutomationIntegrationTest is IntegrationTestBase {
         v3automation.execute(params);
     }
 
-    event CancelOrder(address user, bytes order, bytes signature);
+    event CancelOrder(address user, bytes32 hash, bytes signature);
 
     function testCancelOrder() external {
         (address userAddress, uint256 privateKey) = makeAddrAndKey("cancelOrderUser");
+        bytes32 digest = v3automation.hashTypedDataV4(StructHash._hash(emptyUserConfig));
         bytes memory signature = _signOrder(emptyUserConfig, privateKey);
 
         vm.prank(userAddress);
         vm.expectEmit(false, false, false, true, address(v3automation));
-        emit CancelOrder(userAddress, abi.encode(emptyUserConfig), signature);
-        v3automation.cancelOrder(abi.encode(emptyUserConfig), signature);
+        emit CancelOrder(userAddress, digest, signature);
+        v3automation.cancelOrder(digest, signature);
 
-        bool cancelled = v3automation.isOrderCancelled(signature);
+        bool cancelled = v3automation.isOrderCancelled(userAddress, digest);
         assertTrue(cancelled);
     }
 

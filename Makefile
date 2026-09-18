@@ -38,14 +38,14 @@ verify-%: %
 verify-v3utils:
 verify-structhash:
 verify-nfpm:
-verify-v3automation: v3automation-check v3automation
+verify-v3automation: v3automation
 	$(VERIFY_CMD)
 init-v3utils:
 init-v3automation:
 init-%: %
-	forge script script/Init.s.sol:$(CONTRACT)InitializeScript --rpc-url $(RPC_URL) --broadcast --legacy --gas-price 0
+	forge script script/Init.s.sol:$(CONTRACT)InitializeScript --rpc-url $(RPC_URL) --broadcast
 grant-role-v3automation: v3automation
-	forge script script/GrantRole.s.sol:V3AutomationGrantRoleScript --rpc-url $(RPC_URL) --broadcast --legacy --gas-price 0
+	forge script script/GrantRole.s.sol:V3AutomationGrantRoleScript --rpc-url $(RPC_URL) --broadcast 
 grant-role-v3utils: v3utils
 	forge script script/GrantRole.s.sol:$(CONTRACT)GrantRoleScript --rpc-url $(RPC_URL) --broadcast
 deploy-everything:
