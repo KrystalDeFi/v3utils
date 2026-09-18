@@ -18,7 +18,7 @@ solc = "0.8.15"
 
 libraries = [
     'src/Nfpm.sol:Nfpm:0x7b468aFA6826Ea4fF6021456fE1485C4064Dea0a',
-    'src/CommonLib.sol:CommonLib:0xc7a66fe956ef779837b5d789086a8ebe4addd5fd'
+    'src/CommonLib.sol:CommonLib:0xc2f0dca353bb35f88651ebb5d7658a080ba00715'
 ]
 
 [profile.linker]
@@ -33,9 +33,19 @@ solc = "0.8.15"
 libraries = [
     'src/StructHash.sol:StructHash:0xB486F83280F19cf652843b8F79e52572D589Bbf9',
     'src/Nfpm.sol:Nfpm:0x5306493CCF612bc8564B30B0CDB7ff8fbd719a95',
-    'src/CommonLib.sol:CommonLib:0xc7a66fe956ef779837b5d789086a8ebe4addd5fd'
+    'src/CommonLib.sol:CommonLib:0xc2f0dca353bb35f88651ebb5d7658a080ba00715'
 ]
 
+# NOTE: compute these addresses under the SAME profile the deploy script runs in, or you will get a
+# different answer. bytecode_hash defaults to "ipfs" and the appended metadata covers the compiler
+# settings -- including `libraries` -- so a build that links libraries produces different bytecode,
+# and therefore a different CREATE2 address, than one that does not. `make deploy-commonlib` sets no
+# FOUNDRY_PROFILE, so CommonLib is deployed (and must be computed) under [profile.default].
+# The same metadata sensitivity means an unrelated dependency change moves every address here: PR #60
+# shifted all of them just by adding two lines to remappings.txt. After any dependency or settings
+# change, recompute and re-pin, and confirm against the deploy broadcast rather than trusting a
+# local computation.
+#
 # These files are compiled to CREATE2-deployed libraries at the hardcoded
 # addresses above. Their deployed address depends on keccak256(creationCode),
 # and with bytecode_hash = "ipfs" (the default) the appended metadata hash
