@@ -53,6 +53,29 @@ contract MockEnshrinedNative {
 }
 
 /// @dev Only needs to answer decimals(): initialize's scale validation reads nothing else.
+/// @notice A WETH9 complete enough for the mixed flow: wrap via deposit, top up via transferFrom.
+contract MockWeth9 {
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function deposit() external payable {
+        balanceOf[msg.sender] += msg.value;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        require(allowance[from][msg.sender] >= amount, "ERC20: transfer amount exceeds allowance");
+        allowance[from][msg.sender] -= amount;
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+}
+
 /// @notice A WETH9-shaped mock with no decimals(): reaching for one on the wrapped path would revert.
 contract MockNoDecimals {
     function deposit() external payable {}
@@ -81,6 +104,17 @@ contract NativeHarness is V3Utils {
 
     function sendNative(address to, uint256 tokenAmount) external {
         _sendNative(to, tokenAmount);
+    }
+
+    function prepareSwap(
+        IERC20 token0,
+        IERC20 token1,
+        IERC20 otherToken,
+        uint256 amount0,
+        uint256 amount1,
+        uint256 amountOther
+    ) external payable {
+        _prepareSwap(token0, token1, otherToken, amount0, amount1, amountOther);
     }
 
     function transferToken(address to, IERC20 token, uint256 amount, bool unwrap) external {
@@ -254,4 +288,65 @@ contract EnshrinedNativeTest is Test {
     function test() external {}
 
     receive() external payable {}
+    // --- unit mix-ups on an enshrined chain -------------------------------------
+    // Regression for a real Arc revert. swapAndMint was sent msg.value = 1000e18 with
+    // amount1 = 1000e18, but token1 was the 6-decimal 0x3600 view, so the correct amount1 was
+    // 1000e6. The native credited 1e9 while 1e21 was declared, and the contract dutifully tried to
+    // transferFrom the ~1e21 difference - which only failed because the allowance was too small.
+
+    function testEnshrinedRejectsNativeUnitsDeclaredForTokenAmount() public {
+        uint256 nativeSent = 1000 * 1e18; // what msg.value carried
+        uint256 wrongDeclared = 1000 * 1e18; // 18-dec units for a 6-dec token
+        vm.deal(address(this), nativeSent);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CommonLib.NativeAmountMismatch.selector,
+                1000 * 1e6, // credited, in token units
+                wrongDeclared
+            )
+        );
+        harness.prepareSwap{value: nativeSent}(
+            IERC20(address(0xdead)), IERC20(address(usdc)), IERC20(address(0)), 0, wrongDeclared, 0
+        );
+    }
+
+    /// The same call with amounts in the token's own units is accepted.
+    function testEnshrinedAcceptsTokenUnitsForTokenAmount() public {
+        uint256 nativeSent = 1000 * 1e18;
+        vm.deal(address(this), nativeSent);
+        harness.prepareSwap{value: nativeSent}(
+            IERC20(address(0xdead)), IERC20(address(usdc)), IERC20(address(0)), 0, 1000 * 1e6, 0
+        );
+        assertEq(usdc.balanceOf(address(harness)), 1000 * 1e6);
+    }
+
+    /// Sending more than declared is still the pre-existing TooMuchEtherSent, not the new error.
+    function testEnshrinedStillRejectsTooMuchEther() public {
+        vm.deal(address(this), 2000 * 1e18);
+        vm.expectRevert(CommonLib.TooMuchEtherSent.selector);
+        harness.prepareSwap{value: 2000 * 1e18}(
+            IERC20(address(0xdead)), IERC20(address(usdc)), IERC20(address(0)), 0, 1000 * 1e6, 0
+        );
+    }
+
+    /// The mismatch guard must stay scoped to enshrined chains. On a WETH9 chain, paying part of an
+    /// amount with native value and the rest from an existing WETH balance is a legitimate flow, so
+    /// dropping the `native.enshrined` condition would break it. Without this test, applying the
+    /// guard unconditionally passes the whole suite.
+    function testWrappedAllowsPartialNativeWithTransferFromTopUp() public {
+        MockWeth9 weth9 = new MockWeth9();
+        NativeHarness h = _deploy(address(weth9), Common.NativeMode.WRAPPED, 0);
+
+        // this test contract plays the caller: 0.4 ether already wrapped and approved, 0.6 sent raw
+        vm.deal(address(this), 1 ether);
+        weth9.deposit{value: 0.4 ether}();
+        weth9.approve(address(h), 0.4 ether);
+
+        h.prepareSwap{value: 0.6 ether}(
+            IERC20(address(0xdead)), IERC20(address(weth9)), IERC20(address(0)), 0, 1 ether, 0
+        );
+
+        assertEq(weth9.balanceOf(address(h)), 1 ether); // 0.6 wrapped in + 0.4 pulled
+        assertEq(weth9.balanceOf(address(this)), 0);
+    }
 }

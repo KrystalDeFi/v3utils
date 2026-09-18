@@ -26,6 +26,7 @@ library CommonLib {
     error TransferError();
     error TooMuchEtherSent();
     error NoEtherToken();
+    error NativeAmountMismatch(uint256 credited, uint256 declared);
     error NativeDustNotAllowed();
     error EtherSendFailed();
 
@@ -96,24 +97,32 @@ library CommonLib {
         // take in ether sent, credited in units of the native-representing token
         if (msg.value != 0) {
             uint256 credited = receiveNative(native, msg.value);
+            uint256 declared;
 
             if (native.weth == address(token0)) {
                 amountAdded0 = credited;
-                if (amountAdded0 > amount0) {
-                    revert TooMuchEtherSent();
-                }
+                declared = amount0;
             } else if (native.weth == address(token1)) {
                 amountAdded1 = credited;
-                if (amountAdded1 > amount1) {
-                    revert TooMuchEtherSent();
-                }
+                declared = amount1;
             } else if (native.weth == address(otherToken)) {
                 amountAddedOther = credited;
-                if (amountAddedOther > amountOther) {
-                    revert TooMuchEtherSent();
-                }
+                declared = amountOther;
             } else {
                 revert NoEtherToken();
+            }
+
+            if (credited > declared) {
+                revert TooMuchEtherSent();
+            }
+            // On an enshrined chain native and this token are one asset, so topping the rest up by
+            // transferFrom is pointless - the caller could simply have sent more native. A declared
+            // amount in native 18-decimal units instead of the token's own decimals looks exactly
+            // like that, and left unchecked it pulls the difference: with a generous allowance a
+            // 1e12 unit slip would quietly move ~1e12x the intended amount rather than revert.
+            // Reject the mismatch and report both numbers, since their ratio names the mistake.
+            if (native.enshrined && credited != declared) {
+                revert NativeAmountMismatch(credited, declared);
             }
         }
 
