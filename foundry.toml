@@ -17,8 +17,8 @@ optimizer_runs = 200
 solc = "0.8.15"
 
 libraries = [
-    'src/Nfpm.sol:Nfpm:0x5306493CCF612bc8564B30B0CDB7ff8fbd719a95',
-    'src/CommonLib.sol:CommonLib:0x4078cd0b491845c165d353d469d9aef2232ebbdf'
+    'src/Nfpm.sol:Nfpm:0x7b468aFA6826Ea4fF6021456fE1485C4064Dea0a',
+    'src/CommonLib.sol:CommonLib:0xc7a66fe956ef779837b5d789086a8ebe4addd5fd'
 ]
 
 [profile.linker]
@@ -33,7 +33,7 @@ solc = "0.8.15"
 libraries = [
     'src/StructHash.sol:StructHash:0xB486F83280F19cf652843b8F79e52572D589Bbf9',
     'src/Nfpm.sol:Nfpm:0x5306493CCF612bc8564B30B0CDB7ff8fbd719a95',
-    'src/CommonLib.sol:CommonLib:0x4078cd0b491845c165d353d469d9aef2232ebbdf'
+    'src/CommonLib.sol:CommonLib:0xc7a66fe956ef779837b5d789086a8ebe4addd5fd'
 ]
 
 # These files are compiled to CREATE2-deployed libraries at the hardcoded
