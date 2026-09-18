@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
 import "../src/V3Utils.sol";
+import "../src/CommonLib.sol";
 
 /// @notice Models an Arc-style enshrined native asset: an ERC20 *view* over the account's native
 /// balance, 6 decimals against 18-decimal native, sharing one balance with it. Transfers through
@@ -52,6 +53,13 @@ contract MockEnshrinedNative {
 }
 
 /// @dev Only needs to answer decimals(): initialize's scale validation reads nothing else.
+/// @notice A WETH9-shaped mock with no decimals(): reaching for one on the wrapped path would revert.
+contract MockNoDecimals {
+    function deposit() external payable {}
+
+    function withdraw(uint256) external {}
+}
+
 contract MockDecimals {
     uint8 private immutable _decimals;
 
@@ -68,7 +76,7 @@ contract MockDecimals {
 /// independently of a full mint flow.
 contract NativeHarness is V3Utils {
     function receiveNative() external payable returns (uint256) {
-        return _receiveNative(msg.value);
+        return CommonLib.receiveNative(_nativeConfig(), msg.value);
     }
 
     function sendNative(address to, uint256 tokenAmount) external {
@@ -77,6 +85,16 @@ contract NativeHarness is V3Utils {
 
     function transferToken(address to, IERC20 token, uint256 amount, bool unwrap) external {
         _transferToken(to, token, amount, unwrap);
+    }
+
+    // nativeMode/nativeScale are internal on Common (a public getter is bytecode V3Utils cannot
+    // spare), so surface them here for assertions.
+    function nativeModeView() external view returns (Common.NativeMode) {
+        return nativeMode;
+    }
+
+    function nativeScaleView() external view returns (uint256) {
+        return nativeScale;
     }
 
     function test() external {}
@@ -97,89 +115,52 @@ contract EnshrinedNativeTest is Test {
         harness = _deploy(address(usdc), Common.NativeMode.ENSHRINED, SCALE);
     }
 
+    /// @param scale ignored - the contract derives nativeScale itself; kept so call sites read clearly
     function _deploy(address weth, Common.NativeMode mode, uint256 scale) internal returns (NativeHarness h) {
+        scale;
         address[] memory nfpms = new address[](0);
         vm.startBroadcast(owner);
         h = new NativeHarness();
-        h.initialize(router, owner, owner, weth, mode, scale, nfpms);
+        h.initialize(router, owner, owner, weth, mode, nfpms);
         vm.stopBroadcast();
     }
 
     // --- initialize validation ------------------------------------------------
-
-    function testInitializeRejectsZeroScale() public {
-        address[] memory nfpms = new address[](0);
-        vm.startBroadcast(owner);
-        NativeHarness h = new NativeHarness();
-        vm.expectRevert(Common.InvalidNativeConfig.selector);
-        h.initialize(router, owner, owner, address(usdc), Common.NativeMode.ENSHRINED, 0, nfpms);
-        vm.stopBroadcast();
-    }
-
-    function testInitializeRejectsWrappedWithNonUnitScale() public {
-        address[] memory nfpms = new address[](0);
-        vm.startBroadcast(owner);
-        NativeHarness h = new NativeHarness();
-        vm.expectRevert(Common.InvalidNativeConfig.selector);
-        h.initialize(router, owner, owner, address(usdc), Common.NativeMode.WRAPPED, SCALE, nfpms);
-        vm.stopBroadcast();
-    }
-
     function testInitializeRejectsEnshrinedWithoutToken() public {
         address[] memory nfpms = new address[](0);
         vm.startBroadcast(owner);
         NativeHarness h = new NativeHarness();
         vm.expectRevert(Common.InvalidNativeConfig.selector);
-        h.initialize(router, owner, owner, address(0), Common.NativeMode.ENSHRINED, SCALE, nfpms);
+        h.initialize(router, owner, owner, address(0), Common.NativeMode.ENSHRINED, nfpms);
         vm.stopBroadcast();
     }
 
-    /// Regression for PR #61 review: an unset NATIVE_SCALE defaults to 1, which would otherwise
-    /// initialize ENSHRINED successfully and then underpay every native transfer by the scale factor.
-    /// initialize is one-shot with no setter, so this has to be caught here or not at all.
-    function testInitializeRejectsEnshrinedScaleMismatchingTokenDecimals() public {
-        address[] memory nfpms = new address[](0);
-        vm.startBroadcast(owner);
-        NativeHarness h = new NativeHarness();
-        vm.expectRevert(Common.InvalidNativeConfig.selector);
-        h.initialize(router, owner, owner, address(usdc), Common.NativeMode.ENSHRINED, 1, nfpms);
-        vm.stopBroadcast();
+    function testInitializeStoresNativeConfig() public view {
+        assertEq(uint8(harness.nativeModeView()), uint8(Common.NativeMode.ENSHRINED));
+        assertEq(harness.nativeScaleView(), SCALE);
+        assertEq(harness.WETH(), address(usdc));
     }
 
-    function testInitializeRejectsEnshrinedWithWrongNonUnitScale() public {
-        address[] memory nfpms = new address[](0);
-        vm.startBroadcast(owner);
-        NativeHarness h = new NativeHarness();
-        vm.expectRevert(Common.InvalidNativeConfig.selector);
-        h.initialize(router, owner, owner, address(usdc), Common.NativeMode.ENSHRINED, 1e6, nfpms);
-        vm.stopBroadcast();
+    /// nativeScale is derived from the token, not supplied, so a wrong value is unrepresentable.
+    function testInitializeDerivesScaleFromTokenDecimals() public {
+        assertEq(_deploy(address(new MockDecimals(6)), Common.NativeMode.ENSHRINED, 0).nativeScaleView(), 1e12);
+        assertEq(_deploy(address(new MockDecimals(18)), Common.NativeMode.ENSHRINED, 0).nativeScaleView(), 1);
+        assertEq(_deploy(address(new MockDecimals(0)), Common.NativeMode.ENSHRINED, 0).nativeScaleView(), 1e18);
     }
 
-    /// The scale check must not outlaw a genuine 18-decimal enshrined asset, where 1:1 is correct.
-    function testInitializeAcceptsEnshrinedEighteenDecimalTokenAtScaleOne() public {
-        address token = address(new MockDecimals(18));
-        address[] memory nfpms = new address[](0);
-        vm.startBroadcast(owner);
-        NativeHarness h = new NativeHarness();
-        h.initialize(router, owner, owner, token, Common.NativeMode.ENSHRINED, 1, nfpms);
-        vm.stopBroadcast();
-        assertEq(h.nativeScale(), 1);
-    }
-
-    function testInitializeRejectsEnshrinedTokenOverEighteenDecimals() public {
+    function testInitializeRejectsTokenOverEighteenDecimals() public {
         address token = address(new MockDecimals(19));
         address[] memory nfpms = new address[](0);
         vm.startBroadcast(owner);
         NativeHarness h = new NativeHarness();
         vm.expectRevert(Common.InvalidNativeConfig.selector);
-        h.initialize(router, owner, owner, token, Common.NativeMode.ENSHRINED, 1, nfpms);
+        h.initialize(router, owner, owner, token, Common.NativeMode.ENSHRINED, nfpms);
         vm.stopBroadcast();
     }
 
-    function testInitializeStoresNativeConfig() public view {
-        assertEq(uint8(harness.nativeMode()), uint8(Common.NativeMode.ENSHRINED));
-        assertEq(harness.nativeScale(), SCALE);
-        assertEq(harness.WETH(), address(usdc));
+    /// WRAPPED never reads decimals: a WETH9 wrapper is 1:1 with native by definition.
+    function testWrappedScaleIsOneWithoutReadingDecimals() public {
+        assertEq(_deploy(address(new MockNoDecimals()), Common.NativeMode.WRAPPED, 0).nativeScaleView(), 1);
     }
 
     // --- native -> token (truncating direction) -------------------------------
@@ -193,14 +174,14 @@ contract EnshrinedNativeTest is Test {
 
     function testReceiveNativeRejectsDust() public {
         vm.deal(address(this), 100 * SCALE + 1);
-        vm.expectRevert(Common.NativeDustNotAllowed.selector);
+        vm.expectRevert(CommonLib.NativeDustNotAllowed.selector);
         harness.receiveNative{value: 100 * SCALE + 1}();
     }
 
     function testReceiveNativeRejectsSubUnitValue() public {
         vm.deal(address(this), 1 ether);
         // below one 6-dec unit the whole amount would truncate to zero and be stranded
-        vm.expectRevert(Common.NativeDustNotAllowed.selector);
+        vm.expectRevert(CommonLib.NativeDustNotAllowed.selector);
         harness.receiveNative{value: SCALE - 1}();
     }
 
@@ -249,14 +230,25 @@ contract EnshrinedNativeTest is Test {
 
     // --- the zero-WETH guard in _transferToken --------------------------------
 
-    function testTransferTokenWithUnsetWethNeverUnwraps() public {
-        NativeHarness wrapped = _deploy(address(0), Common.NativeMode.WRAPPED, 1);
-        vm.deal(address(wrapped), 50 * SCALE);
-        // A zero token address must not be mistaken for an unset WETH and unwrapped. Asserting the
-        // SafeERC20 error pins which branch ran: without the WETH != address(0) guard this call
-        // reaches IWETH9(address(0)).withdraw() instead, which reverts with no data.
+    /// A zero WETH is rejected at initialize, which is what makes the unwrap branch in
+    /// _transferToken safe against a zero token address without its own guard.
+    function testInitializeRejectsZeroWethInEitherMode() public {
+        address[] memory nfpms = new address[](0);
+        vm.startBroadcast(owner);
+        NativeHarness a = new NativeHarness();
+        vm.expectRevert(Common.InvalidNativeConfig.selector);
+        a.initialize(router, owner, owner, address(0), Common.NativeMode.WRAPPED, nfpms);
+        NativeHarness b = new NativeHarness();
+        vm.expectRevert(Common.InvalidNativeConfig.selector);
+        b.initialize(router, owner, owner, address(0), Common.NativeMode.ENSHRINED, nfpms);
+        vm.stopBroadcast();
+    }
+
+    /// With WETH guaranteed non-zero, a zero token address simply takes the ERC20 branch.
+    function testTransferTokenWithZeroTokenTakesErc20Path() public {
+        vm.deal(address(harness), 50 * SCALE);
         vm.expectRevert("Address: call to non-contract");
-        wrapped.transferToken(recipient, IERC20(address(0)), 50, true);
+        harness.transferToken(recipient, IERC20(address(0)), 50, true);
     }
 
     function test() external {}

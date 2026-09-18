@@ -23,10 +23,9 @@ contract V3Automation is Pausable, Common, EIP712 {
         address feeTaker,
         address _weth,
         NativeMode _nativeMode,
-        uint256 _nativeScale,
         address[] calldata whitelistedNfpms
     ) public override {
-        super.initialize(_swapRouter, admin, feeTaker, _weth, _nativeMode, _nativeScale, whitelistedNfpms);
+        super.initialize(_swapRouter, admin, feeTaker, _weth, _nativeMode, whitelistedNfpms);
         _grantRole(OPERATOR_ROLE, admin);
     }
 

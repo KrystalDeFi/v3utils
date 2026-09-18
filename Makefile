@@ -26,11 +26,14 @@ structhash:
 	$(eval CONTRACT=StructHash)
 nfpm:
 	$(eval CONTRACT=Nfpm)
+commonlib:
+	$(eval CONTRACT=CommonLib)
 deploy-%: %
 	$(DEPLOY_CMD)
 deploy-v3utils:
 deploy-structhash:
 deploy-nfpm:
+deploy-commonlib:
 deploy-v3automation:
 
 verify-%: %
@@ -38,7 +41,8 @@ verify-%: %
 verify-v3utils:
 verify-structhash:
 verify-nfpm:
-verify-v3automation: v3automation
+verify-commonlib:
+verify-v3automation: v3automation-check v3automation
 	$(VERIFY_CMD)
 init-v3utils:
 init-v3automation:
@@ -50,10 +54,12 @@ grant-role-v3utils: v3utils
 	forge script script/GrantRole.s.sol:$(CONTRACT)GrantRoleScript --rpc-url $(RPC_URL) --broadcast
 deploy-everything:
 	make deploy-nfpm
+	make deploy-commonlib
 	make deploy-structhash
 	make deploy-v3utils
 	make deploy-v3automation
 	make verify-nfpm
+	make verify-commonlib
 	make verify-structhash
 	make verify-v3utils
 	make verify-v3automation

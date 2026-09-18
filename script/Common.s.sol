@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import "forge-std/Script.sol";
 import "../src/V3Automation.sol";
 import "../src/V3Utils.sol";
+import "../src/CommonLib.sol";
 import "@openzeppelin/contracts/utils/Create2.sol";
 
 abstract contract CommonScript is Script {
@@ -53,21 +54,12 @@ abstract contract CommonScript is Script {
     // Native-asset model for the target chain. Chains with a normal WETH9 wrapper set neither var,
     // so both default to the wrapped 1:1 model and their existing .env blocks keep working as-is.
     // nativeMode: 0 = WRAPPED, 1 = ENSHRINED (ERC20 view of native, e.g. Arc's USDC at 0x3600...).
-    // nativeScale: units of native per 1 smallest unit of WETH. 1 when WRAPPED, 1e12 on Arc.
+    // nativeScale is not configured: the contract derives it from IERC20Metadata(WETH).decimals().
     function nativeMode() internal view returns (uint8) {
         uint256 mode = vm.envOr("NATIVE_MODE", uint256(0));
         // bound before the cast: uint8(256) would silently read back as WRAPPED
         require(mode <= 1, "NATIVE_MODE must be 0 (WRAPPED) or 1 (ENSHRINED)");
         return uint8(mode);
-    }
-
-    function nativeScale() internal view returns (uint256) {
-        // No default under ENSHRINED. Falling back to 1 there would deploy a contract that
-        // underpays every native transfer by the scale factor, and initialize cannot be redone.
-        if (nativeMode() != 0) {
-            return vm.envUint("NATIVE_SCALE");
-        }
-        return vm.envOr("NATIVE_SCALE", uint256(1));
     }
 
     function getV3UtilsDeploymentAddress() internal view returns (address) {
@@ -80,6 +72,10 @@ abstract contract CommonScript is Script {
 
     function getStructHashDeploymentAddress() internal view returns (address) {
         return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(StructHash).creationCode)), factory);
+    }
+
+    function getCommonLibDeploymentAddress() internal view returns (address) {
+        return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(CommonLib).creationCode)), factory);
     }
 
     function getNfpmDeploymentAddress() internal view returns (address) {

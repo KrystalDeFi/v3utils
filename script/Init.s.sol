@@ -10,14 +10,12 @@ import "@openzeppelin/contracts/utils/Create2.sol";
 
 interface IV3Initializer {
     // nativeMode: 0 = WRAPPED (WETH9 wrapper), 1 = ENSHRINED (ERC20 view of native, e.g. Arc)
-    // nativeScale: units of native per 1 smallest unit of `weth`. 1 when WRAPPED, 1e12 on Arc.
     function initialize(
         address _swapRouter,
         address admin,
         address feeTaker,
         address weth,
         uint8 nativeMode,
-        uint256 nativeScale,
         address[] calldata nfpms
     ) external;
 }
@@ -35,7 +33,6 @@ contract V3AutomationInitializeScript is CommonScript {
             vm.envAddress("FEE_TAKER"),
             vm.envAddress("WETH"),
             nativeMode(),
-            nativeScale(),
             vm.envAddress("NFPMS", ",")
         );
 
@@ -58,7 +55,6 @@ contract V3UtilsInitializeScript is CommonScript {
             vm.envAddress("FEE_TAKER"),
             vm.envAddress("WETH"),
             nativeMode(),
-            nativeScale(),
             vm.envAddress("NFPMS", ",")
         );
 
