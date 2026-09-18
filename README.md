@@ -56,9 +56,22 @@ Run script below to get verify contract script
 make verify-v3utils
 ```
 # Notes
-If StructHash is updated or deployed to a new chain, update its address in `foundry.toml`
+`StructHash`, `Nfpm` and `CommonLib` are CREATE2-deployed libraries, linked by address rather than
+compiled into the contracts that use them. `CommonLib` exists because `V3Utils` sits close to the
+EIP-170 24576-byte limit: moving the heavy shared helpers into an external library is what keeps it
+under. Deploy them before the contracts that link them (`make deploy-everything` does this in order).
+
+If any of them is updated or deployed to a new chain, update its address in `foundry.toml`:
 ```toml
 libraries = [
-    'src/StructHash.sol:StructHash:<new_address>'
+    'src/StructHash.sol:StructHash:<new_address>',
+    'src/Nfpm.sol:Nfpm:<new_address>',
+    'src/CommonLib.sol:CommonLib:<new_address>'
 ]
 ```
+and keep `COMMON_LIB_ADDRESS` / `NFPM_LIB_ADDRESS` / `STRUCT_HASH_ADDRESS` in `.env` in step, since
+the verify scripts read the addresses from there.
+
+These three files are excluded from `forge fmt` on purpose: their deployed address is derived from
+`keccak256(creationCode)`, and the appended metadata hash covers the source bytes, so reformatting
+them changes their address.
