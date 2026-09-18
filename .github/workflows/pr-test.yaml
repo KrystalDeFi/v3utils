@@ -1,0 +1,29 @@
+name: Run AUTO_ENTER forge tests on the PR
+
+concurrency:
+  group: 'pr-forge-test-auto-enter-${{ github.event.pull_request.number }}'
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    branches:
+      - master
+      - feat/auto-enter
+
+jobs:
+  pr-forge-test-auto-enter:
+    if: github.actor != 'Krystal-CICD'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      # AUTO_ENTER unit tests are fork-free (no RPC / .env needed) — scope to them
+      # so this gate is deterministic and green without chain access. The broader
+      # fork-dependent suite stays out of this targeted workflow.
+      - name: Run AUTO_ENTER forge tests
+        run: forge test --match-path "test/AutoEnter.t.sol" -vvv
