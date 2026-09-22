@@ -14,10 +14,7 @@ contract VerifyV3UtilsScript is CommonScript {
                 "forge verify-contract ",
                 Strings.toHexString(deploymentAddress),
                 " src/V3Utils.sol:V3Utils",
-                " --libraries src/Nfpm.sol:Nfpm:",
-                vm.envString("NFPM_LIB_ADDRESS"),
-                " --libraries src/CommonLib.sol:CommonLib:",
-                vm.envString("COMMON_LIB_ADDRESS"),
+                libraryFlags("v3utilslinker"),
                 " --rpc-url ",
                 vm.envString("RPC_URL"),
                 verifierFlags()
@@ -90,12 +87,7 @@ contract VerifyV3AutomationScript is CommonScript {
                 "forge verify-contract ",
                 Strings.toHexString(deploymentAddress),
                 " src/V3Automation.sol:V3Automation",
-                " --libraries src/StructHash.sol:StructHash:",
-                vm.envString("STRUCT_HASH_ADDRESS"),
-                " --libraries src/Nfpm.sol:Nfpm:",
-                vm.envString("NFPM_LIB_ADDRESS"),
-                " --libraries src/CommonLib.sol:CommonLib:",
-                vm.envString("COMMON_LIB_ADDRESS"),
+                libraryFlags("linker"),
                 verifierFlags()
             )
         );

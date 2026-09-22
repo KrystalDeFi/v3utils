@@ -8,28 +8,10 @@ import "../src/CommonLib.sol";
 import "@openzeppelin/contracts/utils/Create2.sol";
 
 abstract contract CommonScript is Script {
-    bytes16 private constant HEX_DIGITS = "0123456789abcdef";
-
     address krystalRouter;
     address admin;
     bytes32 salt;
     address factory = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-
-    function toHexString(uint256 value, uint256 length) internal pure returns (string memory) {
-        uint256 localValue = value;
-        bytes memory buffer = new bytes(2 * length + 2);
-        buffer[0] = "0";
-        buffer[1] = "x";
-        for (uint256 i = 2 * length + 1; i > 1; --i) {
-            buffer[i] = HEX_DIGITS[localValue & 0xf];
-            localValue >>= 4;
-        }
-        return string(buffer);
-    }
-
-    function toHexString(address addr) internal pure returns (string memory) {
-        return toHexString(uint256(uint160(addr)), 20);
-    }
 
     // Builds the verifier flags for `forge verify-contract`, sourced from env so the same
     // scripts work across explorers (e.g. blockscout for chains Etherscan doesn't support).
@@ -47,6 +29,20 @@ abstract contract CommonScript is Script {
         }
         if (bytes(apiKey).length > 0) {
             flags = string.concat(flags, " --etherscan-api-key ", apiKey);
+        }
+        return flags;
+    }
+
+    // Builds `--libraries` flags for `forge verify-contract` from foundry.toml's `libraries`, the same
+    // list the deploy links against - so a re-pinned library address can never be picked up by one
+    // and missed by the other. Entries are already in forge's `path:Name:address` form. Requires
+    // fs_permissions read access on foundry.toml, which the linker profiles grant.
+    function libraryFlags(string memory profile) internal view returns (string memory) {
+        string[] memory libraries =
+            vm.parseTomlStringArray(vm.readFile("foundry.toml"), string.concat(".profile.", profile, ".libraries"));
+        string memory flags = "";
+        for (uint256 i = 0; i < libraries.length; i++) {
+            flags = string.concat(flags, " --libraries ", libraries[i]);
         }
         return flags;
     }

@@ -16,9 +16,14 @@ optimizer_runs = 200
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
 solc = "0.8.15"
 
+# Verify.s.sol reads the `libraries` list below to build `forge verify-contract --libraries`, so the
+# deploy and the verification can never drift apart. fs_permissions is a forge runtime setting only -
+# it is not part of the solc input, so it does not move any CREATE2 address.
+fs_permissions = [{ access = "read", path = "./foundry.toml" }]
+
 libraries = [
     'src/Nfpm.sol:Nfpm:0x7b468aFA6826Ea4fF6021456fE1485C4064Dea0a',
-    'src/CommonLib.sol:CommonLib:0xc2f0dca353bb35f88651ebb5d7658a080ba00715'
+    'src/CommonLib.sol:CommonLib:0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4'
 ]
 
 [profile.linker]
@@ -30,10 +35,15 @@ optimizer_runs = 200
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
 solc = "0.8.15"
 
+# Verify.s.sol reads the `libraries` list below to build `forge verify-contract --libraries`, so the
+# deploy and the verification can never drift apart. fs_permissions is a forge runtime setting only -
+# it is not part of the solc input, so it does not move any CREATE2 address.
+fs_permissions = [{ access = "read", path = "./foundry.toml" }]
+
 libraries = [
-    'src/StructHash.sol:StructHash:0xB486F83280F19cf652843b8F79e52572D589Bbf9',
-    'src/Nfpm.sol:Nfpm:0x5306493CCF612bc8564B30B0CDB7ff8fbd719a95',
-    'src/CommonLib.sol:CommonLib:0xc2f0dca353bb35f88651ebb5d7658a080ba00715'
+    'src/StructHash.sol:StructHash:0x7637F99dF82CA0f47d8e3D6742c925b7B14900A5',
+    'src/Nfpm.sol:Nfpm:0x7b468aFA6826Ea4fF6021456fE1485C4064Dea0a',
+    'src/CommonLib.sol:CommonLib:0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4'
 ]
 
 # NOTE: compute these addresses under the SAME profile the deploy script runs in, or you will get a

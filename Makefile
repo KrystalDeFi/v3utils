@@ -10,7 +10,7 @@ build: src/V3Utils.sol clean
 	forge build
 test: src/V3Utils.sol test/*
 	forge test
-.PHONY: clean v3utils v3automation structhash
+.PHONY: clean v3utils v3automation structhash libs-check-v3utils libs-check-v3automation
 clean:
 	forge clean && rm -rf cache
 v3utils:
@@ -22,34 +22,16 @@ v3automation:
 # Libraries are reached by DELEGATECALL, so a linked address that holds the wrong code runs the
 # wrong logic silently - exactly what happened on Arc, where a stale CommonLib stayed pinned after
 # its source changed. (A *missing* address is safe: solc guards library calls with an extcodesize
-# check, so the call reverts.) Assert, for each linked library, that .env agrees with the address
-# foundry.toml links against and that code exists there on the target chain.
-libs-check: libs-check-config libs-check-code
+# check, so the call reverts.) foundry.toml's `libraries` is the only source of truth for what gets
+# linked; check-libs.sh asserts each pinned address holds the bytecode we build, on the target chain.
+# The profile is spelled out rather than read from $(FOUNDRY_PROFILE): that variable is set by an
+# $(eval) in a sibling prerequisite's recipe, so its value here would depend on prerequisite order.
+libs-check-v3utils:
+	@script/check-libs.sh v3utilslinker
 
-# Config consistency needs no network, so check it first and fail fast.
-libs-check-config:
-	@for pair in "Nfpm:$(NFPM_LIB_ADDRESS)" "CommonLib:$(COMMON_LIB_ADDRESS)"; do \
-		name=$${pair%%:*}; addr=$${pair#*:}; \
-		if [ -z "$$addr" ]; then echo "$$name address is not set in .env"; exit 1; fi; \
-		if ! grep -iq "$$name:$$addr" foundry.toml; then \
-			echo "MISMATCH $$name: .env says $$addr, foundry.toml links:"; \
-			grep -i "$$name:0x" foundry.toml; \
-			echo "deploy links against foundry.toml while verify passes .env, so these must agree"; \
-			exit 1; fi; \
-		echo "$$name config ok  $$addr"; \
-	done
+libs-check-v3automation:
+	@script/check-libs.sh linker
 
-libs-check-code:
-	@for pair in "Nfpm:$(NFPM_LIB_ADDRESS)" "CommonLib:$(COMMON_LIB_ADDRESS)"; do \
-		name=$${pair%%:*}; addr=$${pair#*:}; \
-		if [ $$(cast co $$addr --rpc-url $(RPC_URL) | wc -m) -le 3 ]; then \
-			echo "$$name is not deployed at $$addr on this chain =>> deploy it first"; exit 1; fi; \
-		echo "$$name deployed ok  $$addr"; \
-	done
-
-v3automation-check: libs-check
-	forge script script/V3Automation.s.sol:BeforeV3AutomationScript
-	@if [[ $$(cast co $(STRUCT_HASH_ADDRESS) --rpc-url $(RPC_URL) | wc -m) -eq 3 ]]; then echo 'structhash not deployed yet. =>> `make deploy-structhash` first'; exit 1; fi
 structhash:
 	$(eval CONTRACT=StructHash)
 nfpm:
@@ -58,19 +40,19 @@ commonlib:
 	$(eval CONTRACT=CommonLib)
 deploy-%: %
 	$(DEPLOY_CMD)
-deploy-v3utils: libs-check
+deploy-v3utils: libs-check-v3utils
 deploy-structhash:
 deploy-nfpm:
 deploy-commonlib:
-deploy-v3automation: libs-check
+deploy-v3automation: libs-check-v3automation
 
 verify-%: %
 	$(VERIFY_CMD)
-verify-v3utils: libs-check
+verify-v3utils: libs-check-v3utils
 verify-structhash:
 verify-nfpm:
 verify-commonlib:
-verify-v3automation: v3automation-check v3automation
+verify-v3automation: libs-check-v3automation v3automation
 	$(VERIFY_CMD)
 init-v3utils:
 init-v3automation:
