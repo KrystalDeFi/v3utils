@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.0;
 
 import "./Common.s.sol";
 
-contract V3AutomationScript is CommonScript {
+contract CommonLibScript is CommonScript {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
-        V3Automation v3automation = new V3Automation{salt: salt}();
+        address deploymentAddress = Create2.deploy(0, salt, type(CommonLib).creationCode);
+        console.logAddress(deploymentAddress);
         vm.stopBroadcast();
     }
 
-    // To ignore from test coverage
     function test() external {}
 }

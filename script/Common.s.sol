@@ -4,31 +4,14 @@ pragma solidity ^0.8.0;
 import "forge-std/Script.sol";
 import "../src/V3Automation.sol";
 import "../src/V3Utils.sol";
+import "../src/CommonLib.sol";
 import "@openzeppelin/contracts/utils/Create2.sol";
 
 abstract contract CommonScript is Script {
-    bytes16 private constant HEX_DIGITS = "0123456789abcdef";
-
     address krystalRouter;
     address admin;
     bytes32 salt;
     address factory = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-
-    function toHexString(uint256 value, uint256 length) internal pure returns (string memory) {
-        uint256 localValue = value;
-        bytes memory buffer = new bytes(2 * length + 2);
-        buffer[0] = "0";
-        buffer[1] = "x";
-        for (uint256 i = 2 * length + 1; i > 1; --i) {
-            buffer[i] = HEX_DIGITS[localValue & 0xf];
-            localValue >>= 4;
-        }
-        return string(buffer);
-    }
-
-    function toHexString(address addr) internal pure returns (string memory) {
-        return toHexString(uint256(uint160(addr)), 20);
-    }
 
     // Builds the verifier flags for `forge verify-contract`, sourced from env so the same
     // scripts work across explorers (e.g. blockscout for chains Etherscan doesn't support).
@@ -50,6 +33,31 @@ abstract contract CommonScript is Script {
         return flags;
     }
 
+    // Builds `--libraries` flags for `forge verify-contract` from foundry.toml's `libraries`, the same
+    // list the deploy links against - so a re-pinned library address can never be picked up by one
+    // and missed by the other. Entries are already in forge's `path:Name:address` form. Requires
+    // fs_permissions read access on foundry.toml, which the linker profiles grant.
+    function libraryFlags(string memory profile) internal view returns (string memory) {
+        string[] memory libraries =
+            vm.parseTomlStringArray(vm.readFile("foundry.toml"), string.concat(".profile.", profile, ".libraries"));
+        string memory flags = "";
+        for (uint256 i = 0; i < libraries.length; i++) {
+            flags = string.concat(flags, " --libraries ", libraries[i]);
+        }
+        return flags;
+    }
+
+    // Native-asset model for the target chain. Chains with a normal WETH9 wrapper set neither var,
+    // so both default to the wrapped 1:1 model and their existing .env blocks keep working as-is.
+    // nativeMode: 0 = WRAPPED, 1 = ENSHRINED (ERC20 view of native, e.g. Arc's USDC at 0x3600...).
+    // nativeScale is not configured: the contract derives it from IERC20Metadata(WETH).decimals().
+    function nativeMode() internal view returns (uint8) {
+        uint256 mode = vm.envOr("NATIVE_MODE", uint256(0));
+        // bound before the cast: uint8(256) would silently read back as WRAPPED
+        require(mode <= 1, "NATIVE_MODE must be 0 (WRAPPED) or 1 (ENSHRINED)");
+        return uint8(mode);
+    }
+
     function getV3UtilsDeploymentAddress() internal view returns (address) {
         return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(V3Utils).creationCode)), factory);
     }
@@ -60,6 +68,10 @@ abstract contract CommonScript is Script {
 
     function getStructHashDeploymentAddress() internal view returns (address) {
         return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(StructHash).creationCode)), factory);
+    }
+
+    function getCommonLibDeploymentAddress() internal view returns (address) {
+        return Create2.computeAddress(salt, keccak256(abi.encodePacked(type(CommonLib).creationCode)), factory);
     }
 
     function getNfpmDeploymentAddress() internal view returns (address) {

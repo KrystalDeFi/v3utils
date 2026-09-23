@@ -9,8 +9,15 @@ import "@openzeppelin/contracts/utils/Create2.sol";
 // NOTE: This script is use when deploy transaction is made but initialization is not
 
 interface IV3Initializer {
-    function initialize(address _swapRouter, address admin, address feeTaker, address weth, address[] calldata nfpms)
-        external;
+    // nativeMode: 0 = WRAPPED (WETH9 wrapper), 1 = ENSHRINED (ERC20 view of native, e.g. Arc)
+    function initialize(
+        address _swapRouter,
+        address admin,
+        address feeTaker,
+        address weth,
+        uint8 nativeMode,
+        address[] calldata nfpms
+    ) external;
 }
 
 contract V3AutomationInitializeScript is CommonScript {
@@ -21,7 +28,12 @@ contract V3AutomationInitializeScript is CommonScript {
         vm.startBroadcast(deployerPrivateKey);
         IV3Initializer v3automation = IV3Initializer(deploymentAddress);
         v3automation.initialize(
-            krystalRouter, admin, vm.envAddress("FEE_TAKER"), vm.envAddress("WETH"), vm.envAddress("NFPMS", ",")
+            krystalRouter,
+            admin,
+            vm.envAddress("FEE_TAKER"),
+            vm.envAddress("WETH"),
+            nativeMode(),
+            vm.envAddress("NFPMS", ",")
         );
 
         vm.stopBroadcast();
@@ -38,7 +50,12 @@ contract V3UtilsInitializeScript is CommonScript {
         vm.startBroadcast(deployerPrivateKey);
         IV3Initializer v3utils = IV3Initializer(deploymentAddress);
         v3utils.initialize(
-            krystalRouter, admin, vm.envAddress("FEE_TAKER"), vm.envAddress("WETH"), vm.envAddress("NFPMS", ",")
+            krystalRouter,
+            admin,
+            vm.envAddress("FEE_TAKER"),
+            vm.envAddress("WETH"),
+            nativeMode(),
+            vm.envAddress("NFPMS", ",")
         );
 
         vm.stopBroadcast();
