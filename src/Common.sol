@@ -24,7 +24,6 @@ abstract contract Common is AccessControl, Pausable {
     error SameToken();
     error AmountError();
     error SlippageError();
-    error CollectError();
     error TransferError();
     error EtherSendFailed();
     error TooMuchEtherSent();
@@ -342,33 +341,47 @@ abstract contract Common is AccessControl, Pausable {
     {
         (uint256 total0, uint256 total1) = _swapAndPrepareAmounts(params, unwrap);
 
-        (result.tokenId, result.liquidity, result.added0, result.added1) = Nfpm.mint(
-            params.nfpm,
-            params.protocol,
-            Nfpm.MintParams(
-                address(params.token0),
-                address(params.token1),
-                params.fee,
-                params.tickSpacing,
-                params.tickLower,
-                params.tickUpper,
-                total0,
-                total1,
-                params.amountAddMin0,
-                params.amountAddMin1,
-                address(this), // is sent to real recipient afterwards
-                params.deadline,
-                0,
-                params.poolDeployer
-            )
-        );
+        // What the nfpm REPORTS it added is not what the add COST us. A token that charges a
+        // surcharge on a transfer to the pool debits this contract for more than `added`, so
+        // `total - added` overstates what is still here. Refunds are computed from the balance
+        // that actually moved; otherwise we promise the recipient tokens we no longer hold.
+        uint256 spent0;
+        uint256 spent1;
+        {
+            uint256 balanceBefore0 = _selfBalance(params.token0);
+            uint256 balanceBefore1 = _selfBalance(params.token1);
+
+            (result.tokenId, result.liquidity, result.added0, result.added1) = Nfpm.mint(
+                params.nfpm,
+                params.protocol,
+                Nfpm.MintParams(
+                    address(params.token0),
+                    address(params.token1),
+                    params.fee,
+                    params.tickSpacing,
+                    params.tickLower,
+                    params.tickUpper,
+                    total0,
+                    total1,
+                    params.amountAddMin0,
+                    params.amountAddMin1,
+                    address(this), // is sent to real recipient afterwards
+                    params.deadline,
+                    0,
+                    params.poolDeployer
+                )
+            );
+
+            spent0 = balanceBefore0 - _selfBalance(params.token0);
+            spent1 = balanceBefore1 - _selfBalance(params.token1);
+        }
 
         params.nfpm.transferFrom(address(this), params.recipient, result.tokenId);
         emit SwapAndMint(address(params.nfpm), result.tokenId, result.liquidity, result.added0, result.added1);
 
         _returnLeftoverTokens(
             ReturnLeftoverTokensParams(
-                params.recipient, params.token0, params.token1, total0, total1, result.added0, result.added1, unwrap
+                params.recipient, params.token0, params.token1, total0, total1, spent0, spent1, unwrap
             )
         );
     }
@@ -421,15 +434,25 @@ abstract contract Common is AccessControl, Pausable {
                 params.tokenId, total0, total1, params.amountAddMin0, params.amountAddMin1, params.deadline
             );
 
-        (result.liquidity, result.added0, result.added1) = params.nfpm.increaseLiquidity(increaseLiquidityParams);
+        // See _swapAndMint: measure what the add actually cost rather than trusting what the nfpm
+        // reports it added, so a surcharge token cannot leave the refund short.
+        uint256 spent0;
+        uint256 spent1;
+        {
+            uint256 balanceBefore0 = _selfBalance(token0);
+            uint256 balanceBefore1 = _selfBalance(token1);
+
+            (result.liquidity, result.added0, result.added1) = params.nfpm.increaseLiquidity(increaseLiquidityParams);
+
+            spent0 = balanceBefore0 - _selfBalance(token0);
+            spent1 = balanceBefore1 - _selfBalance(token1);
+        }
 
         emit SwapAndIncreaseLiquidity(
             address(params.nfpm), params.tokenId, result.liquidity, result.added0, result.added1
         );
         _returnLeftoverTokens(
-            ReturnLeftoverTokensParams(
-                params.recipient, token0, token1, total0, total1, result.added0, result.added1, unwrap
-            )
+            ReturnLeftoverTokensParams(params.recipient, token0, token1, total0, total1, spent0, spent1, unwrap)
         );
     }
 
@@ -444,7 +467,10 @@ abstract contract Common is AccessControl, Pausable {
             }
             (uint256 amountInDelta, uint256 amountOutDelta) =
                 _swap(params.token0, params.token1, params.amountIn1, params.amountOut1Min, params.swapData1, 1);
-            total0 = params.amount0 - amountInDelta;
+            // amountInDelta is measured, so it covers any surcharge the swap drew on top of
+            // amountIn - including one drawn from a balance donated to this contract. Clamp
+            // rather than underflow; a few donated wei must not brick every zap through the pool.
+            total0 = params.amount0 > amountInDelta ? params.amount0 - amountInDelta : 0;
             total1 = params.amount1 + amountOutDelta;
         } else if (params.swapSourceToken == params.token1) {
             if (params.amount1 < params.amountIn0) {
@@ -452,9 +478,19 @@ abstract contract Common is AccessControl, Pausable {
             }
             (uint256 amountInDelta, uint256 amountOutDelta) =
                 _swap(params.token1, params.token0, params.amountIn0, params.amountOut0Min, params.swapData0, 0);
-            total1 = params.amount1 - amountInDelta;
+            // see above
+            total1 = params.amount1 > amountInDelta ? params.amount1 - amountInDelta : 0;
             total0 = params.amount0 + amountOutDelta;
         } else if (address(params.swapSourceToken) != address(0)) {
+            // Bound the REQUESTED spend against amount2, the way the two branches above bound theirs
+            // against amount0/amount1. The entry-point check does not cover this: it runs against
+            // the PRE-fee amount2 and the fees are taken out afterwards, so without this a caller
+            // could ask to swap more than remains theirs and have a donated balance of the source
+            // token quietly make up the difference. Requested amounts are used deliberately - a
+            // measured figure here would be donation-sensitive and hand back the DoS.
+            if (params.amountIn0 + params.amountIn1 > params.amount2) {
+                revert AmountError();
+            }
             (uint256 amountInDelta0, uint256 amountOutDelta0) = _swap(
                 params.swapSourceToken, params.token0, params.amountIn0, params.amountOut0Min, params.swapData0, 0
             );
@@ -464,11 +500,14 @@ abstract contract Common is AccessControl, Pausable {
             total0 = params.amount0 + amountOutDelta0;
             total1 = params.amount1 + amountOutDelta1;
 
-            if (params.amount2 < amountInDelta0 + amountInDelta1) {
-                revert AmountError();
-            }
-            // return third token leftover if any
-            uint256 leftOver = params.amount2 - amountInDelta0 - amountInDelta1;
+            // Measured again, so the same reasoning as the two branches above applies: the deltas
+            // include any surcharge the swaps drew on top of amountIn, and a donated balance is
+            // fair game for that surcharge. Re-checking the MEASURED spend against amount2 here
+            // would only hand an attacker a DoS - the entry points already bound
+            // amountIn0 + amountIn1 by amount2 on the REQUESTED amounts, which is the invariant
+            // that actually protects the caller. Clamp the remainder instead.
+            uint256 spentSource = amountInDelta0 + amountInDelta1;
+            uint256 leftOver = params.amount2 > spentSource ? params.amount2 - spentSource : 0;
 
             if (leftOver != 0) {
                 _transferToken(params.recipient, params.swapSourceToken, leftOver, unwrap);
@@ -488,8 +527,11 @@ abstract contract Common is AccessControl, Pausable {
 
     // returns leftover token balances
     function _returnLeftoverTokens(ReturnLeftoverTokensParams memory params) internal {
-        uint256 left0 = params.total0 - params.added0;
-        uint256 left1 = params.total1 - params.added1;
+        // `added` is measured, not reported, so it can exceed `total`: a surcharge token draws its
+        // fee from whatever this contract holds, and anyone may donate a balance for it to draw on.
+        // Nothing is owed back in that case - do not underflow on the griefer's dust.
+        uint256 left0 = params.total0 > params.added0 ? params.total0 - params.added0 : 0;
+        uint256 left1 = params.total1 > params.added1 ? params.total1 - params.added1 : 0;
 
         // return leftovers
         if (left0 != 0) {
@@ -558,32 +600,6 @@ abstract contract Common is AccessControl, Pausable {
         }
     }
 
-    // collects specified amount of fees from uniswap v3 position
-    function _collectFees(
-        INonfungiblePositionManager nfpm,
-        uint256 tokenId,
-        IERC20 token0,
-        IERC20 token1,
-        uint128 collectAmount0,
-        uint128 collectAmount1
-    ) internal returns (uint256 amount0, uint256 amount1) {
-        uint256 balanceBefore0 = token0.balanceOf(address(this));
-        uint256 balanceBefore1 = token1.balanceOf(address(this));
-        (amount0, amount1) = Nfpm.collect(
-            nfpm, IUniV3NonfungiblePositionManager.CollectParams(tokenId, address(this), collectAmount0, collectAmount1)
-        );
-        uint256 balanceAfter0 = token0.balanceOf(address(this));
-        uint256 balanceAfter1 = token1.balanceOf(address(this));
-
-        // reverts for fee-on-transfer tokens
-        if (balanceAfter0 - balanceBefore0 != amount0) {
-            revert CollectError();
-        }
-        if (balanceAfter1 - balanceBefore1 != amount1) {
-            revert CollectError();
-        }
-    }
-
     function _decreaseLiquidityAndCollectFees(DecreaseAndCollectFeesParams memory params)
         internal
         returns (uint256 collectedAmount0, uint256 collectedAmount1, uint256 feeAmount0, uint256 feeAmount1)
@@ -591,14 +607,48 @@ abstract contract Common is AccessControl, Pausable {
         (uint256 amount0, uint256 amount1) = _decreaseLiquidity(
             params.nfpm, params.tokenId, params.liquidity, params.deadline, params.token0Min, params.token1Min
         );
-        (collectedAmount0, collectedAmount1) = Nfpm.collect(
+
+        // `decreaseLiquidity` only credits tokensOwed - `collect` is what actually moves tokens -
+        // and a token that skims on a transfer OUT of the pool delivers less than the nfpm reports.
+        // Measure what arrived, so fees, refunds and the final payout are all sized against tokens
+        // this contract really holds rather than against the gross figure.
+        uint256 balanceBefore0 = _selfBalance(params.token0);
+        uint256 balanceBefore1 = _selfBalance(params.token1);
+
+        Nfpm.collect(
             params.nfpm,
             IUniV3NonfungiblePositionManager.CollectParams(
                 params.tokenId, address(this), type(uint128).max, type(uint128).max
             )
         );
-        feeAmount0 = collectedAmount0 - amount0;
-        feeAmount1 = collectedAmount1 - amount1;
+
+        collectedAmount0 = _selfBalance(params.token0) - balanceBefore0;
+        collectedAmount1 = _selfBalance(params.token1) - balanceBefore1;
+
+        // The principal from `decreaseLiquidity` is a gross figure too, so it can exceed what the
+        // collect delivered. Clamp it rather than underflowing: the shortfall is borne by the
+        // principal (it came out of the position), and only the excess above it counts as fees.
+        uint256 principal0 = amount0 > collectedAmount0 ? collectedAmount0 : amount0;
+        uint256 principal1 = amount1 > collectedAmount1 ? collectedAmount1 : amount1;
+        feeAmount0 = collectedAmount0 - principal0;
+        feeAmount1 = collectedAmount1 - principal1;
+
+        // decreaseLiquidity already checked token0Min/token1Min, but against the GROSS amounts the
+        // pool computed - and the skim happens afterwards, in collect. Left there, the caller's
+        // floor is verified against a number they never receive: measuring the collect makes these
+        // withdrawals succeed rather than revert, which would turn a visible failure into a silent
+        // short fill. Re-check the floor against what actually landed.
+        if (params.liquidity != 0 && (principal0 < params.token0Min || principal1 < params.token1Min)) {
+            revert SlippageError();
+        }
+    }
+
+    /// @dev Single call site for the balance reads the delta measurements rely on. Written inline,
+    ///      each of the twelve measurement points emitted its own staticcall and ABI encoding -
+    ///      1,075 bytes in total, which was enough on its own to push V3Utils past the EIP-170
+    ///      limit. Keep the reads funnelled through here; do not inline them back.
+    function _selfBalance(IERC20 token) private view returns (uint256) {
+        return token.balanceOf(address(this));
     }
 
     function _getWeth9() internal view returns (IWETH9 weth) {
