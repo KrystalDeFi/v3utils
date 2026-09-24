@@ -568,4 +568,73 @@ contract SurchargeTokenTest is IntegrationTestBase {
         vm.expectRevert(Common.SlippageError.selector);
         _withdraw(minted, surIsToken0 ? floor : 0, surIsToken0 ? 0 : floor);
     }
+
+    function _deployZapper(address router) internal returns (V3Utils zapper) {
+        vm.startBroadcast(TEST_OWNER_ACCOUNT);
+        zapper = new V3Utils();
+        zapper.initialize(
+            router,
+            TEST_OWNER_ACCOUNT,
+            TEST_OWNER_ACCOUNT,
+            address(WETH_ERC20),
+            Common.NativeMode.WRAPPED,
+            _getNfpms()
+        );
+        vm.stopBroadcast();
+    }
+
+    /// The entry-point bound on `amountIn0 + amountIn1` is checked against the PRE-fee `amount2`,
+    /// but fees are then deducted from it. With a third-token source and a nonzero fee, the
+    /// requested swap inputs can exceed the post-fee amount that actually belongs to the caller -
+    /// and any donated balance of the source token silently covers the difference, minting the
+    /// caller value they never provided. The requested spend has to be re-bounded post-fee, the way
+    /// the token0/token1 branches already do it.
+    function testThirdTokenSourceCannotSpendBeyondPostFeeAmount() public {
+        _seedDeepLiquidity();
+
+        uint24 targetFee = 500;
+        address targetPool = FACTORY.getPool(address(WETH_ERC20), address(USDC), targetFee);
+        require(targetPool != address(0), "target pool missing at this fork block");
+        (, int24 spotTick,,,,,) = IUniV3PoolMin(targetPool).slot0();
+
+        MockV3SwapRouter router = new MockV3SwapRouter(pool);
+        V3Utils zapper = _deployZapper(address(router));
+
+        address zapUser = address(0xFEED);
+        uint256 surAmount = 1 ether;
+        uint256 usdcAmount = 2000e6;
+        uint256 donation = 0.05 ether; // comfortably more than the fee, so the leak is reachable
+
+        sur.mint(zapUser, surAmount);
+        _writeTokenBalance(zapUser, address(USDC), usdcAmount);
+        sur.mint(address(zapper), donation);
+
+        vm.startPrank(zapUser);
+        sur.approve(address(zapper), type(uint256).max);
+        USDC.approve(address(zapper), type(uint256).max);
+        vm.stopPrank();
+
+        Common.SwapAndMintParams memory params = _mintParamsWith(0, 0);
+        params.token0 = WETH_ERC20;
+        params.token1 = USDC;
+        params.fee = targetFee;
+        params.tickLower = ((spotTick - 1000) / 10) * 10;
+        params.tickUpper = ((spotTick + 1000) / 10) * 10;
+        params.amount0 = 0;
+        params.amount1 = usdcAmount;
+        params.amount2 = surAmount;
+        params.recipient = zapUser;
+        params.swapSourceToken = IERC20(address(sur));
+        params.protocolFeeX64 = 184467440737095520; // 1% of 2^64 - shrinks amount2 after the entry check
+        // Ask to swap the whole PRE-fee amount, which is more than remains after the fee.
+        params.amountIn0 = surAmount;
+        params.swapData0 = abi.encodeCall(
+            MockV3SwapRouter.swapExactIn,
+            (address(sur), IUniV3PoolMin(pool).token0() == address(sur), surAmount, address(zapper))
+        );
+
+        vm.prank(zapUser);
+        vm.expectRevert(Common.AmountError.selector);
+        zapper.swapAndMint(params);
+    }
 }

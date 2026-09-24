@@ -482,6 +482,15 @@ abstract contract Common is AccessControl, Pausable {
             total1 = params.amount1 > amountInDelta ? params.amount1 - amountInDelta : 0;
             total0 = params.amount0 + amountOutDelta;
         } else if (address(params.swapSourceToken) != address(0)) {
+            // Bound the REQUESTED spend against amount2, the way the two branches above bound theirs
+            // against amount0/amount1. The entry-point check does not cover this: it runs against
+            // the PRE-fee amount2 and the fees are taken out afterwards, so without this a caller
+            // could ask to swap more than remains theirs and have a donated balance of the source
+            // token quietly make up the difference. Requested amounts are used deliberately - a
+            // measured figure here would be donation-sensitive and hand back the DoS.
+            if (params.amountIn0 + params.amountIn1 > params.amount2) {
+                revert AmountError();
+            }
             (uint256 amountInDelta0, uint256 amountOutDelta0) = _swap(
                 params.swapSourceToken, params.token0, params.amountIn0, params.amountOut0Min, params.swapData0, 0
             );
