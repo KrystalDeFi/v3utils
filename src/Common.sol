@@ -348,8 +348,8 @@ abstract contract Common is AccessControl, Pausable {
         uint256 spent0;
         uint256 spent1;
         {
-            uint256 balanceBefore0 = params.token0.balanceOf(address(this));
-            uint256 balanceBefore1 = params.token1.balanceOf(address(this));
+            uint256 balanceBefore0 = _selfBalance(params.token0);
+            uint256 balanceBefore1 = _selfBalance(params.token1);
 
             (result.tokenId, result.liquidity, result.added0, result.added1) = Nfpm.mint(
                 params.nfpm,
@@ -372,8 +372,8 @@ abstract contract Common is AccessControl, Pausable {
                 )
             );
 
-            spent0 = balanceBefore0 - params.token0.balanceOf(address(this));
-            spent1 = balanceBefore1 - params.token1.balanceOf(address(this));
+            spent0 = balanceBefore0 - _selfBalance(params.token0);
+            spent1 = balanceBefore1 - _selfBalance(params.token1);
         }
 
         params.nfpm.transferFrom(address(this), params.recipient, result.tokenId);
@@ -439,13 +439,13 @@ abstract contract Common is AccessControl, Pausable {
         uint256 spent0;
         uint256 spent1;
         {
-            uint256 balanceBefore0 = token0.balanceOf(address(this));
-            uint256 balanceBefore1 = token1.balanceOf(address(this));
+            uint256 balanceBefore0 = _selfBalance(token0);
+            uint256 balanceBefore1 = _selfBalance(token1);
 
             (result.liquidity, result.added0, result.added1) = params.nfpm.increaseLiquidity(increaseLiquidityParams);
 
-            spent0 = balanceBefore0 - token0.balanceOf(address(this));
-            spent1 = balanceBefore1 - token1.balanceOf(address(this));
+            spent0 = balanceBefore0 - _selfBalance(token0);
+            spent1 = balanceBefore1 - _selfBalance(token1);
         }
 
         emit SwapAndIncreaseLiquidity(
@@ -612,8 +612,8 @@ abstract contract Common is AccessControl, Pausable {
         // and a token that skims on a transfer OUT of the pool delivers less than the nfpm reports.
         // Measure what arrived, so fees, refunds and the final payout are all sized against tokens
         // this contract really holds rather than against the gross figure.
-        uint256 balanceBefore0 = params.token0.balanceOf(address(this));
-        uint256 balanceBefore1 = params.token1.balanceOf(address(this));
+        uint256 balanceBefore0 = _selfBalance(params.token0);
+        uint256 balanceBefore1 = _selfBalance(params.token1);
 
         Nfpm.collect(
             params.nfpm,
@@ -622,8 +622,8 @@ abstract contract Common is AccessControl, Pausable {
             )
         );
 
-        collectedAmount0 = params.token0.balanceOf(address(this)) - balanceBefore0;
-        collectedAmount1 = params.token1.balanceOf(address(this)) - balanceBefore1;
+        collectedAmount0 = _selfBalance(params.token0) - balanceBefore0;
+        collectedAmount1 = _selfBalance(params.token1) - balanceBefore1;
 
         // The principal from `decreaseLiquidity` is a gross figure too, so it can exceed what the
         // collect delivered. Clamp it rather than underflowing: the shortfall is borne by the
@@ -641,6 +641,14 @@ abstract contract Common is AccessControl, Pausable {
         if (params.liquidity != 0 && (principal0 < params.token0Min || principal1 < params.token1Min)) {
             revert SlippageError();
         }
+    }
+
+    /// @dev Single call site for the balance reads the delta measurements rely on. Written inline,
+    ///      each of the twelve measurement points emitted its own staticcall and ABI encoding -
+    ///      1,075 bytes in total, which was enough on its own to push V3Utils past the EIP-170
+    ///      limit. Keep the reads funnelled through here; do not inline them back.
+    function _selfBalance(IERC20 token) private view returns (uint256) {
+        return token.balanceOf(address(this));
     }
 
     function _getWeth9() internal view returns (IWETH9 weth) {
