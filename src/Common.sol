@@ -491,11 +491,14 @@ abstract contract Common is AccessControl, Pausable {
             total0 = params.amount0 + amountOutDelta0;
             total1 = params.amount1 + amountOutDelta1;
 
-            if (params.amount2 < amountInDelta0 + amountInDelta1) {
-                revert AmountError();
-            }
-            // return third token leftover if any
-            uint256 leftOver = params.amount2 - amountInDelta0 - amountInDelta1;
+            // Measured again, so the same reasoning as the two branches above applies: the deltas
+            // include any surcharge the swaps drew on top of amountIn, and a donated balance is
+            // fair game for that surcharge. Re-checking the MEASURED spend against amount2 here
+            // would only hand an attacker a DoS - the entry points already bound
+            // amountIn0 + amountIn1 by amount2 on the REQUESTED amounts, which is the invariant
+            // that actually protects the caller. Clamp the remainder instead.
+            uint256 spentSource = amountInDelta0 + amountInDelta1;
+            uint256 leftOver = params.amount2 > spentSource ? params.amount2 - spentSource : 0;
 
             if (leftOver != 0) {
                 _transferToken(params.recipient, params.swapSourceToken, leftOver, unwrap);
@@ -620,6 +623,15 @@ abstract contract Common is AccessControl, Pausable {
         uint256 principal1 = amount1 > collectedAmount1 ? collectedAmount1 : amount1;
         feeAmount0 = collectedAmount0 - principal0;
         feeAmount1 = collectedAmount1 - principal1;
+
+        // decreaseLiquidity already checked token0Min/token1Min, but against the GROSS amounts the
+        // pool computed - and the skim happens afterwards, in collect. Left there, the caller's
+        // floor is verified against a number they never receive: measuring the collect makes these
+        // withdrawals succeed rather than revert, which would turn a visible failure into a silent
+        // short fill. Re-check the floor against what actually landed.
+        if (params.liquidity != 0 && (principal0 < params.token0Min || principal1 < params.token1Min)) {
+            revert SlippageError();
+        }
     }
 
     function _getWeth9() internal view returns (IWETH9 weth) {

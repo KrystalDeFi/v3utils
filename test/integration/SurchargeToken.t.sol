@@ -68,11 +68,13 @@ contract MockSurchargeToken is ERC20 {
 
 interface IUniV3Factory {
     function createPool(address tokenA, address tokenB, uint24 fee) external returns (address pool);
+    function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool);
 }
 
 interface IUniV3PoolMin {
     function initialize(uint160 sqrtPriceX96) external;
     function token0() external view returns (address);
+    function slot0() external view returns (uint160, int24, uint16, uint16, uint16, uint8, bool);
 }
 
 interface IUniV3PoolSwap {
@@ -425,5 +427,145 @@ contract SurchargeTokenTest is IntegrationTestBase {
         Common.SwapAndMintResult memory result = zapper.swapAndMint(params);
 
         assertGt(result.liquidity, 0, "position should have been minted");
+    }
+
+    /// The third-token swap-source branch has the same griefing exposure the token0/token1 branches
+    /// were fixed for, just wearing a different error. `amountInDelta` is measured, so donated dust
+    /// of the source token inflates it past `amount2` and the zap reverts with AmountError. The
+    /// entry points already bound amountIn0 + amountIn1 by amount2 on the REQUESTED amounts
+    /// (V3Utils.sol:440 and :554), so re-checking the MEASURED spend here buys nothing and only
+    /// hands an attacker a denial of service for the price of a few wei.
+    function testDonatedDustDoesNotBreakThirdTokenSwapSource() public {
+        _seedDeepLiquidity();
+
+        // Target a real, unrelated pool so SUR is genuinely a third token here.
+        uint24 targetFee = 500;
+        address targetPool = FACTORY.getPool(address(WETH_ERC20), address(USDC), targetFee);
+        require(targetPool != address(0), "target pool missing at this fork block");
+        (, int24 spotTick,,,,,) = IUniV3PoolMin(targetPool).slot0();
+        int24 tickLower = ((spotTick - 1000) / 10) * 10;
+        int24 tickUpper = ((spotTick + 1000) / 10) * 10;
+
+        MockV3SwapRouter router = new MockV3SwapRouter(pool);
+        vm.startBroadcast(TEST_OWNER_ACCOUNT);
+        V3Utils zapper = new V3Utils();
+        zapper.initialize(
+            address(router),
+            TEST_OWNER_ACCOUNT,
+            TEST_OWNER_ACCOUNT,
+            address(WETH_ERC20),
+            Common.NativeMode.WRAPPED,
+            _getNfpms()
+        );
+        vm.stopBroadcast();
+
+        address zapUser = address(0xD00D);
+        uint256 surAmount = 1 ether;
+        uint256 usdcAmount = 2000e6;
+
+        sur.mint(zapUser, surAmount);
+        _writeTokenBalance(zapUser, address(USDC), usdcAmount);
+        sur.mint(address(zapper), 1e15); // the donation
+
+        vm.startPrank(zapUser);
+        sur.approve(address(zapper), type(uint256).max);
+        USDC.approve(address(zapper), type(uint256).max);
+        vm.stopPrank();
+
+        // WETH sorts below USDC.e, so token0 is WETH - the side funded by swapping the third token.
+        Common.SwapAndMintParams memory params = _mintParamsWith(0, 0);
+        params.token0 = WETH_ERC20;
+        params.token1 = USDC;
+        params.fee = targetFee;
+        params.tickLower = tickLower;
+        params.tickUpper = tickUpper;
+        params.amount0 = 0;
+        params.amount1 = usdcAmount;
+        params.amount2 = surAmount;
+        params.recipient = zapUser;
+        params.swapSourceToken = IERC20(address(sur));
+        params.amountIn0 = surAmount; // all of the third token goes to the token0 leg
+        params.swapData0 = abi.encodeCall(
+            MockV3SwapRouter.swapExactIn,
+            (address(sur), IUniV3PoolMin(pool).token0() == address(sur), surAmount, address(zapper))
+        );
+
+        vm.prank(zapUser);
+        Common.SwapAndMintResult memory result = zapper.swapAndMint(params);
+
+        assertGt(result.liquidity, 0, "position should have been minted");
+    }
+
+    function _withdraw(Common.SwapAndMintResult memory minted, uint256 removeMin0, uint256 removeMin1) internal {
+        V3Utils.Instructions memory instructions = V3Utils.Instructions(
+            V3Utils.WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP,
+            Nfpm.Protocol.UNI_V3,
+            address(0), // targetToken - no swaps
+            removeMin0,
+            removeMin1,
+            0,
+            0,
+            "",
+            0,
+            0,
+            "",
+            TICK_LOWER,
+            TICK_UPPER,
+            false, // compoundFees
+            minted.liquidity,
+            0,
+            0,
+            block.timestamp,
+            user,
+            false, // unwrap
+            0,
+            0,
+            0
+        );
+
+        // Approval is a separate call on purpose: it must not sit between a vm.expectRevert and
+        // the call being asserted on.
+        vm.prank(user);
+        v3utils.execute(NPM, minted.tokenId, instructions);
+    }
+
+    function _approveNft(uint256 tokenId) internal {
+        vm.prank(user);
+        NPM.approve(address(v3utils), tokenId);
+    }
+
+    /// `amountRemoveMin` is the caller's floor on what they get back. The nfpm checks it inside
+    /// decreaseLiquidity against the GROSS amounts the pool computed, but the skim happens later,
+    /// during collect - so the floor is verified against a number the caller never receives.
+    /// Measuring the collect made these withdrawals succeed instead of reverting, which turned a
+    /// visible failure into a silent short fill; the floor has to be re-checked against what landed.
+    function testWithdrawEnforcesRemoveMinAgainstWhatArrives() public {
+        Common.SwapAndMintParams memory mintParams = _mintParams();
+        vm.prank(user);
+        Common.SwapAndMintResult memory minted = v3utils.swapAndMint(mintParams);
+
+        bool surIsToken0 = IUniV3PoolMin(pool).token0() == address(sur);
+
+        // Dry run with no floor, to learn what the pool pays out and what actually lands.
+        uint256 snap = vm.snapshotState();
+        uint256 poolBefore = sur.balanceOf(pool);
+        uint256 userBefore = sur.balanceOf(user);
+        _approveNft(minted.tokenId);
+        _withdraw(minted, 0, 0);
+        uint256 gross = poolBefore - sur.balanceOf(pool);
+        uint256 net = sur.balanceOf(user) - userBefore;
+        vm.revertToState(snap);
+
+        assertLt(net, gross, "token should have skimmed on the way out");
+
+        // A floor above what lands, but still within what the nfpm reports as removed - so the
+        // nfpm's own check passes and only ours can catch it.
+        uint256 floor = net + 1;
+        assertLe(floor, gross, "floor must sit between net and gross for this to test anything");
+
+        _approveNft(minted.tokenId); // the snapshot revert undid it
+
+        vm.expectRevert(Common.SlippageError.selector);
+        _withdraw(minted, surIsToken0 ? floor : 0, surIsToken0 ? 0 : floor);
     }
 }
