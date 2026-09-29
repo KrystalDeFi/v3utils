@@ -42,11 +42,11 @@
     "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
   },
   "5042": {
-    "CommonLib": "0x4078cd0b491845c165d353d469d9aef2232ebbdf",
+    "CommonLib": "0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4",
     "nfpmLib": "0x7b468afa6826ea4ff6021456fe1485c4064dea0a",
     "structHash": "0x7637f99df82ca0f47d8e3d6742c925b7b14900a5",
-    "v3Automation": "0x4cbb9846360142d60c81c4127f317b557fe2930a",
-    "v3Utils": "0x968cba9ce5fedc73bca355d8b3eb661a6199e003"
+    "v3Automation": "0x4b444bf2e88624390566af18df52da8cf7bc014c",
+    "v3Utils": "0x1ee314a465dafd595ab7de8707cca629178b45d6"
   },
   "8453": {
     "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
