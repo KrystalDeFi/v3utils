@@ -3,6 +3,12 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "v3-periphery/interfaces/external/IWETH9.sol";
+import "v3-core/libraries/FullMath.sol";
+
+/// @dev Ramses v3: claims a position's gauge rewards in `tokens` for whoever holds its NFT
+interface IRewardsPositionManager {
+    function getReward(uint256 tokenId, address[] calldata tokens) external;
+}
 
 /**
  * @title CommonLib
@@ -29,6 +35,16 @@ library CommonLib {
     error NativeAmountMismatch(uint256 credited, uint256 declared);
     error NativeDustNotAllowed();
     error EtherSendFailed();
+
+    /// @dev Also declared in `Common`, so it is part of the ABI of the contracts that emit it through this library
+    event ForwardPositionReward(
+        address indexed nfpm,
+        uint256 indexed tokenId,
+        address indexed recipient,
+        address token,
+        uint256 amount,
+        uint256 fee
+    );
 
     /// @notice Native-asset model of the chain, as resolved by `Common.initialize`.
     /// @param weth the token representing native value
@@ -185,5 +201,40 @@ library CommonLib {
             return;
         }
         require(success && (returnData.length == 0 || abi.decode(returnData, (bool))), "SA");
+    }
+
+    /// @notice Claims the gauge reward `token` of a position the caller holds and passes it on: `feeX64` of it to
+    /// `feeTaker`, like the performance fee on collected fees, and the rest to `recipient`.
+    /// @dev Ramses v3 pays a position's reward to whoever holds its NFT. Sends nothing when the claim reverts (a pool
+    /// without a gauge) or is forfeited. Only the claimed amount is used, so a reward token that is also one of the
+    /// position's tokens is unaffected.
+    function forwardPositionReward(
+        address nfpm,
+        uint256 tokenId,
+        IERC20 token,
+        address recipient,
+        uint64 feeX64,
+        address feeTaker
+    ) public {
+        uint256 balanceBefore = token.balanceOf(address(this));
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(token);
+        try IRewardsPositionManager(nfpm).getReward(tokenId, tokens) {}
+        catch {
+            return;
+        }
+        uint256 amount = token.balanceOf(address(this)) - balanceBefore;
+        if (amount == 0) {
+            return;
+        }
+        uint256 fee = FullMath.mulDiv(amount, feeX64, 2 ** 64);
+        if (fee != 0) {
+            SafeERC20.safeTransfer(token, feeTaker, fee);
+            amount -= fee;
+        }
+        if (amount != 0) {
+            SafeERC20.safeTransfer(token, recipient, amount);
+        }
+        emit ForwardPositionReward(nfpm, tokenId, recipient, address(token), amount, fee);
     }
 }
