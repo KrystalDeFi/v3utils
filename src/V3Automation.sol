@@ -125,8 +125,7 @@ contract V3Automation is Pausable, Common, EIP712 {
                 params.deadline,
                 params.amountRemoveMin0,
                 params.amountRemoveMin1,
-                params.compoundFees,
-                params.performanceFeeX64
+                params.compoundFees
             )
         );
 

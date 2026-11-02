@@ -104,8 +104,7 @@ contract V3Utils is IERC721Receiver, Common {
                     instructions.deadline,
                     instructions.amountRemoveMin0,
                     instructions.amountRemoveMin1,
-                    instructions.compoundFees,
-                    instructions.performanceFeeX64
+                    instructions.compoundFees
                 )
             );
 

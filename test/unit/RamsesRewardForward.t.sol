@@ -112,14 +112,11 @@ contract RewardForwardHarness is Common {
         IERC20 token0,
         IERC20 token1,
         uint256 tokenId,
-        uint128 liquidity,
-        uint64 performanceFeeX64
+        uint128 liquidity
     ) external returns (uint256 collected0, uint256 collected1, uint256 fee0, uint256 fee1) {
         require(_isWhitelistedNfpm(address(nfpm)));
         return _decreaseLiquidityAndCollectFees(
-            DecreaseAndCollectFeesParams(
-                nfpm, user, token0, token1, tokenId, liquidity, block.timestamp, 0, 0, false, performanceFeeX64
-            )
+            DecreaseAndCollectFeesParams(nfpm, user, token0, token1, tokenId, liquidity, block.timestamp, 0, 0, false)
         );
     }
 }
@@ -138,12 +135,9 @@ contract RamsesRewardForwardTest is Test {
         bool claimReverts;
         bool forfeits;
         bool overlap;
-        uint64 feeX64;
     }
 
     address constant USER = address(0xBEEF);
-    address constant FEE_TAKER = address(0xFEE);
-    uint64 constant MAX_PERFORMANCE_FEE_X64 = 5902958103587057000; // 32%, Common's maximum
     uint256 constant TOKEN_ID = 1;
 
     MockToken reward;
@@ -162,7 +156,6 @@ contract RamsesRewardForwardTest is Test {
         nfpms[0] = address(nfpm);
         nfpms[1] = address(overlapNfpm);
         harness.setWhitelistNfpm(nfpms, true);
-        harness.setFeeTaker(FEE_TAKER);
     }
 
     /// flags: 1 = the claim reverts, 2 = the claim is forfeited, 4 = the reward token is also token0,
@@ -193,30 +186,6 @@ contract RamsesRewardForwardTest is Test {
         _run(m, op);
     }
 
-    // like the collected fees, the reward pays the operation's performance fee: the fee taker gets it, the user the rest
-    function testFeeIsTakenOnTheForwardedReward(uint96 pending, uint96 held, uint64 feeX64) public {
-        vm.assume(feeX64 <= MAX_PERFORMANCE_FEE_X64);
-        Op memory op;
-        op.pending = pending;
-        op.liquidity = 1;
-        op.configured = true;
-        op.feeX64 = feeX64;
-        harness.setPositionRewardToken(address(nfpm), address(reward));
-        reward.mint(address(harness), held);
-        _run(nfpm, op);
-    }
-
-    function testRevertsWhenTheFeeIsAboveTheMaximum(uint64 feeX64) public {
-        vm.assume(feeX64 > MAX_PERFORMANCE_FEE_X64);
-        harness.setPositionRewardToken(address(nfpm), address(reward));
-        nfpm.setPosition(TOKEN_ID, address(harness), 1e18, 0, 0, 0);
-        (IERC20 token0, IERC20 token1) = (nfpm.token0(), nfpm.token1());
-        vm.expectRevert(Common.TooMuchFee.selector);
-        harness.decreaseAndCollect(
-            INonfungiblePositionManager(address(nfpm)), USER, token0, token1, TOKEN_ID, 1, feeX64
-        );
-    }
-
     function testFuzz_onlyAdminSetsRewardToken(address caller, address someNfpm, address token) public {
         vm.assume(caller != address(this));
         vm.prank(caller);
@@ -233,16 +202,13 @@ contract RamsesRewardForwardTest is Test {
         uint256 held = reward.balanceOf(address(harness));
 
         try harness.decreaseAndCollect(
-            INonfungiblePositionManager(address(m)), USER, m.token0(), m.token1(), TOKEN_ID, op.liquidity, op.feeX64
+            INonfungiblePositionManager(address(m)), USER, m.token0(), m.token1(), TOKEN_ID, op.liquidity
         ) returns (
             uint256 collected0, uint256 collected1, uint256 fee0, uint256
         ) {
-            // the user gets exactly the pending reward when its claim goes through, less the performance fee, which
-            // goes to the fee taker; nothing otherwise
+            // the user gets exactly the pending reward when its claim goes through, nothing otherwise
             bool claimed = op.configured && !op.claimReverts;
-            uint256 fee = (claimed && !op.forfeits ? uint256(op.pending) * op.feeX64 : 0) >> 64;
-            assertEq(reward.balanceOf(USER), (claimed && !op.forfeits ? op.pending : 0) - fee, "user's reward");
-            assertEq(reward.balanceOf(FEE_TAKER), fee, "fee");
+            assertEq(reward.balanceOf(USER), claimed && !op.forfeits ? op.pending : 0, "user's reward");
             // the contract keeps what it already held. It gains only what a liquidity change claims when nothing was
             // claimed first (the old leak) and, when the reward token is token0, the collected token0
             uint256 leaked = !claimed && op.liquidity != 0 && !op.forfeits ? op.pending : 0;

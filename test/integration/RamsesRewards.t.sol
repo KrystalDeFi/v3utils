@@ -46,15 +46,8 @@ contract RamsesRewardsTest is Test {
 
     address constant ADMIN = address(0xAD);
 
-    uint256 constant Q64 = 2 ** 64;
-
     event ForwardPositionReward(
-        address indexed nfpm,
-        uint256 indexed tokenId,
-        address indexed recipient,
-        address token,
-        uint256 amount,
-        uint256 fee
+        address indexed nfpm, uint256 indexed tokenId, address indexed recipient, address token, uint256 amount
     );
 
     V3Utils v3utils;
@@ -105,7 +98,7 @@ contract RamsesRewardsTest is Test {
         RAMSES_NFPM.approve(address(v3utils), tokenId);
 
         vm.expectEmit(true, true, true, true, address(v3utils));
-        emit ForwardPositionReward(address(RAMSES_NFPM), tokenId, owner, RAM, earned, 0);
+        emit ForwardPositionReward(address(RAMSES_NFPM), tokenId, owner, RAM, earned);
         vm.prank(owner);
         v3utils.execute(RAMSES_NFPM, tokenId, instructions);
 
@@ -217,7 +210,7 @@ contract RamsesRewardsTest is Test {
         params.orderSignature = _signOrder(emptyUserConfig, ownerKey);
 
         vm.expectEmit(true, true, true, true, address(v3automation));
-        emit ForwardPositionReward(address(RAMSES_NFPM), tokenId, owner, RAM, earned, 0);
+        emit ForwardPositionReward(address(RAMSES_NFPM), tokenId, owner, RAM, earned);
         vm.prank(ADMIN);
         v3automation.execute(params);
 
@@ -225,52 +218,6 @@ contract RamsesRewardsTest is Test {
         assertEq(IERC20(RAM).balanceOf(address(v3automation)), 0, "V3Automation kept none");
         assertEq(RAMSES_NFPM.ownerOf(tokenId), owner);
         assertEq(_liquidity(tokenId), 0);
-    }
-
-    // like the collected fees, the RAM pays the operation's performance fee (ADMIN is the fee taker)
-    function testWithdrawTakesThePerformanceFeeOnRam() external {
-        uint256 earned = GAUGE.earned(RAM, tokenId);
-        uint64 feeX64 = uint64(Q64 / 10);
-        uint256 fee = earned * feeX64 / Q64;
-        V3Utils.Instructions memory instructions =
-            _instructions(V3Utils.WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP, tokenId);
-        instructions.performanceFeeX64 = feeX64;
-
-        vm.expectEmit(true, true, true, true, address(v3utils));
-        emit ForwardPositionReward(address(RAMSES_NFPM), tokenId, owner, RAM, earned - fee, fee);
-        _sendToV3Utils(instructions);
-
-        assertGt(fee, 0);
-        assertEq(IERC20(RAM).balanceOf(owner), earned - fee, "owner got the RAM less the fee");
-        assertEq(IERC20(RAM).balanceOf(ADMIN), fee, "the fee taker got the fee");
-        assertEq(IERC20(RAM).balanceOf(address(v3utils)), 0, "V3Utils kept none");
-    }
-
-    function testAutoExitTakesThePerformanceFeeOnRam() external {
-        uint256 earned = GAUGE.earned(RAM, tokenId);
-        uint64 feeX64 = uint64(Q64 / 10);
-        uint256 fee = earned * feeX64 / Q64;
-        vm.prank(owner);
-        RAMSES_NFPM.setApprovalForAll(address(v3automation), true);
-
-        V3Automation.ExecuteParams memory params;
-        params.action = V3Automation.Action.AUTO_EXIT;
-        params.protocol = Nfpm.Protocol.RAMSES_V3;
-        params.nfpm = RAMSES_NFPM;
-        params.tokenId = tokenId;
-        params.liquidity = _liquidity(tokenId);
-        params.deadline = block.timestamp;
-        params.performanceFeeX64 = feeX64;
-        params.abiEncodedUserOrder = abi.encode(emptyUserConfig);
-        params.orderSignature = _signOrder(emptyUserConfig, ownerKey);
-
-        vm.prank(ADMIN);
-        v3automation.execute(params);
-
-        assertGt(fee, 0);
-        assertEq(IERC20(RAM).balanceOf(owner), earned - fee, "owner got the RAM less the fee");
-        assertEq(IERC20(RAM).balanceOf(ADMIN), fee, "the fee taker got the fee");
-        assertEq(IERC20(RAM).balanceOf(address(v3automation)), 0, "V3Automation kept none");
     }
 
     function testSetPositionRewardToken() external {
