@@ -3,7 +3,14 @@ ifneq (,$(wildcard ./.env))
     export
 endif
 
-DEPLOY_CMD = forge script script/$(CONTRACT).s.sol:$(CONTRACT)Script --rpc-url $(RPC_URL) --broadcast
+# HyperEVM (999) runs two block types: small blocks (3M gas) and big blocks (30M gas). A deployer
+# with big blocks enabled (eth_usingBigBlocks) lands its txs in big blocks, but forge simulates
+# against the forked block's gas limit, which is a small block's 3M: V3Utils's ~7.5M-gas creation
+# then fails with OutOfGas locally before anything is sent. Lift the simulation cap there only.
+ifeq ($(CHAIN_ID),999)
+    DEPLOY_EXTRA_FLAGS = --disable-block-gas-limit
+endif
+DEPLOY_CMD = forge script script/$(CONTRACT).s.sol:$(CONTRACT)Script --rpc-url $(RPC_URL) --broadcast $(DEPLOY_EXTRA_FLAGS)
 VERIFY_CMD = forge script script/Verify.s.sol:Verify$(CONTRACT)Script | awk 'END{print}' | bash
 
 build: src/V3Utils.sol clean

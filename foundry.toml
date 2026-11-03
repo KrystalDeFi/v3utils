@@ -22,7 +22,7 @@ solc = "0.8.15"
 fs_permissions = [{ access = "read", path = "./foundry.toml" }]
 
 libraries = [
-    'src/Nfpm.sol:Nfpm:0x7b468aFA6826Ea4fF6021456fE1485C4064Dea0a',
+    'src/Nfpm.sol:Nfpm:0xdE2D99466Fc10C905e6A83acd695EEc0C1224EEA',
     'src/CommonLib.sol:CommonLib:0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4'
 ]
 
@@ -41,8 +41,8 @@ solc = "0.8.15"
 fs_permissions = [{ access = "read", path = "./foundry.toml" }]
 
 libraries = [
-    'src/StructHash.sol:StructHash:0x7637F99dF82CA0f47d8e3D6742c925b7B14900A5',
-    'src/Nfpm.sol:Nfpm:0x7b468aFA6826Ea4fF6021456fE1485C4064Dea0a',
+    'src/StructHash.sol:StructHash:0x2678a1DDd61b5da9464ec5ac4b32c5561F90C92A',
+    'src/Nfpm.sol:Nfpm:0xdE2D99466Fc10C905e6A83acd695EEc0C1224EEA',
     'src/CommonLib.sol:CommonLib:0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4'
 ]
 
