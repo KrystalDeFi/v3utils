@@ -11,6 +11,11 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "./Nfpm.sol";
 import "./CommonLib.sol";
 
+/// @dev Ramses v3: claims a position's gauge rewards in `tokens` for whoever holds its NFT
+interface IRewardsPositionManager {
+    function getReward(uint256 tokenId, address[] calldata tokens) external;
+}
+
 abstract contract Common is AccessControl, Pausable {
     using Address for address;
 
@@ -71,6 +76,9 @@ abstract contract Common is AccessControl, Pausable {
     event SwapAndIncreaseLiquidity(
         address indexed nfpm, uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1
     );
+    event ForwardPositionReward(
+        address indexed nfpm, uint256 indexed tokenId, address indexed recipient, address token, uint256 amount
+    );
 
     EnumerableSet.AddressSet private _whitelistedNfpm;
 
@@ -96,6 +104,9 @@ abstract contract Common is AccessControl, Pausable {
     uint256 internal nativeScale;
 
     mapping(FeeType => uint64) private _maxFeeX64;
+
+    // per position manager, the gauge reward a position pays to whoever holds its NFT (Ramses v3: RAM)
+    mapping(address => address) public positionRewardToken;
 
     constructor() {
         _maxFeeX64[FeeType.GAS_FEE] = 5534023222112865280; // 30%
@@ -604,6 +615,10 @@ abstract contract Common is AccessControl, Pausable {
         internal
         returns (uint256 collectedAmount0, uint256 collectedAmount1, uint256 feeAmount0, uint256 feeAmount1)
     {
+        // this contract holds the NFT, and a Ramses v3 liquidity change pays the position's gauge reward to the holder:
+        // claim it first and pass it on to the user
+        _forwardPositionReward(params.nfpm, params.tokenId, params.userAddress);
+
         (uint256 amount0, uint256 amount1) = _decreaseLiquidity(
             params.nfpm, params.tokenId, params.liquidity, params.deadline, params.token0Min, params.token1Min
         );
@@ -640,6 +655,27 @@ abstract contract Common is AccessControl, Pausable {
         // short fill. Re-check the floor against what actually landed.
         if (params.liquidity != 0 && (principal0 < params.token0Min || principal1 < params.token1Min)) {
             revert SlippageError();
+        }
+    }
+
+    // Sends nothing when the claim reverts (a pool without a gauge) or is forfeited. Only the claimed amount is sent,
+    // so a reward token that is also one of the position's tokens is unaffected.
+    function _forwardPositionReward(INonfungiblePositionManager nfpm, uint256 tokenId, address recipient) private {
+        IERC20 token = IERC20(positionRewardToken[address(nfpm)]);
+        if (address(token) == address(0)) {
+            return;
+        }
+        uint256 balanceBefore = _selfBalance(token);
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(token);
+        try IRewardsPositionManager(address(nfpm)).getReward(tokenId, tokens) {}
+        catch {
+            return;
+        }
+        uint256 amount = _selfBalance(token) - balanceBefore;
+        if (amount != 0) {
+            SafeERC20.safeTransfer(token, recipient, amount);
+            emit ForwardPositionReward(address(nfpm), tokenId, recipient, address(token), amount);
         }
     }
 
@@ -802,5 +838,10 @@ abstract contract Common is AccessControl, Pausable {
 
     function setFeeTaker(address feeTaker) external onlyRole(ADMIN_ROLE) {
         FEE_TAKER = feeTaker;
+    }
+
+    // the gauge reward passed on to the user (Ramses v3: RAM; never xRAM, which can't be transferred)
+    function setPositionRewardToken(address nfpm, address token) external onlyRole(ADMIN_ROLE) {
+        positionRewardToken[nfpm] = token;
     }
 }
