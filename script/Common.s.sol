@@ -28,7 +28,7 @@ abstract contract CommonScript is Script {
             flags = string.concat(flags, " --verifier-url ", verifierUrl);
         }
         if (bytes(apiKey).length > 0) {
-            flags = string.concat(flags, " --etherscan-api-key ", apiKey);
+            flags = string.concat(flags, " --verifier-api-key ", apiKey);
         }
         return flags;
     }

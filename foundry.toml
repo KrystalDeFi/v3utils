@@ -23,7 +23,7 @@ fs_permissions = [{ access = "read", path = "./foundry.toml" }]
 
 libraries = [
     'src/Nfpm.sol:Nfpm:0xdE2D99466Fc10C905e6A83acd695EEc0C1224EEA',
-    'src/CommonLib.sol:CommonLib:0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4'
+    'src/CommonLib.sol:CommonLib:0xC2F0Dca353bb35f88651EBb5D7658A080ba00715'
 ]
 
 [profile.linker]
@@ -41,9 +41,9 @@ solc = "0.8.15"
 fs_permissions = [{ access = "read", path = "./foundry.toml" }]
 
 libraries = [
-    'src/StructHash.sol:StructHash:0x2678a1DDd61b5da9464ec5ac4b32c5561F90C92A',
+    'src/StructHash.sol:StructHash:0x733312C8d8A2616b0A43AB3e2d17aAC5637Bf24c',
     'src/Nfpm.sol:Nfpm:0xdE2D99466Fc10C905e6A83acd695EEc0C1224EEA',
-    'src/CommonLib.sol:CommonLib:0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4'
+    'src/CommonLib.sol:CommonLib:0xC2F0Dca353bb35f88651EBb5D7658A080ba00715'
 ]
 
 # NOTE: compute these addresses under the SAME profile the deploy script runs in, or you will get a

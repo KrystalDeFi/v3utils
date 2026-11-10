@@ -67,5 +67,12 @@
     "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
     "v3Automation": "0x6ed60864fb8fb610a65af5d16cef272548bc64d6",
     "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
+  },
+  "99901": {
+    "CommonLib": "0xc2f0dca353bb35f88651ebb5d7658a080ba00715",
+    "nfpmLib": "0xde2d99466fc10c905e6a83acd695eec0c1224eea",
+    "structHash": "0x733312c8d8a2616b0a43ab3e2d17aac5637bf24c",
+    "v3Automation": "0xf6fa00ef46d2f50a07397342e7362b563e3e85f7",
+    "v3Utils": "0x7af58bea8162cadddb0edf5a9997a7db86607669"
   }
 }
