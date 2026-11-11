@@ -30,16 +30,18 @@
     "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
   },
   "999": {
-    "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
-    "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
-    "v3Automation": "0x6ed60864fb8fb610a65af5d16cef272548bc64d6",
-    "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
+    "CommonLib": "0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4",
+    "nfpmLib": "0xde2d99466fc10c905e6a83acd695eec0c1224eea",
+    "structHash": "0x2678a1ddd61b5da9464ec5ac4b32c5561f90c92a",
+    "v3Automation": "0x207e5bf02a9dcd3a99502885d0e2c28a1d021ada",
+    "v3Utils": "0x8053e6e8b6cab476d13060806141be5bc71bfc42"
   },
   "4663": {
-    "nfpmLib": "0x5306493ccf612bc8564b30b0cdb7ff8fbd719a95",
-    "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
-    "v3Automation": "0x6ed60864fb8fb610a65af5d16cef272548bc64d6",
-    "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
+    "CommonLib": "0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4",
+    "nfpmLib": "0xde2d99466fc10c905e6a83acd695eec0c1224eea",
+    "structHash": "0x2678a1ddd61b5da9464ec5ac4b32c5561f90c92a",
+    "v3Automation": "0x207e5bf02a9dcd3a99502885d0e2c28a1d021ada",
+    "v3Utils": "0x8053e6e8b6cab476d13060806141be5bc71bfc42"
   },
   "5042": {
     "CommonLib": "0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4",
@@ -65,5 +67,12 @@
     "structHash": "0xb486f83280f19cf652843b8f79e52572d589bbf9",
     "v3Automation": "0x6ed60864fb8fb610a65af5d16cef272548bc64d6",
     "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
+  },
+  "99901": {
+    "CommonLib": "0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4",
+    "nfpmLib": "0xde2d99466fc10c905e6a83acd695eec0c1224eea",
+    "structHash": "0x2678a1ddd61b5da9464ec5ac4b32c5561f90c92a",
+    "v3Automation": "0x207e5bf02a9dcd3a99502885d0e2c28a1d021ada",
+    "v3Utils": "0x8053e6e8b6cab476d13060806141be5bc71bfc42"
   }
 }

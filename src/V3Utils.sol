@@ -536,6 +536,7 @@ contract V3Utils is IERC721Receiver, Common {
 
     /// @notice Does 1 or 2 swaps from swapSourceToken to token0 and token1 and adds as much as possible liquidity to any existing position (no need to be position owner).
     // Sends any leftover tokens to recipient.
+    // Ramses v3 only lets the position's owner or an approved address add liquidity: approve this contract first.
     function swapAndIncreaseLiquidity(SwapAndIncreaseLiquidityParams calldata params)
         external
         payable

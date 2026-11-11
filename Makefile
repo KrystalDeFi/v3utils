@@ -3,14 +3,28 @@ ifneq (,$(wildcard ./.env))
     export
 endif
 
-DEPLOY_CMD = forge script script/$(CONTRACT).s.sol:$(CONTRACT)Script --rpc-url $(RPC_URL) --broadcast
+# HyperEVM (999) runs two block types: small blocks (3M gas) and big blocks (30M gas). A deployer
+# with big blocks enabled (eth_usingBigBlocks) lands its txs in big blocks, but forge simulates
+# against the forked block's gas limit, which is a small block's 3M: V3Utils's ~7.5M-gas creation
+# then fails with OutOfGas locally before anything is sent. Lift the simulation cap there only.
+ifeq ($(CHAIN_ID),999)
+    DEPLOY_EXTRA_FLAGS = --disable-block-gas-limit
+endif
+DEPLOY_CMD = forge script script/$(CONTRACT).s.sol:$(CONTRACT)Script --rpc-url $(RPC_URL) --broadcast $(DEPLOY_EXTRA_FLAGS)
 VERIFY_CMD = forge script script/Verify.s.sol:Verify$(CONTRACT)Script | awk 'END{print}' | bash
 
-build: src/V3Utils.sol clean
+# The appended solc metadata hash covers forge-computed remappings, so the forge version is part of
+# every CREATE2 address: v1.7.1, v1.8.x and v1.9.0 each produce a different address for the same
+# sources and salt. check-forge.sh pins the toolchain to the v1.8.3 release (commit cae51ad) that
+# produced the deployed bytecode and rejects anything else before it can build or broadcast.
+forge-check:
+	@script/check-forge.sh
+
+build: src/V3Utils.sol clean forge-check
 	forge build
-test: src/V3Utils.sol test/*
+test: src/V3Utils.sol test/* forge-check
 	forge test
-.PHONY: clean v3utils v3automation structhash libs-check-v3utils libs-check-v3automation
+.PHONY: clean v3utils v3automation structhash libs-check-v3utils libs-check-v3automation forge-check
 clean:
 	forge clean && rm -rf cache
 v3utils:
@@ -38,7 +52,7 @@ nfpm:
 	$(eval CONTRACT=Nfpm)
 commonlib:
 	$(eval CONTRACT=CommonLib)
-deploy-%: %
+deploy-%: forge-check %
 	$(DEPLOY_CMD)
 deploy-v3utils: libs-check-v3utils
 deploy-structhash:
