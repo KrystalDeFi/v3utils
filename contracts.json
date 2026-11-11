@@ -69,10 +69,10 @@
     "v3Utils": "0xb4acbc082b5e7ded571c98ee4257778a9d784b36"
   },
   "99901": {
-    "CommonLib": "0xc2f0dca353bb35f88651ebb5d7658a080ba00715",
+    "CommonLib": "0xc4aee87ba7a14601cd48294a6d6c92b1196d9bd4",
     "nfpmLib": "0xde2d99466fc10c905e6a83acd695eec0c1224eea",
-    "structHash": "0x733312c8d8a2616b0a43ab3e2d17aac5637bf24c",
-    "v3Automation": "0xf6fa00ef46d2f50a07397342e7362b563e3e85f7",
-    "v3Utils": "0x7af58bea8162cadddb0edf5a9997a7db86607669"
+    "structHash": "0x2678a1ddd61b5da9464ec5ac4b32c5561f90c92a",
+    "v3Automation": "0x207e5bf02a9dcd3a99502885d0e2c28a1d021ada",
+    "v3Utils": "0x8053e6e8b6cab476d13060806141be5bc71bfc42"
   }
 }
