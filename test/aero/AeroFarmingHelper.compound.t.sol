@@ -27,7 +27,7 @@ contract AeroFarmingHelperCompoundTest is AeroForkBase {
         address indexed gauge,
         uint256 indexed tokenId,
         uint256 newTokenId,
-        AeroFarmingHelper.Action action,
+        AeroFarmingCore.Action action,
         bool automated
     );
 
@@ -101,7 +101,7 @@ contract AeroFarmingHelperCompoundTest is AeroForkBase {
         return IERC20(t).balanceOf(a);
     }
 
-    function _params(uint64 feeX64) internal view returns (AeroFarmingHelper.CompoundParams memory p) {
+    function _params(uint64 feeX64) internal view returns (AeroFarmingCore.CompoundParams memory p) {
         p.deadline = block.timestamp + 1 hours;
         p.performanceFeeX64 = feeX64;
     }
@@ -115,7 +115,7 @@ contract AeroFarmingHelperCompoundTest is AeroForkBase {
         uint256 ft0 = _bal(AERO, feeTaker);
         uint256 hA = _bal(AERO, address(helper));
         uint256 hW = _bal(WETH, address(helper));
-        AeroFarmingHelper.CompoundParams memory p = _params(feeX64);
+        AeroFarmingCore.CompoundParams memory p = _params(feeX64);
 
         vm.recordLogs();
         vm.prank(user);
@@ -156,10 +156,10 @@ contract AeroFarmingHelperCompoundTest is AeroForkBase {
                 assertEq(logs[i].topics[1], bytes32(uint256(uint160(user))));
                 assertEq(logs[i].topics[2], bytes32(uint256(uint160(GAUGE_B_BASE))));
                 assertEq(logs[i].topics[3], bytes32(id));
-                (uint256 newId, AeroFarmingHelper.Action a, bool automated) =
-                    abi.decode(logs[i].data, (uint256, AeroFarmingHelper.Action, bool));
+                (uint256 newId, AeroFarmingCore.Action a, bool automated) =
+                    abi.decode(logs[i].data, (uint256, AeroFarmingCore.Action, bool));
                 assertEq(newId, id);
-                assertEq(uint8(a), uint8(AeroFarmingHelper.Action.COMPOUND));
+                assertEq(uint8(a), uint8(AeroFarmingCore.Action.COMPOUND));
                 assertFalse(automated);
             }
         }
@@ -170,16 +170,16 @@ contract AeroFarmingHelperCompoundTest is AeroForkBase {
     function test_compound_requiresClaimApproval() public {
         vm.prank(user);
         ICLGaugeApprovals(GAUGE_B_BASE).approveForClaim(address(helper), false);
-        AeroFarmingHelper.CompoundParams memory p = _params(0);
+        AeroFarmingCore.CompoundParams memory p = _params(0);
         vm.prank(user);
         vm.expectRevert(bytes("NA"));
         helper.compound(GAUGE_B_BASE, id, p);
     }
 
     function test_compound_feeAboveCapReverts() public {
-        AeroFarmingHelper.CompoundParams memory p = _params(5902958103587057001);
+        AeroFarmingCore.CompoundParams memory p = _params(5902958103587057001);
         vm.prank(user);
-        vm.expectRevert(AeroFarmingHelper.FeeTooHigh.selector);
+        vm.expectRevert(AeroFarmingCore.FeeTooHigh.selector);
         helper.compound(GAUGE_B_BASE, id, p);
     }
 
@@ -187,9 +187,9 @@ contract AeroFarmingHelperCompoundTest is AeroForkBase {
         _deployHelper(AERO, false, WETH);
         AeroFarmingHelper h = helper;
         _approveGauge(user, GAUGE_B_BASE, true);
-        AeroFarmingHelper.CompoundParams memory p = _params(0);
+        AeroFarmingCore.CompoundParams memory p = _params(0);
         vm.prank(user);
-        vm.expectRevert(AeroFarmingHelper.CompoundDisabled.selector);
+        vm.expectRevert(AeroFarmingCore.CompoundDisabled.selector);
         h.compound(GAUGE_B_BASE, id, p);
     }
 
@@ -200,7 +200,7 @@ contract AeroFarmingHelperCompoundTest is AeroForkBase {
         uint256 claimed = _earned();
         uint64 feeX64 = 1 << 62;
         uint256 fee = FullMath.mulDiv(claimed, feeX64, 2 ** 64);
-        AeroFarmingHelper.CompoundParams memory p = _params(feeX64);
+        AeroFarmingCore.CompoundParams memory p = _params(feeX64);
         p.amountIn0 = claimed - fee + 1;
         uint128 l0 = _liq();
         uint256 u0 = _bal(AERO, user);

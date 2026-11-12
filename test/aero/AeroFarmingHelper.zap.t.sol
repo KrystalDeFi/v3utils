@@ -12,7 +12,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         address indexed gauge,
         uint256 indexed tokenId,
         uint256 newTokenId,
-        AeroFarmingHelper.Action action,
+        AeroFarmingCore.Action action,
         bool automated
     );
 
@@ -80,10 +80,10 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
             assertEq(logs[i].topics[1], bytes32(uint256(uint160(user))));
             assertEq(logs[i].topics[2], bytes32(uint256(uint160(GAUGE_A_BASE))));
             assertEq(logs[i].topics[3], bytes32(id));
-            (uint256 newId, AeroFarmingHelper.Action a, bool automated) =
-                abi.decode(logs[i].data, (uint256, AeroFarmingHelper.Action, bool));
+            (uint256 newId, AeroFarmingCore.Action a, bool automated) =
+                abi.decode(logs[i].data, (uint256, AeroFarmingCore.Action, bool));
             assertEq(newId, id);
-            assertEq(uint8(a), uint8(AeroFarmingHelper.Action.ZAP_IN));
+            assertEq(uint8(a), uint8(AeroFarmingCore.Action.ZAP_IN));
             assertFalse(automated);
         }
         assertEq(found, 1);
@@ -110,7 +110,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         vm.startPrank(user);
         IERC20(USDC_BASE).approve(address(h), type(uint256).max);
         IERC20(WETH).approve(address(h), type(uint256).max);
-        vm.expectRevert(AeroFarmingHelper.NativeDisabled.selector);
+        vm.expectRevert(AeroFarmingCore.NativeDisabled.selector);
         h.zapInAndStake{value: 1 ether}(GAUGE_A_BASE, p, false);
         vm.stopPrank();
     }
@@ -119,7 +119,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
         p.protocol = Nfpm.Protocol.UNI_V3;
         vm.prank(user);
-        vm.expectRevert(AeroFarmingHelper.InvalidInstructions.selector);
+        vm.expectRevert(AeroFarmingCore.InvalidInstructions.selector);
         helper.zapInAndStake(GAUGE_A_BASE, p, false);
     }
 
@@ -127,7 +127,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
         vm.mockCall(LEAF_VOTER, abi.encodeWithSelector(ILeafVoter.isActivated.selector, GAUGE_A_BASE), abi.encode(false));
         vm.prank(user);
-        vm.expectRevert(AeroFarmingHelper.GaugeNotLive.selector);
+        vm.expectRevert(AeroFarmingCore.GaugeNotLive.selector);
         helper.zapInAndStake(GAUGE_A_BASE, p, false);
     }
 
@@ -148,20 +148,20 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         ICLGaugeWithdraw(GAUGE_A_BASE).withdraw(id);
         address h = address(helper);
         vm.prank(user);
-        vm.expectRevert(AeroFarmingHelper.UnexpectedNft.selector);
+        vm.expectRevert(AeroFarmingCore.UnexpectedNft.selector);
         IERC721(NFPM).safeTransferFrom(user, h, id);
     }
 
     function test_onERC721Received_wrongSenderReverts() public {
         address h = address(helper);
-        vm.expectRevert(AeroFarmingHelper.UnexpectedNft.selector);
+        vm.expectRevert(AeroFarmingCore.UnexpectedNft.selector);
         AeroFarmingHelper(payable(h)).onERC721Received(GAUGE_A_BASE, GAUGE_A_BASE, 1, "");
     }
 
     function test_onERC721Received_noActiveGaugeSpoofedReverts() public {
         AeroFarmingHelper h = helper;
         vm.prank(NFPM);
-        vm.expectRevert(AeroFarmingHelper.UnexpectedNft.selector);
+        vm.expectRevert(AeroFarmingCore.UnexpectedNft.selector);
         h.onERC721Received(GAUGE_A_BASE, GAUGE_A_BASE, 1, "");
     }
 
@@ -170,7 +170,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         AeroFarmingHelper h = helper;
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
         vm.prank(user);
-        vm.expectRevert(AeroFarmingHelper.NativeDisabled.selector);
+        vm.expectRevert(AeroFarmingCore.NativeDisabled.selector);
         h.zapInAndStake(GAUGE_A_BASE, p, true);
     }
 
@@ -178,7 +178,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
         p.nfpm = INonfungiblePositionManager(makeAddr("otherNfpm"));
         vm.prank(user);
-        vm.expectRevert(AeroFarmingHelper.InvalidInstructions.selector);
+        vm.expectRevert(AeroFarmingCore.InvalidInstructions.selector);
         helper.zapInAndStake(GAUGE_A_BASE, p, false);
     }
 
@@ -186,7 +186,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
         p.token1 = p.token0;
         vm.prank(user);
-        vm.expectRevert(AeroFarmingHelper.InvalidInstructions.selector);
+        vm.expectRevert(AeroFarmingCore.InvalidInstructions.selector);
         helper.zapInAndStake(GAUGE_A_BASE, p, false);
     }
 }

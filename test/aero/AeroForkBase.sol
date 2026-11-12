@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import "forge-std/Test.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/aero/AeroFarmingHelper.sol";
+import "../../src/aero/AeroAutomationModule.sol";
 
 abstract contract AeroForkBase is Test {
     uint256 internal constant BASE_BLOCK = 56384489;
@@ -29,6 +30,8 @@ abstract contract AeroForkBase is Test {
     address internal operator;
     address internal withdrawer;
     AeroFarmingHelper internal helper;
+    AeroAutomationModule internal moduleImpl; // the module implementation (never called directly in production)
+    AeroAutomationModule internal automation; // the helper proxy, typed for the operator path served by its fallback
 
     function _forkBase() internal {
         vm.createSelectFork(vm.envString("BASE_RPC_URL"), BASE_BLOCK);
@@ -46,11 +49,24 @@ abstract contract AeroForkBase is Test {
         operator = makeAddr("operator");
         withdrawer = makeAddr("withdrawer");
         AeroFarmingHelper impl = new AeroFarmingHelper();
+        moduleImpl = new AeroAutomationModule();
         bytes memory init = abi.encodeCall(
             AeroFarmingHelper.initialize,
-            (admin, operator, withdrawer, V3UTILS, GAUGE_FACTORY, rewardToken, compoundEnabled, weth, STRUCT_HASH)
+            (
+                admin,
+                operator,
+                withdrawer,
+                V3UTILS,
+                GAUGE_FACTORY,
+                rewardToken,
+                compoundEnabled,
+                weth,
+                STRUCT_HASH,
+                address(moduleImpl)
+            )
         );
         helper = AeroFarmingHelper(payable(address(new ERC1967Proxy(address(impl), init))));
+        automation = AeroAutomationModule(address(helper));
         return helper;
     }
 

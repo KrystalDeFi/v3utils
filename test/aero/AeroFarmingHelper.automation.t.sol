@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import "./AeroForkBase.sol";
 import "../../src/StructHash.sol";
 import "v3-core/libraries/TickMath.sol";
+import "v3-core/libraries/FullMath.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 
 /// @dev Calls the internal StructHash overload so the test can compare it with the deployed library.
@@ -30,7 +31,7 @@ abstract contract AutomationBase is AeroForkBase {
         address indexed gauge,
         uint256 indexed tokenId,
         uint256 newTokenId,
-        AeroFarmingHelper.Action action,
+        AeroFarmingCore.Action action,
         bool automated
     );
     event CancelOrder(address user, bytes32 hash, bytes signature);
@@ -77,15 +78,15 @@ abstract contract AutomationBase is AeroForkBase {
     }
 
     function _sign(uint256 key, bytes memory order) internal view returns (bytes memory) {
-        bytes32 digest = helper.hashOrder(order);
+        bytes32 digest = automation.hashOrder(order);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
         return abi.encodePacked(r, s, v);
     }
 
-    function _params(AeroFarmingHelper.AutoAction a, address gauge, bytes memory data, address account)
+    function _params(AeroFarmingCore.AutoAction a, address gauge, bytes memory data, address account)
         internal
         view
-        returns (AeroFarmingHelper.OrderParams memory p)
+        returns (AeroFarmingCore.OrderParams memory p)
     {
         p.action = a;
         p.account = account;
@@ -96,7 +97,7 @@ abstract contract AutomationBase is AeroForkBase {
         p.signature = _sign(userKey, p.order);
     }
 
-    function _farmActions(Vm.Log[] memory logs, uint256 tokenId, AeroFarmingHelper.Action act, bool automated)
+    function _farmActions(Vm.Log[] memory logs, uint256 tokenId, AeroFarmingCore.Action act, bool automated)
         internal
         view
         returns (uint256 found, uint256 newId)
@@ -105,8 +106,8 @@ abstract contract AutomationBase is AeroForkBase {
             if (logs[i].emitter != address(helper) || logs[i].topics[0] != FarmAction.selector) continue;
             if (logs[i].topics[3] != bytes32(tokenId)) continue;
             assertEq(logs[i].topics[1], bytes32(uint256(uint160(user))));
-            (uint256 n, AeroFarmingHelper.Action a, bool au) =
-                abi.decode(logs[i].data, (uint256, AeroFarmingHelper.Action, bool));
+            (uint256 n, AeroFarmingCore.Action a, bool au) =
+                abi.decode(logs[i].data, (uint256, AeroFarmingCore.Action, bool));
             assertEq(uint8(a), uint8(act));
             assertEq(au, automated);
             newId = n;
@@ -152,8 +153,8 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
         ins.tickUpper = base + 5 * TS;
     }
 
-    function _adjustParams() internal view returns (AeroFarmingHelper.OrderParams memory) {
-        return _params(AeroFarmingHelper.AutoAction.AUTO_ADJUST, GAUGE_A_BASE, abi.encode(_rebalanceIns()), user);
+    function _adjustParams() internal view returns (AeroFarmingCore.OrderParams memory) {
+        return _params(AeroFarmingCore.AutoAction.AUTO_ADJUST, GAUGE_A_BASE, abi.encode(_rebalanceIns()), user);
     }
 
     function _assertClean() internal {
@@ -193,18 +194,18 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
                 address(helper)
             )
         );
-        assertEq(helper.domainSeparator(), expected);
+        assertEq(automation.domainSeparator(), expected);
         bytes memory o = _order();
         assertEq(
-            helper.hashOrder(o), keccak256(abi.encodePacked("\x19\x01", expected, IStructHash(STRUCT_HASH)._hash(o)))
+            automation.hashOrder(o), keccak256(abi.encodePacked("\x19\x01", expected, IStructHash(STRUCT_HASH)._hash(o)))
         );
     }
 
     function test_autoAdjust_validOrder() public {
-        AeroFarmingHelper.OrderParams memory p = _adjustParams();
+        AeroFarmingCore.OrderParams memory p = _adjustParams();
         vm.recordLogs();
         vm.prank(operator);
-        uint256 newId = helper.executeOrder(p);
+        uint256 newId = automation.executeOrder(p);
         assertTrue(newId != id);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId));
         assertEq(IERC721(NFPM).ownerOf(newId), GAUGE_A_BASE);
@@ -212,27 +213,27 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
         assertEq(_liq(), 0);
         _assertClean();
         (uint256 found, uint256 n) =
-            _farmActions(vm.getRecordedLogs(), id, AeroFarmingHelper.Action.REBALANCE, true);
+            _farmActions(vm.getRecordedLogs(), id, AeroFarmingCore.Action.REBALANCE, true);
         assertEq(found, 1);
         assertEq(n, newId);
     }
 
     function test_autoExit_validOrder() public {
-        AeroFarmingHelper.OrderParams memory p =
-            _params(AeroFarmingHelper.AutoAction.AUTO_EXIT, GAUGE_A_BASE, abi.encode(_ins(_liq())), user);
+        AeroFarmingCore.OrderParams memory p =
+            _params(AeroFarmingCore.AutoAction.AUTO_EXIT, GAUGE_A_BASE, abi.encode(_ins(_liq())), user);
         vm.recordLogs();
         vm.prank(operator);
-        helper.executeOrder(p);
+        automation.executeOrder(p);
         assertEq(IERC721(NFPM).ownerOf(id), user);
         assertFalse(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(_liq(), 0);
         _assertClean();
-        (uint256 found,) = _farmActions(vm.getRecordedLogs(), id, AeroFarmingHelper.Action.EXIT, true);
+        (uint256 found,) = _farmActions(vm.getRecordedLogs(), id, AeroFarmingCore.Action.EXIT, true);
         assertEq(found, 1);
     }
 
     function test_execute_nonOperatorReverts() public {
-        AeroFarmingHelper.OrderParams memory p = _adjustParams();
+        AeroFarmingCore.OrderParams memory p = _adjustParams();
         bytes32 role = helper.OPERATOR_ROLE();
         address caller = makeAddr("aeroNotOperator");
         vm.expectRevert(
@@ -246,81 +247,154 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
             )
         );
         vm.prank(caller);
-        helper.executeOrder(p);
+        automation.executeOrder(p);
     }
 
     function test_execute_wrongSignerReverts() public {
         (, uint256 otherKey) = makeAddrAndKey("aeroOrderOther");
-        AeroFarmingHelper.OrderParams memory p = _adjustParams();
+        AeroFarmingCore.OrderParams memory p = _adjustParams();
         p.signature = _sign(otherKey, p.order);
         vm.prank(operator);
-        vm.expectRevert(AeroFarmingHelper.InvalidSignature.selector);
-        helper.executeOrder(p);
+        vm.expectRevert(AeroFarmingCore.InvalidSignature.selector);
+        automation.executeOrder(p);
     }
 
     function test_execute_signerNotStakeOwnerReverts() public {
+        // account A has its own stake in the same gauge and signs a valid order for it
+        uint256 victimId = id;
+        address victim = user;
         (address other, uint256 otherKey) = makeAddrAndKey("aeroOrderOther");
-        AeroFarmingHelper.OrderParams memory p = _adjustParams();
+        deal(WETH, other, 10 ether);
+        deal(USDC_BASE, other, 50_000e6);
+        _approveGauge(other, GAUGE_A_BASE, false);
+        vm.startPrank(other);
+        IERC20(WETH).approve(address(helper), type(uint256).max);
+        IERC20(USDC_BASE).approve(address(helper), type(uint256).max);
+        vm.stopPrank();
+        user = other;
+        _mint(GAUGE_A_BASE, POOL_A_BASE, WETH, USDC_BASE, TS, 1 ether, 5000e6, 10);
+        uint256 otherId = id;
+        user = victim;
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(other, otherId));
+        bytes memory otherOrder = _order(); // references A's own tokenId
+        bytes memory otherSig = _sign(otherKey, otherOrder);
+
+        // the operator points A's order at the victim B's tokenId
+        id = victimId;
+        uint128 victimLiq = _liq();
+        AeroFarmingCore.OrderParams memory p = _adjustParams();
         p.account = other;
-        p.signature = _sign(otherKey, p.order); // perfectly valid signature, but other does not own the stake
+        p.order = otherOrder;
+        p.signature = otherSig;
         vm.prank(operator);
-        vm.expectRevert(AeroFarmingHelper.NotStakeOwner.selector);
-        helper.executeOrder(p);
+        vm.expectRevert(AeroFarmingCore.NotStakeOwner.selector);
+        automation.executeOrder(p);
+
+        // B's position is untouched
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(victim, victimId));
+        assertEq(IERC721(NFPM).ownerOf(victimId), GAUGE_A_BASE);
+        assertEq(_liq(), victimLiq);
+
+        // positive control: the same signed order does act on A's own stake
+        id = otherId;
+        p = _params(AeroFarmingCore.AutoAction.AUTO_EXIT, GAUGE_A_BASE, abi.encode(_ins(_liq())), other);
+        p.order = otherOrder;
+        p.signature = otherSig;
+        vm.prank(operator);
+        automation.executeOrder(p);
+        assertEq(IERC721(NFPM).ownerOf(otherId), other);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(victim, victimId));
     }
 
     function test_execute_cancelledReverts() public {
-        AeroFarmingHelper.OrderParams memory p = _adjustParams();
-        bytes32 digest = helper.hashOrder(p.order);
+        AeroFarmingCore.OrderParams memory p = _adjustParams();
+        bytes32 digest = automation.hashOrder(p.order);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(userKey, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
-        assertFalse(helper.isOrderCancelled(user, digest));
+        assertFalse(automation.isOrderCancelled(user, digest));
         vm.expectEmit(address(helper));
         emit CancelOrder(user, digest, sig);
         vm.prank(user);
-        helper.cancelOrder(digest, sig);
-        assertTrue(helper.isOrderCancelled(user, digest));
-        assertFalse(helper.isOrderCancelled(operator, digest));
+        automation.cancelOrder(digest, sig);
+        assertTrue(automation.isOrderCancelled(user, digest));
+        assertFalse(automation.isOrderCancelled(operator, digest));
         vm.prank(operator);
-        vm.expectRevert(AeroFarmingHelper.OrderCancelled.selector);
-        helper.executeOrder(p);
+        vm.expectRevert(AeroFarmingCore.OrderCancelled.selector);
+        automation.executeOrder(p);
     }
 
     function test_cancelOrder_badSignatureReverts() public {
         bytes memory o = _order();
-        bytes32 digest = helper.hashOrder(o);
+        bytes32 digest = automation.hashOrder(o);
         (, uint256 otherKey) = makeAddrAndKey("aeroOrderOther");
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(otherKey, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
         vm.prank(user);
-        vm.expectRevert(AeroFarmingHelper.InvalidSignature.selector);
-        helper.cancelOrder(digest, sig);
+        vm.expectRevert(AeroFarmingCore.InvalidSignature.selector);
+        automation.cancelOrder(digest, sig);
     }
 
     function test_orderValidAcrossUpgrade() public {
-        AeroFarmingHelper.OrderParams memory p = _adjustParams();
+        AeroFarmingCore.OrderParams memory p = _adjustParams();
         AeroFarmingHelper newImpl = new AeroFarmingHelper();
         vm.prank(admin);
         helper.upgradeTo(address(newImpl));
         vm.prank(operator);
-        uint256 newId = helper.executeOrder(p);
+        uint256 newId = automation.executeOrder(p);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId));
     }
 
     function test_execute_whenPausedReverts() public {
-        AeroFarmingHelper.OrderParams memory p = _adjustParams();
+        AeroFarmingCore.OrderParams memory p = _adjustParams();
         vm.prank(admin);
         helper.pause();
         vm.prank(operator);
         vm.expectRevert(bytes("Pausable: paused"));
-        helper.executeOrder(p);
+        automation.executeOrder(p);
+    }
+
+    function test_module_directCallCannotAct() public {
+        AeroFarmingCore.OrderParams memory p = _adjustParams(); // a valid order signed by the stake owner
+        uint128 liq = _liq();
+        bytes32 role = moduleImpl.OPERATOR_ROLE();
+        // no roles exist in the module's own storage, so even the proxy's operator is rejected
+        assertFalse(moduleImpl.hasRole(role, operator));
+        assertFalse(moduleImpl.hasRole(moduleImpl.DEFAULT_ADMIN_ROLE(), admin));
+        vm.expectRevert(
+            bytes(
+                string.concat(
+                    "AccessControl: account ",
+                    Strings.toHexString(operator),
+                    " is missing role ",
+                    Strings.toHexString(uint256(role), 32)
+                )
+            )
+        );
+        vm.prank(operator);
+        moduleImpl.executeOrder(p);
+
+        // the module has no initialize (no fallback either) and its initializers are disabled
+        bytes memory init = abi.encodeCall(
+            AeroFarmingHelper.initialize,
+            (operator, operator, operator, V3UTILS, GAUGE_FACTORY, AERO, true, WETH, STRUCT_HASH, address(moduleImpl))
+        );
+        vm.prank(operator);
+        (bool ok, bytes memory ret) = address(moduleImpl).call(init);
+        assertFalse(ok);
+        assertEq(ret.length, 0);
+        assertEq(uint256(vm.load(address(moduleImpl), bytes32(0))) & 0xff, type(uint8).max);
+        assertFalse(moduleImpl.hasRole(role, operator));
+
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        assertEq(_liq(), liq);
     }
 
     function test_autoHarvest_notSupportedYet() public {
-        AeroFarmingHelper.OrderParams memory p =
-            _params(AeroFarmingHelper.AutoAction.AUTO_HARVEST, GAUGE_A_BASE, "", user);
+        AeroFarmingCore.OrderParams memory p =
+            _params(AeroFarmingCore.AutoAction.AUTO_HARVEST, GAUGE_A_BASE, "", user);
         vm.prank(operator);
-        vm.expectRevert(AeroFarmingHelper.NotSupportedAction.selector);
-        helper.executeOrder(p);
+        vm.expectRevert(AeroFarmingCore.NotSupportedAction.selector);
+        automation.executeOrder(p);
     }
 }
 
@@ -357,21 +431,26 @@ contract AeroFarmingHelperAutoCompoundTest is AutomationBase {
         uint256 claimed = ICLGauge(GAUGE_B_BASE).earned(user, ids);
         assertGt(claimed, 0);
         (,,,,,,, uint128 l0,,,,) = INonfungiblePositionManager(NFPM).positions(id);
-        AeroFarmingHelper.CompoundParams memory c;
+        AeroFarmingCore.CompoundParams memory c;
         c.deadline = block.timestamp + 1 hours;
         c.performanceFeeX64 = 1 << 62;
-        AeroFarmingHelper.OrderParams memory p =
-            _params(AeroFarmingHelper.AutoAction.AUTO_COMPOUND, GAUGE_B_BASE, abi.encode(c), user);
+        uint256 expectedFee = FullMath.mulDiv(claimed, c.performanceFeeX64, 2 ** 64);
+        assertGt(expectedFee, 0);
+        address feeTaker = V3Utils(payable(V3UTILS)).FEE_TAKER();
+        uint256 ft0 = IERC20(AERO).balanceOf(feeTaker);
+        AeroFarmingCore.OrderParams memory p =
+            _params(AeroFarmingCore.AutoAction.AUTO_COMPOUND, GAUGE_B_BASE, abi.encode(c), user);
         vm.recordLogs();
         vm.prank(operator);
-        helper.executeOrder(p);
+        automation.executeOrder(p);
         (,,,,,,, uint128 l1,,,,) = INonfungiblePositionManager(NFPM).positions(id);
         assertGt(l1, l0);
+        assertEq(IERC20(AERO).balanceOf(feeTaker) - ft0, expectedFee);
         assertTrue(ICLGauge(GAUGE_B_BASE).stakedContains(user, id));
         assertEq(IERC20(AERO).balanceOf(address(helper)), 0);
         assertEq(IERC20(WETH).balanceOf(address(helper)), 0);
         assertEq(IERC721(NFPM).balanceOf(address(helper)), 0);
-        (uint256 found,) = _farmActions(vm.getRecordedLogs(), id, AeroFarmingHelper.Action.COMPOUND, true);
+        (uint256 found,) = _farmActions(vm.getRecordedLogs(), id, AeroFarmingCore.Action.COMPOUND, true);
         assertEq(found, 1);
     }
 }
