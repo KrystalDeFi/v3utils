@@ -14,6 +14,7 @@ import "../Common.sol";
 import "../V3Utils.sol";
 import "v3-core/libraries/FullMath.sol";
 import "./IAero.sol";
+import {SignatureValidator} from "@krystal/util-contracts/contracts/SignatureValidator.sol";
 
 interface V3UtilsLike {
     function swapAndMint(Common.SwapAndMintParams calldata params)
@@ -77,6 +78,23 @@ contract AeroFarmingHelper is
     event DeductFees(
         address indexed nfpm, uint256 indexed tokenId, address indexed userAddress, Common.DeductFeesEventData data
     );
+    enum AutoAction {
+        AUTO_ADJUST,
+        AUTO_EXIT,
+        AUTO_COMPOUND,
+        AUTO_HARVEST
+    }
+
+    struct OrderParams {
+        AutoAction action;
+        address account;
+        address gauge;
+        uint256 tokenId;
+        bytes actionData;
+        bytes order;
+        bytes signature;
+    }
+
     event CancelOrder(address user, bytes32 hash, bytes signature);
     event ConfigUpdated(address v3utils, address structHash);
 
@@ -91,6 +109,8 @@ contract AeroFarmingHelper is
     error InvalidInstructions();
     error FeeTooHigh();
     error NotSupportedAction();
+    error NativeTransferFailed();
+    error UnexpectedNative();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -117,17 +137,25 @@ contract AeroFarmingHelper is
         compoundEnabled = compoundEnabled_;
         weth = weth_;
         structHash = structHash_;
-        emit ConfigUpdated(v3utils_, structHash_);
+        _emitConfig();
     }
 
     function setV3Utils(address v3utils_) external onlyRole(DEFAULT_ADMIN_ROLE) {
         v3utils = v3utils_;
-        emit ConfigUpdated(v3utils_, structHash);
+        _emitConfig();
     }
 
     function setStructHash(address structHash_) external onlyRole(DEFAULT_ADMIN_ROLE) {
         structHash = structHash_;
-        emit ConfigUpdated(v3utils, structHash_);
+        _emitConfig();
+    }
+
+    function _checkUnwrap(bool unwrap) internal view {
+        if (unwrap && weth == address(0)) revert NativeDisabled();
+    }
+
+    function _emitConfig() internal {
+        emit ConfigUpdated(v3utils, structHash);
     }
 
     function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -147,8 +175,7 @@ contract AeroFarmingHelper is
     }
 
     function withdrawNative(address to) external onlyRole(WITHDRAWER_ROLE) {
-        (bool ok,) = to.call{value: address(this).balance}("");
-        require(ok, "native transfer failed");
+        _sendNative(to, address(this).balance);
     }
 
     function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
@@ -168,7 +195,7 @@ contract AeroFarmingHelper is
     }
 
     /// @notice Zap tokens (and/or native coin) into a new Aero CL position and stake it in `gauge` for the caller.
-    function zapInAndStake(address gauge, Common.SwapAndMintParams calldata params, bool unwrap)
+    function zapInAndStake(address gauge, Common.SwapAndMintParams memory p, bool unwrap)
         external
         payable
         nonReentrant
@@ -176,33 +203,22 @@ contract AeroFarmingHelper is
         returns (uint256 tokenId)
     {
         INonfungiblePositionManager nfpm = _validateGauge(gauge);
-        Common.SwapAndMintParams memory p = params;
         if (address(p.nfpm) != address(nfpm) || p.protocol != Nfpm.Protocol.AERODROME || p.token0 == p.token1) {
             revert InvalidInstructions();
         }
         p.recipient = address(this);
 
-        address[3] memory tokens = [address(p.token0), address(p.token1), address(0)];
-        uint256[3] memory amounts = [p.amount0, p.amount1, uint256(0)];
-        if (p.swapSourceToken != p.token0 && p.swapSourceToken != p.token1 && address(p.swapSourceToken) != address(0))
-        {
-            tokens[2] = address(p.swapSourceToken);
-            amounts[2] = p.amount2;
-        }
-        address[] memory list = _nonZero(tokens);
-        if (unwrap && weth == address(0)) revert NativeDisabled();
+        (address[3] memory tokens, uint256[3] memory amounts) =
+            _slots(address(p.token0), address(p.token1), address(p.swapSourceToken), p.amount0, p.amount1, p.amount2);
+        address[] memory list = _tokenSet(tokens[0], tokens[1], tokens[2], address(0));
+        _checkUnwrap(unwrap);
         uint256[] memory before = _snapshot(list);
 
         _pullInputs(tokens, amounts);
 
-        address v = v3utils;
-        for (uint256 i; i < 3; ++i) {
-            if (tokens[i] != address(0)) IERC20(tokens[i]).forceApprove(v, amounts[i]);
-        }
-        tokenId = V3UtilsLike(v).swapAndMint(p).tokenId;
-        for (uint256 i; i < 3; ++i) {
-            if (tokens[i] != address(0)) IERC20(tokens[i]).forceApprove(v, 0);
-        }
+        _approveInputs(tokens, amounts, false);
+        tokenId = V3UtilsLike(v3utils).swapAndMint(p).tokenId;
+        _approveInputs(tokens, amounts, true);
 
         _stake(gauge, nfpm, tokenId, msg.sender);
         _sweep(list, before, msg.sender, unwrap);
@@ -210,19 +226,18 @@ contract AeroFarmingHelper is
     }
 
     /// @notice Add liquidity to a staked position: unstake, increase through V3Utils, restake. Leftovers go back to the caller.
-    function addLiquidity(address gauge, Common.SwapAndIncreaseLiquidityParams calldata params, bool unwrap)
+    function addLiquidity(address gauge, Common.SwapAndIncreaseLiquidityParams memory p, bool unwrap)
         external
         payable
         nonReentrant
         whenNotPaused
     {
         INonfungiblePositionManager nfpm = _validateGauge(gauge);
-        if (address(params.nfpm) != address(nfpm) || params.protocol != Nfpm.Protocol.AERODROME) {
+        if (address(p.nfpm) != address(nfpm) || p.protocol != Nfpm.Protocol.AERODROME) {
             revert InvalidInstructions();
         }
-        if (unwrap && weth == address(0)) revert NativeDisabled();
-        uint256 tokenId = params.tokenId;
-        Common.SwapAndIncreaseLiquidityParams memory p = params;
+        _checkUnwrap(unwrap);
+        uint256 tokenId = p.tokenId;
         p.recipient = address(this);
 
         (address[3] memory tokens, uint256[3] memory amounts) = _increaseInputs(nfpm, p);
@@ -232,14 +247,9 @@ contract AeroFarmingHelper is
         _unstake(gauge, tokenId, msg.sender);
         _pullInputs(tokens, amounts);
 
-        address v = v3utils;
-        for (uint256 i; i < 3; ++i) {
-            if (tokens[i] != address(0)) IERC20(tokens[i]).forceApprove(v, amounts[i]);
-        }
-        V3UtilsLike(v).swapAndIncreaseLiquidity(p);
-        for (uint256 i; i < 3; ++i) {
-            if (tokens[i] != address(0)) IERC20(tokens[i]).forceApprove(v, 0);
-        }
+        _approveInputs(tokens, amounts, false);
+        V3UtilsLike(v3utils).swapAndIncreaseLiquidity(p);
+        _approveInputs(tokens, amounts, true);
 
         _stake(gauge, nfpm, tokenId, msg.sender);
         _sweep(list, before, msg.sender, unwrap);
@@ -247,7 +257,7 @@ contract AeroFarmingHelper is
     }
 
     /// @notice Withdraw part of a staked position's liquidity (and collect fees); the NFT is restaked under the same id.
-    function removeLiquidity(address gauge, uint256 tokenId, V3Utils.Instructions calldata ins)
+    function removeLiquidity(address gauge, uint256 tokenId, V3Utils.Instructions memory ins)
         external
         nonReentrant
         whenNotPaused
@@ -256,7 +266,7 @@ contract AeroFarmingHelper is
     }
 
     /// @notice Withdraw all liquidity of a staked position and return the (empty) NFT, unstaked, to the caller.
-    function exit(address gauge, uint256 tokenId, V3Utils.Instructions calldata ins)
+    function exit(address gauge, uint256 tokenId, V3Utils.Instructions memory ins)
         external
         nonReentrant
         whenNotPaused
@@ -266,7 +276,7 @@ contract AeroFarmingHelper is
 
     /// @notice Move a staked position to a new range: V3Utils mints the new position, which is staked for the caller.
     /// The old (emptied) NFT is returned, unstaked, to the caller.
-    function rebalance(address gauge, uint256 tokenId, V3Utils.Instructions calldata ins)
+    function rebalance(address gauge, uint256 tokenId, V3Utils.Instructions memory ins)
         external
         nonReentrant
         whenNotPaused
@@ -292,8 +302,73 @@ contract AeroFarmingHelper is
 
     /// @notice Claim the position's AERO emissions, take the performance fee and add the rest back to the position (Base only).
     /// Requires the caller to have approved this helper with `approveForClaim` on the gauge.
-    function compound(address gauge, uint256 tokenId, CompoundParams calldata p) external nonReentrant whenNotPaused {
+    function compound(address gauge, uint256 tokenId, CompoundParams memory p) external nonReentrant whenNotPaused {
         _compound(msg.sender, gauge, tokenId, p, false);
+    }
+
+    bytes32 private constant DOMAIN_TYPE_HASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+
+    /// @notice EIP-712 domain separator, computed per call so it binds to the proxy address.
+    function domainSeparator() public view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                DOMAIN_TYPE_HASH, keccak256("AeroFarmingHelper"), keccak256("1"), block.chainid, address(this)
+            )
+        );
+    }
+
+    /// @notice EIP-712 digest of an abi-encoded `StructHash.Order`.
+    function hashOrder(bytes calldata order) public view returns (bytes32 digest) {
+        digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), IStructHash(structHash)._hash(order)));
+    }
+
+    /// @notice Cancel an order (identified by its EIP-712 digest) signed by the caller.
+    function cancelOrder(bytes32 hash, bytes calldata signature) external {
+        if (!SignatureValidator.isValidSignatureNow(msg.sender, hash, signature)) revert InvalidSignature();
+        _cancelledOrder[_cancelKey(msg.sender, hash)] = true;
+        emit CancelOrder(msg.sender, hash, signature);
+    }
+
+    function isOrderCancelled(address actor, bytes32 hash) external view returns (bool) {
+        return _cancelledOrder[_cancelKey(actor, hash)];
+    }
+
+    /// @dev Keyed on the digest (not the signature bytes, which can be re-encoded) and scoped per actor.
+    function _cancelKey(address actor, bytes32 digest) private pure returns (bytes32) {
+        return keccak256(abi.encode(actor, digest));
+    }
+
+    /// @notice Operator entry point: runs an action on `p.account`'s staked position under an order the account signed.
+    /// The order's tokenId, nfpm and type are not checked on-chain (the signed order only authorises the operator).
+    function executeOrder(OrderParams calldata p)
+        external
+        onlyRole(OPERATOR_ROLE)
+        whenNotPaused
+        nonReentrant
+        returns (uint256 tokenIdAfter)
+    {
+        address account = p.account;
+        if (!ICLGauge(p.gauge).stakedContains(account, p.tokenId)) revert NotStakeOwner();
+        bytes32 digest = hashOrder(p.order);
+        if (!SignatureValidator.isValidSignatureNow(account, digest, p.signature)) revert InvalidSignature();
+        if (_cancelledOrder[_cancelKey(account, digest)]) revert OrderCancelled();
+
+        tokenIdAfter = p.tokenId;
+        if (p.action == AutoAction.AUTO_COMPOUND) {
+            _compound(account, p.gauge, tokenIdAfter, abi.decode(p.actionData, (CompoundParams)), true);
+        } else if (p.action == AutoAction.AUTO_HARVEST) {
+            revert NotSupportedAction();
+        } else {
+            tokenIdAfter = _modify(
+                account,
+                p.gauge,
+                tokenIdAfter,
+                abi.decode(p.actionData, (V3Utils.Instructions)),
+                p.action == AutoAction.AUTO_ADJUST ? Action.REBALANCE : Action.EXIT,
+                true
+            );
+        }
     }
 
     function _compound(address account, address gauge, uint256 tokenId, CompoundParams memory p, bool automated)
@@ -301,15 +376,12 @@ contract AeroFarmingHelper is
     {
         if (!compoundEnabled) revert CompoundDisabled();
         INonfungiblePositionManager nfpm = _validateGauge(gauge);
-        if (p.unwrap && weth == address(0)) revert NativeDisabled();
-        address[] memory list;
-        {
-            (address token0, address token1,) = _positionInfo(nfpm, tokenId);
-            list = _tokenSet(token0, token1, rewardToken, address(0));
-        }
+        _checkUnwrap(p.unwrap);
+        (address token0, address token1,) = _positionInfo(nfpm, tokenId);
+        address[] memory list = _tokenSet(token0, token1, rewardToken, address(0));
         uint256[] memory before = _snapshot(list);
 
-        _claimAndIncrease(account, gauge, nfpm, tokenId, p);
+        _claimAndIncrease(account, gauge, nfpm, tokenId, p, token0, token1);
         _stake(gauge, nfpm, tokenId, account);
         _sweep(list, before, account, p.unwrap);
         emit FarmAction(account, gauge, tokenId, tokenId, Action.COMPOUND, automated);
@@ -321,10 +393,11 @@ contract AeroFarmingHelper is
         address gauge,
         INonfungiblePositionManager nfpm,
         uint256 tokenId,
-        CompoundParams memory p
+        CompoundParams memory p,
+        address token0,
+        address token1
     ) internal {
         address reward = rewardToken;
-        (address token0, address token1,) = _positionInfo(nfpm, tokenId);
         uint256 claimed = _claim(gauge, account, tokenId, reward);
         _unstake(gauge, tokenId, account);
         uint256 fee = _takeFee(
@@ -409,19 +482,15 @@ contract AeroFarmingHelper is
         Common.DeductFeesEventData memory d;
         d.feeX64 = feeX64;
         d.feeType = t;
+        d.token0 = token0;
+        d.token1 = token1;
         if (reward == token0) {
-            d.token0 = token0;
-            d.token1 = token1;
             d.amount0 = amount;
             d.feeAmount0 = fee;
         } else if (reward == token1) {
-            d.token0 = token0;
-            d.token1 = token1;
             d.amount1 = amount;
             d.feeAmount1 = fee;
         } else {
-            d.token0 = token0;
-            d.token1 = token1;
             d.token2 = reward;
             d.amount2 = amount;
             d.feeAmount2 = fee;
@@ -484,7 +553,7 @@ contract AeroFarmingHelper is
         } else {
             revert NotSupportedAction();
         }
-        if (ins.unwrap && weth == address(0)) revert NativeDisabled();
+        _checkUnwrap(ins.unwrap);
         list = _tokenSet(token0, token1, ins.targetToken, rewardToken);
     }
 
@@ -503,14 +572,20 @@ contract AeroFarmingHelper is
         returns (address[3] memory tokens, uint256[3] memory amounts)
     {
         (address t0, address t1,) = _positionInfo(nfpm, p.tokenId);
+        return _slots(t0, t1, address(p.swapSourceToken), p.amount0, p.amount1, p.amount2);
+    }
+
+    /// @dev The third slot is the swap source token, used only when it is neither token0 nor token1.
+    function _slots(address t0, address t1, address src, uint256 a0, uint256 a1, uint256 a2)
+        internal
+        pure
+        returns (address[3] memory tokens, uint256[3] memory amounts)
+    {
         tokens = [t0, t1, address(0)];
-        amounts = [p.amount0, p.amount1, uint256(0)];
-        if (
-            address(p.swapSourceToken) != address(0) && address(p.swapSourceToken) != t0
-                && address(p.swapSourceToken) != t1
-        ) {
-            tokens[2] = address(p.swapSourceToken);
-            amounts[2] = p.amount2;
+        amounts = [a0, a1, uint256(0)];
+        if (src != address(0) && src != t0 && src != t1) {
+            tokens[2] = src;
+            amounts[2] = a2;
         }
     }
 
@@ -563,14 +638,25 @@ contract AeroFarmingHelper is
             if (bal <= before[i]) continue;
             uint256 delta = bal - before[i];
             if (unwrap && tokens[i] == w) {
-                if (w == address(0)) revert NativeDisabled();
                 IWETHLike(w).withdraw(delta);
-                (bool ok,) = to.call{value: delta}("");
-                require(ok, "native transfer failed");
+                _sendNative(to, delta);
             } else {
                 IERC20(tokens[i]).safeTransfer(to, delta);
             }
         }
+    }
+
+    /// @dev Approves V3Utils for `amounts` of each non-zero token, or resets the approvals to zero.
+    function _approveInputs(address[3] memory tokens, uint256[3] memory amounts, bool reset) internal {
+        address v = v3utils;
+        for (uint256 i; i < 3; ++i) {
+            if (tokens[i] != address(0)) IERC20(tokens[i]).forceApprove(v, reset ? 0 : amounts[i]);
+        }
+    }
+
+    function _sendNative(address to, uint256 amount) internal {
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) revert NativeTransferFailed();
     }
 
     /// @dev Pulls `amounts` from msg.sender. msg.value is wrapped and counts toward the WETH slot.
@@ -580,34 +666,16 @@ contract AeroFarmingHelper is
         if (native > 0) {
             address w = weth;
             if (w == address(0)) revert NativeDisabled();
-            bool matched;
-            for (uint256 i; i < 3; ++i) {
-                if (tokens[i] == w) {
-                    if (native > amounts[i]) revert NativeDisabled();
-                    amounts[i] -= native;
-                    matched = true;
-                    break;
-                }
-            }
-            if (!matched) revert NativeDisabled();
+            uint256 i;
+            while (i < 3 && tokens[i] != w) ++i;
+            if (i == 3 || native > amounts[i]) revert NativeDisabled();
+            amounts[i] -= native;
             IWETHLike(w).deposit{value: native}();
         }
         for (uint256 i; i < 3; ++i) {
             if (tokens[i] != address(0) && amounts[i] > 0) {
                 IERC20(tokens[i]).safeTransferFrom(msg.sender, address(this), amounts[i]);
             }
-        }
-    }
-
-    function _nonZero(address[3] memory tokens) internal pure returns (address[] memory list) {
-        uint256 n;
-        for (uint256 i; i < 3; ++i) {
-            if (tokens[i] != address(0)) ++n;
-        }
-        list = new address[](n);
-        n = 0;
-        for (uint256 i; i < 3; ++i) {
-            if (tokens[i] != address(0)) list[n++] = tokens[i];
         }
     }
 
@@ -625,6 +693,6 @@ contract AeroFarmingHelper is
 
     /// @dev Only accepts native coin from WETH (unwrap).
     receive() external payable {
-        require(msg.sender == weth, "only weth");
+        if (msg.sender != weth) revert UnexpectedNative();
     }
 }
