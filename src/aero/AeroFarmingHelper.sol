@@ -12,6 +12,7 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "../Common.sol";
 import "../V3Utils.sol";
+import "v3-core/libraries/FullMath.sol";
 import "./IAero.sol";
 
 interface V3UtilsLike {
@@ -272,6 +273,160 @@ contract AeroFarmingHelper is
         returns (uint256 newTokenId)
     {
         newTokenId = _modify(msg.sender, gauge, tokenId, ins, Action.REBALANCE, false);
+    }
+
+    struct CompoundParams {
+        uint256 amountIn0;
+        uint256 amountOut0Min;
+        bytes swapData0;
+        uint256 amountIn1;
+        uint256 amountOut1Min;
+        bytes swapData1;
+        uint256 amountAddMin0;
+        uint256 amountAddMin1;
+        uint256 deadline;
+        uint64 performanceFeeX64;
+        uint64 gasFeeX64;
+        bool unwrap;
+    }
+
+    /// @notice Claim the position's AERO emissions, take the performance fee and add the rest back to the position (Base only).
+    /// Requires the caller to have approved this helper with `approveForClaim` on the gauge.
+    function compound(address gauge, uint256 tokenId, CompoundParams calldata p) external nonReentrant whenNotPaused {
+        _compound(msg.sender, gauge, tokenId, p, false);
+    }
+
+    function _compound(address account, address gauge, uint256 tokenId, CompoundParams memory p, bool automated)
+        internal
+    {
+        if (!compoundEnabled) revert CompoundDisabled();
+        INonfungiblePositionManager nfpm = _validateGauge(gauge);
+        if (p.unwrap && weth == address(0)) revert NativeDisabled();
+        address[] memory list;
+        {
+            (address token0, address token1,) = _positionInfo(nfpm, tokenId);
+            list = _tokenSet(token0, token1, rewardToken, address(0));
+        }
+        uint256[] memory before = _snapshot(list);
+
+        _claimAndIncrease(account, gauge, nfpm, tokenId, p);
+        _stake(gauge, nfpm, tokenId, account);
+        _sweep(list, before, account, p.unwrap);
+        emit FarmAction(account, gauge, tokenId, tokenId, Action.COMPOUND, automated);
+    }
+
+    /// @dev Claim emissions, unstake, take the performance fee and add the remaining reward to the position.
+    function _claimAndIncrease(
+        address account,
+        address gauge,
+        INonfungiblePositionManager nfpm,
+        uint256 tokenId,
+        CompoundParams memory p
+    ) internal {
+        address reward = rewardToken;
+        (address token0, address token1,) = _positionInfo(nfpm, tokenId);
+        uint256 claimed = _claim(gauge, account, tokenId, reward);
+        _unstake(gauge, tokenId, account);
+        uint256 fee = _takeFee(
+            address(nfpm),
+            tokenId,
+            account,
+            token0,
+            token1,
+            claimed,
+            p.performanceFeeX64,
+            Common.FeeType.PERFORMANCE_FEE
+        );
+        _increaseWithReward(nfpm, tokenId, token0, token1, reward, claimed - fee, p);
+    }
+
+    /// @dev Claims `account`'s emissions for `tokenId` to this contract and returns the reward-token delta.
+    function _claim(address gauge, address account, uint256 tokenId, address reward)
+        internal
+        returns (uint256 claimed)
+    {
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = tokenId;
+        uint256 b = IERC20(reward).balanceOf(address(this));
+        ICLGauge(gauge).claimEmissions(account, address(this), ids);
+        claimed = IERC20(reward).balanceOf(address(this)) - b;
+    }
+
+    /// @dev Runs V3Utils.swapAndIncreaseLiquidity with `amount` of the reward token as the only input.
+    function _increaseWithReward(
+        INonfungiblePositionManager nfpm,
+        uint256 tokenId,
+        address token0,
+        address token1,
+        address reward,
+        uint256 amount,
+        CompoundParams memory c
+    ) internal {
+        Common.SwapAndIncreaseLiquidityParams memory p;
+        p.protocol = Nfpm.Protocol.AERODROME;
+        p.nfpm = nfpm;
+        p.tokenId = tokenId;
+        if (reward == token0) p.amount0 = amount;
+        else if (reward == token1) p.amount1 = amount;
+        else p.amount2 = amount;
+        p.recipient = address(this);
+        p.deadline = c.deadline;
+        p.swapSourceToken = IERC20(reward);
+        p.amountIn0 = c.amountIn0;
+        p.amountOut0Min = c.amountOut0Min;
+        p.swapData0 = c.swapData0;
+        p.amountIn1 = c.amountIn1;
+        p.amountOut1Min = c.amountOut1Min;
+        p.swapData1 = c.swapData1;
+        p.amountAddMin0 = c.amountAddMin0;
+        p.amountAddMin1 = c.amountAddMin1;
+        p.gasFeeX64 = c.gasFeeX64;
+
+        address v = v3utils;
+        IERC20(reward).forceApprove(v, amount);
+        V3UtilsLike(v).swapAndIncreaseLiquidity(p);
+        IERC20(reward).forceApprove(v, 0);
+    }
+
+    /// @dev Sends `amount * feeX64 / 2^64` of the reward token to V3Utils' FEE_TAKER and emits DeductFees.
+    function _takeFee(
+        address nfpm,
+        uint256 tokenId,
+        address account,
+        address token0,
+        address token1,
+        uint256 amount,
+        uint64 feeX64,
+        Common.FeeType t
+    ) internal returns (uint256 fee) {
+        uint64 cap = t == Common.FeeType.GAS_FEE ? MAX_GAS_FEE_X64 : MAX_PERFORMANCE_FEE_X64;
+        if (feeX64 > cap) revert FeeTooHigh();
+        fee = FullMath.mulDiv(amount, feeX64, 2 ** 64);
+        if (fee == 0) return 0;
+        address reward = rewardToken;
+        IERC20(reward).safeTransfer(V3Utils(payable(v3utils)).FEE_TAKER(), fee);
+
+        Common.DeductFeesEventData memory d;
+        d.feeX64 = feeX64;
+        d.feeType = t;
+        if (reward == token0) {
+            d.token0 = token0;
+            d.token1 = token1;
+            d.amount0 = amount;
+            d.feeAmount0 = fee;
+        } else if (reward == token1) {
+            d.token0 = token0;
+            d.token1 = token1;
+            d.amount1 = amount;
+            d.feeAmount1 = fee;
+        } else {
+            d.token0 = token0;
+            d.token1 = token1;
+            d.token2 = reward;
+            d.amount2 = amount;
+            d.feeAmount2 = fee;
+        }
+        emit DeductFees(nfpm, tokenId, account, d);
     }
 
     /// @dev Unstake, run `ins` through V3Utils, then restake (REMOVE_LIQUIDITY), restake the new NFT (REBALANCE) or hand the NFT to `account` (EXIT).
