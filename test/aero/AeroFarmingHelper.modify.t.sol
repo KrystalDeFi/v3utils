@@ -23,7 +23,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         user = makeAddr("aeroModifyUser");
         deal(WETH, user, 10 ether);
         deal(USDC_BASE, user, 50_000e6);
-        _approveGauge(user, GAUGE_A_BASE, true);
+        _approveGauge(user, GAUGE_A_BASE, false);
         vm.startPrank(user);
         IERC20(WETH).approve(address(helper), type(uint256).max);
         IERC20(USDC_BASE).approve(address(helper), type(uint256).max);
@@ -162,12 +162,55 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
     }
 
     function test_remove_withClaimApproval_forwardsRewardAndPoolTokens() public {
+        vm.prank(user);
+        ICLGaugeApprovals(GAUGE_A_BASE).approveForClaim(address(helper), true);
         uint256 a0 = _bal(AERO, user);
         V3Utils.Instructions memory ins = _ins(_liq() / 2);
         vm.prank(user);
         helper.removeLiquidity(GAUGE_A_BASE, id, ins);
         assertGt(_bal(AERO, user), a0);
         _assertHelperClean(0, 0, 0);
+    }
+
+    function test_remove_withoutClaimApproval_userReceivesTokens() public {
+        uint256 w0 = _bal(WETH, user);
+        uint256 u0 = _bal(USDC_BASE, user);
+        V3Utils.Instructions memory ins = _ins(_liq() / 2);
+        vm.prank(user);
+        helper.removeLiquidity(GAUGE_A_BASE, id, ins);
+        assertGt(_bal(WETH, user), w0);
+        assertGt(_bal(USDC_BASE, user), u0);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        _assertHelperClean(0, 0, 0);
+    }
+
+    function test_attackerCannotActOnOthersStake() public {
+        address attacker = makeAddr("aeroModifyAttacker");
+        deal(WETH, attacker, 10 ether);
+        deal(USDC_BASE, attacker, 50_000e6);
+        _approveGauge(attacker, GAUGE_A_BASE, true);
+        vm.startPrank(attacker);
+        IERC20(WETH).approve(address(helper), type(uint256).max);
+        IERC20(USDC_BASE).approve(address(helper), type(uint256).max);
+        vm.stopPrank();
+
+        V3Utils.Instructions memory rem = _ins(_liq() / 2);
+        V3Utils.Instructions memory ex = _ins(_liq());
+        Common.SwapAndIncreaseLiquidityParams memory p = _addParams(0.5 ether, 2000e6);
+        AeroFarmingHelper h = helper;
+
+        vm.startPrank(attacker);
+        vm.expectRevert(bytes("NA"));
+        h.removeLiquidity(GAUGE_A_BASE, id, rem);
+        vm.expectRevert(bytes("NA"));
+        h.exit(GAUGE_A_BASE, id, ex);
+        vm.expectRevert(bytes("NA"));
+        h.addLiquidity(GAUGE_A_BASE, p, false);
+        vm.stopPrank();
+
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        assertFalse(ICLGauge(GAUGE_A_BASE).stakedContains(attacker, id));
+        assertEq(IERC721(NFPM).ownerOf(id), GAUGE_A_BASE);
     }
 
     function test_exit_returnsNftUnstaked() public {
