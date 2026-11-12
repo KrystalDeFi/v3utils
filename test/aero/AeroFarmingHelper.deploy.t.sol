@@ -13,7 +13,9 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         address adm = makeAddr("deployAdmin");
         address op = makeAddr("deployOperator");
         address wd = makeAddr("deployWithdrawer");
-        vm.setEnv("PRIVATE_KEY", "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+        uint256 pk = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
+        address deployer = vm.addr(pk);
+        vm.setEnv("PRIVATE_KEY", vm.toString(bytes32(pk)));
         vm.setEnv("ADMIN", vm.toString(adm));
         vm.setEnv("OPERATOR", vm.toString(op));
         vm.setEnv("WITHDRAWER", vm.toString(wd));
@@ -24,8 +26,15 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         vm.setEnv("NATIVE_WETH", vm.toString(WETH));
         vm.setEnv("STRUCT_HASH", vm.toString(STRUCT_HASH));
 
+        // env is process-global and forge runs tests in parallel, so the zero-address check shares this test
+        AeroFarmingHelperScript script = new AeroFarmingHelperScript();
+        vm.setEnv("ADMIN", vm.toString(address(0)));
+        vm.expectRevert(bytes("ADMIN must be non-zero"));
+        script.run();
+        vm.setEnv("ADMIN", vm.toString(adm));
+
         vm.recordLogs();
-        new AeroFarmingHelperScript().run();
+        script.run();
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         // the proxy is the ERC1967Proxy whose Upgraded event is emitted by it
@@ -45,7 +54,18 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         assertTrue(h.hasRole(h.DEFAULT_ADMIN_ROLE(), adm));
         assertTrue(h.hasRole(h.OPERATOR_ROLE(), op));
         assertTrue(h.hasRole(h.WITHDRAWER_ROLE(), wd));
-        assertFalse(h.hasRole(h.DEFAULT_ADMIN_ROLE(), address(this)));
+        bytes32 aRole = h.DEFAULT_ADMIN_ROLE();
+        bytes32 oRole = h.OPERATOR_ROLE();
+        bytes32 wRole = h.WITHDRAWER_ROLE();
+        assertFalse(h.hasRole(aRole, deployer));
+        assertFalse(h.hasRole(oRole, deployer));
+        assertFalse(h.hasRole(wRole, deployer));
+        assertFalse(h.hasRole(oRole, adm));
+        assertFalse(h.hasRole(wRole, adm));
+        assertFalse(h.hasRole(aRole, op));
+        assertFalse(h.hasRole(wRole, op));
+        assertFalse(h.hasRole(aRole, wd));
+        assertFalse(h.hasRole(oRole, wd));
         assertTrue(h.automationModule() != address(0));
         assertGt(h.automationModule().code.length, 0);
         address impl = address(uint160(uint256(vm.load(proxy, IMPL_SLOT))));

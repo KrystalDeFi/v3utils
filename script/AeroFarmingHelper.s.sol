@@ -10,6 +10,12 @@ import "../src/aero/AeroAutomationModule.sol";
 contract AeroFarmingHelperScript is Script {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        address admin = _required("ADMIN");
+        address operator = _required("OPERATOR");
+        address withdrawer = _required("WITHDRAWER");
+        address v3utils = _required("V3UTILS");
+        address gaugeFactory = _required("GAUGE_FACTORY");
+        address structHash = _required("STRUCT_HASH");
         vm.startBroadcast(deployerPrivateKey);
 
         AeroAutomationModule module = new AeroAutomationModule();
@@ -19,15 +25,15 @@ contract AeroFarmingHelperScript is Script {
             abi.encodeCall(
                 AeroFarmingHelper.initialize,
                 (
-                    vm.envAddress("ADMIN"),
-                    vm.envAddress("OPERATOR"),
-                    vm.envAddress("WITHDRAWER"),
-                    vm.envAddress("V3UTILS"),
-                    vm.envAddress("GAUGE_FACTORY"),
+                    admin,
+                    operator,
+                    withdrawer,
+                    v3utils,
+                    gaugeFactory,
                     vm.envAddress("REWARD_TOKEN"),
                     vm.envBool("COMPOUND_ENABLED"),
                     vm.envAddress("NATIVE_WETH"),
-                    vm.envAddress("STRUCT_HASH"),
+                    structHash,
                     address(module)
                 )
             )
@@ -38,6 +44,11 @@ contract AeroFarmingHelperScript is Script {
         console.log("AeroAutomationModule:", address(module));
         console.log("AeroFarmingHelper implementation:", address(impl));
         console.log("AeroFarmingHelper proxy:", address(proxy));
+    }
+
+    function _required(string memory key) internal view returns (address a) {
+        a = vm.envAddress(key);
+        require(a != address(0), string.concat(key, " must be non-zero"));
     }
 
     // To ignore from test coverage
