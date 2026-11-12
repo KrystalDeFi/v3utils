@@ -102,6 +102,22 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         assertEq(address(helper).balance, 0);
     }
 
+    function test_zapIn_unwrapLeftoverWeth_paysNative() public {
+        // far more WETH than the range needs, so there is a WETH leftover to unwrap
+        Common.SwapAndMintParams memory p = _params(5 ether, 1000e6);
+        uint256 e0 = user.balance;
+        uint256 w0 = _bal(WETH, user);
+        vm.prank(user);
+        uint256 id = helper.zapInAndStake(GAUGE_A_BASE, p, true);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        assertGt(user.balance, e0, "leftover WETH not paid as native");
+        assertEq(_bal(WETH, user), w0 - 5 ether, "leftover must not come back as WETH");
+        assertEq(address(helper).balance, 0);
+        assertEq(_bal(WETH, address(helper)), 0);
+        assertEq(_bal(USDC_BASE, address(helper)), 0);
+        assertEq(IERC721(NFPM).balanceOf(address(helper)), 0);
+    }
+
     function test_zapIn_nativeDisabledReverts() public {
         _deployHelper(AERO, true, address(0));
         _approveGauge(user, GAUGE_A_BASE, false);

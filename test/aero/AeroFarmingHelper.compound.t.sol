@@ -222,3 +222,104 @@ contract AeroFarmingHelperCompoundTest is AeroForkBase {
         assertLe(_bal(AERO, user) - u0, claimed - fee);
     }
 }
+
+/// @dev The common production path: the reward (AERO) is NOT a pool token, so it is added through V3Utils'
+/// amount2 / swapSourceToken path with swaps through the (etched) router.
+contract AeroFarmingHelperCompoundGaugeATest is AeroForkBase {
+    address user;
+    int24 constant TS = 50;
+    uint256 id;
+    address feeTaker;
+    address router;
+
+    function setUp() public {
+        _forkBase();
+        _deployHelper(AERO, true, WETH);
+        user = makeAddr("aeroCompoundAUser");
+        feeTaker = V3Utils(payable(V3UTILS)).FEE_TAKER();
+        deal(WETH, user, 10 ether);
+        deal(USDC_BASE, user, 50_000e6);
+        _approveGauge(user, GAUGE_A_BASE, true);
+        vm.startPrank(user);
+        IERC20(WETH).approve(address(helper), type(uint256).max);
+        IERC20(USDC_BASE).approve(address(helper), type(uint256).max);
+        vm.stopPrank();
+
+        (, int24 tick,,,,) = ICLPoolSlot0B(POOL_A_BASE).slot0();
+        int24 base = (tick / TS) * TS;
+        Common.SwapAndMintParams memory p;
+        p.protocol = Nfpm.Protocol.AERODROME;
+        p.nfpm = INonfungiblePositionManager(NFPM);
+        p.token0 = IERC20(WETH);
+        p.token1 = IERC20(USDC_BASE);
+        p.tickSpacing = TS;
+        p.tickLower = base - 10 * TS;
+        p.tickUpper = base + 10 * TS;
+        p.amount0 = 1 ether;
+        p.amount1 = 5000e6;
+        p.deadline = block.timestamp + 1 hours;
+        p.recipient = user;
+        vm.prank(user);
+        id = helper.zapInAndStake(GAUGE_A_BASE, p, false);
+
+        (uint256 minStakeBlocks,) = ICLGaugeFactory(GAUGE_FACTORY).effectivePenaltyConfig(GAUGE_A_BASE);
+        vm.roll(block.number + minStakeBlocks + 1000);
+        vm.warp(block.timestamp + 2 * (minStakeBlocks + 1000));
+
+        // V3Utils reads its own swapRouter from storage, so the mock code goes at the real router address
+        router = V3Utils(payable(V3UTILS)).swapRouter();
+        vm.etch(router, address(new MockSwapRouter()).code);
+        deal(WETH, router, 100 ether);
+        deal(USDC_BASE, router, 1_000_000e6);
+    }
+
+    function test_compound_gaugeA_rewardNotPoolToken_swapsThroughRouter() public {
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        uint256 claimed = ICLGauge(GAUGE_A_BASE).earned(user, ids);
+        assertGt(claimed, 0, "no emissions accrued");
+        uint64 feeX64 = 1 << 62;
+        uint256 fee = FullMath.mulDiv(claimed, feeX64, 2 ** 64);
+        uint256 net = claimed - fee;
+
+        // swap half of the net reward into each pool token, deliberately leaving some AERO unswapped
+        AeroFarmingCore.CompoundParams memory c;
+        c.deadline = block.timestamp + 1 hours;
+        c.performanceFeeX64 = feeX64;
+        c.amountIn0 = net / 3;
+        c.amountIn1 = net / 3;
+        uint256 out0 = 0.0003 ether;
+        uint256 out1 = 1e6;
+        c.amountOut0Min = out0;
+        c.amountOut1Min = out1;
+        c.swapData0 = abi.encodeCall(MockSwapRouter.swap, (IERC20(AERO), IERC20(WETH), out0));
+        c.swapData1 = abi.encodeCall(MockSwapRouter.swap, (IERC20(AERO), IERC20(USDC_BASE), out1));
+
+        (,,,,,,, uint128 l0,,,,) = INonfungiblePositionManager(NFPM).positions(id);
+        uint256 ft0 = IERC20(AERO).balanceOf(feeTaker);
+        uint256 uA = IERC20(AERO).balanceOf(user);
+
+        vm.prank(user);
+        helper.compound(GAUGE_A_BASE, id, c);
+
+        (,,,,,,, uint128 l1,,,,) = INonfungiblePositionManager(NFPM).positions(id);
+        assertGt(l1, l0, "liquidity not increased");
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        assertEq(IERC721(NFPM).ownerOf(id), GAUGE_A_BASE);
+        assertEq(IERC20(AERO).balanceOf(feeTaker) - ft0, fee, "performance fee");
+        assertEq(IERC20(AERO).balanceOf(user) - uA, net - c.amountIn0 - c.amountIn1, "unswapped AERO swept to user");
+        assertEq(IERC20(AERO).balanceOf(router), c.amountIn0 + c.amountIn1, "router received the swap inputs");
+        _assertHelperEmpty();
+    }
+
+    function _assertHelperEmpty() internal view {
+        address h = address(helper);
+        assertEq(IERC20(AERO).balanceOf(h), 0);
+        assertEq(IERC20(WETH).balanceOf(h), 0);
+        assertEq(IERC20(USDC_BASE).balanceOf(h), 0);
+        assertEq(IERC721(NFPM).balanceOf(h), 0);
+        assertEq(IERC20(AERO).allowance(h, V3UTILS), 0);
+        assertEq(IERC20(WETH).allowance(h, V3UTILS), 0);
+        assertEq(IERC20(USDC_BASE).allowance(h, V3UTILS), 0);
+    }
+}

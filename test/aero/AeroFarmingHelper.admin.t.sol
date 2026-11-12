@@ -62,8 +62,10 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
 
     function test_upgrade_nonAdminReverts() public {
         AeroFarmingHelper newImpl = new AeroFarmingHelper();
-        vm.expectRevert();
-        vm.prank(makeAddr("rando"));
+        address rando = makeAddr("rando");
+        bytes memory err = _missingRole(rando, h.DEFAULT_ADMIN_ROLE());
+        vm.expectRevert(err);
+        vm.prank(rando);
         h.upgradeTo(address(newImpl));
     }
 
@@ -83,8 +85,10 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
 
     function test_setV3Utils_onlyAdmin() public {
         address other = makeAddr("newV3");
-        vm.expectRevert();
-        vm.prank(makeAddr("rando"));
+        address rando = makeAddr("rando");
+        bytes memory err = _missingRole(rando, h.DEFAULT_ADMIN_ROLE());
+        vm.expectRevert(err);
+        vm.prank(rando);
         h.setV3Utils(other);
 
         vm.prank(admin);
@@ -92,8 +96,8 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
         assertEq(h.v3utils(), other);
 
         address sh = makeAddr("newSh");
-        vm.expectRevert();
-        vm.prank(makeAddr("rando"));
+        vm.expectRevert(err);
+        vm.prank(rando);
         h.setStructHash(sh);
         vm.prank(admin);
         h.setStructHash(sh);
@@ -102,20 +106,90 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
 
     function test_withdrawERC20_onlyWithdrawer() public {
         deal(USDC_BASE, address(h), 1000);
-        vm.expectRevert();
-        vm.prank(makeAddr("rando"));
-        h.withdrawERC20(IERC20(USDC_BASE), makeAddr("to"));
-
+        address rando = makeAddr("rando");
         address to = makeAddr("to");
+        bytes memory err = _missingRole(rando, h.WITHDRAWER_ROLE());
+        vm.expectRevert(err);
+        vm.prank(rando);
+        h.withdrawERC20(IERC20(USDC_BASE), to);
+
         IERC20 usdc = IERC20(USDC_BASE);
         vm.prank(withdrawer);
         h.withdrawERC20(usdc, to);
         assertEq(usdc.balanceOf(to), 1000);
     }
 
+    function test_withdrawERC721_onlyWithdrawer() public {
+        uint256 tokenId = _strayNft();
+        address to = makeAddr("nftTo");
+        address rando = makeAddr("rando");
+        bytes memory err = _missingRole(rando, h.WITHDRAWER_ROLE());
+        vm.expectRevert(err);
+        vm.prank(rando);
+        h.withdrawERC721(IERC721(NFPM), tokenId, to);
+        assertEq(IERC721(NFPM).ownerOf(tokenId), address(h));
+
+        vm.prank(withdrawer);
+        h.withdrawERC721(IERC721(NFPM), tokenId, to);
+        assertEq(IERC721(NFPM).ownerOf(tokenId), to);
+    }
+
+    function test_withdrawNative_onlyWithdrawer() public {
+        vm.deal(address(h), 3 ether);
+        address to = makeAddr("nativeTo");
+        address rando = makeAddr("rando");
+        bytes memory err = _missingRole(rando, h.WITHDRAWER_ROLE());
+        vm.expectRevert(err);
+        vm.prank(rando);
+        h.withdrawNative(to);
+        assertEq(address(h).balance, 3 ether);
+
+        vm.prank(withdrawer);
+        h.withdrawNative(to);
+        assertEq(to.balance, 3 ether);
+        assertEq(address(h).balance, 0);
+    }
+
+    /// @dev Mints an NFT straight to the helper (a stray transfer the helper's receive guard would not accept).
+    function _strayNft() internal returns (uint256 tokenId) {
+        address minter = makeAddr("strayMinter");
+        deal(WETH, minter, 1 ether);
+        deal(USDC_BASE, minter, 5000e6);
+        (, int24 tick,,,,) = ICLPoolSlot0Admin(POOL_A_BASE).slot0();
+        int24 base = (tick / 50) * 50;
+        Common.SwapAndMintParams memory p;
+        p.protocol = Nfpm.Protocol.AERODROME;
+        p.nfpm = INonfungiblePositionManager(NFPM);
+        p.token0 = IERC20(WETH);
+        p.token1 = IERC20(USDC_BASE);
+        p.tickSpacing = 50;
+        p.tickLower = base - 500;
+        p.tickUpper = base + 500;
+        p.amount0 = 1 ether;
+        p.amount1 = 5000e6;
+        p.deadline = block.timestamp + 1 hours;
+        p.recipient = minter;
+        vm.startPrank(minter);
+        IERC20(WETH).approve(V3UTILS, type(uint256).max);
+        IERC20(USDC_BASE).approve(V3UTILS, type(uint256).max);
+        tokenId = V3UtilsLike(V3UTILS).swapAndMint(p).tokenId;
+        vm.stopPrank();
+        // transferFrom (not safeTransferFrom) so the helper's onERC721Received guard is bypassed
+        vm.prank(minter);
+        IERC721(NFPM).transferFrom(minter, address(h), tokenId);
+    }
+
+    function _missingRole(address account, bytes32 role) internal pure returns (bytes memory) {
+        return abi.encodePacked(
+            "AccessControl: account ", Strings.toHexString(account), " is missing role ", Strings.toHexString(uint256(role), 32)
+        );
+    }
+
     function test_pause_blocksFlows() public {
-        vm.expectRevert();
-        vm.prank(makeAddr("rando"));
+        address rando = makeAddr("rando");
+        bytes memory err = _missingRole(rando, h.DEFAULT_ADMIN_ROLE());
+        vm.expectRevert(err);
+        vm.prank(rando);
         h.pause();
 
         vm.prank(admin);
@@ -281,4 +355,8 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
         assertFalse(ok);
         assertEq(ret.length, 0);
     }
+}
+
+interface ICLPoolSlot0Admin {
+    function slot0() external view returns (uint160, int24, uint16, uint16, uint16, bool);
 }

@@ -32,14 +32,6 @@ contract FakeGaugeAlwaysStaked {
     }
 }
 
-/// @dev Pulls the caller's whole allowance of `tokenIn`, pays `amountOut` of `tokenOut`.
-contract MockSwapRouter {
-    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountOut) external {
-        tokenIn.transferFrom(msg.sender, address(this), tokenIn.allowance(msg.sender, address(this)));
-        tokenOut.transfer(msg.sender, amountOut);
-    }
-}
-
 abstract contract AutomationBase is AeroForkBase {
     uint256 internal userKey;
     address internal user;
@@ -475,6 +467,75 @@ contract AeroFarmingHelperAutoCompoundTest is AutomationBase {
     }
 }
 
+/// @dev AUTO_COMPOUND where the reward (AERO) is not a pool token: amount2 path, swaps through the etched router.
+contract AeroFarmingHelperAutoCompoundGaugeATest is AutomationBase {
+    int24 constant TS = 50;
+    address internal router;
+
+    function setUp() public {
+        _forkBase();
+        _deployHelper(AERO, true, WETH);
+        (user, userKey) = makeAddrAndKey("aeroOrderCompoundAUser");
+        deal(WETH, user, 10 ether);
+        deal(USDC_BASE, user, 50_000e6);
+        _approveGauge(user, GAUGE_A_BASE, true);
+        vm.startPrank(user);
+        IERC20(WETH).approve(address(helper), type(uint256).max);
+        IERC20(USDC_BASE).approve(address(helper), type(uint256).max);
+        vm.stopPrank();
+        _mint(GAUGE_A_BASE, POOL_A_BASE, WETH, USDC_BASE, TS, 1 ether, 5000e6, 10);
+        // V3Utils reads its own swapRouter from storage, so the mock code goes at the real router address
+        router = V3Utils(payable(V3UTILS)).swapRouter();
+        vm.etch(router, address(new MockSwapRouter()).code);
+        deal(WETH, router, 100 ether);
+        deal(USDC_BASE, router, 1_000_000e6);
+    }
+
+    function test_autoCompound_gaugeA_rewardNotPoolToken() public {
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        uint256 claimed = ICLGauge(GAUGE_A_BASE).earned(user, ids);
+        assertGt(claimed, 0);
+        AeroFarmingCore.CompoundParams memory c;
+        c.deadline = block.timestamp + 1 hours;
+        c.performanceFeeX64 = 1 << 62;
+        uint256 fee = FullMath.mulDiv(claimed, c.performanceFeeX64, 2 ** 64);
+        uint256 net = claimed - fee;
+        c.amountIn0 = net / 3;
+        c.amountIn1 = net / 3;
+        c.amountOut0Min = 0.0003 ether;
+        c.amountOut1Min = 1e6;
+        c.swapData0 = abi.encodeCall(MockSwapRouter.swap, (IERC20(AERO), IERC20(WETH), 0.0003 ether));
+        c.swapData1 = abi.encodeCall(MockSwapRouter.swap, (IERC20(AERO), IERC20(USDC_BASE), 1e6));
+        (,,,,,,, uint128 l0,,,,) = INonfungiblePositionManager(NFPM).positions(id);
+        address feeTaker = V3Utils(payable(V3UTILS)).FEE_TAKER();
+        uint256 ft0 = IERC20(AERO).balanceOf(feeTaker);
+        uint256 uA = IERC20(AERO).balanceOf(user);
+        AeroFarmingCore.OrderParams memory p =
+            _params(AeroFarmingCore.AutoAction.AUTO_COMPOUND, GAUGE_A_BASE, abi.encode(c), user);
+
+        vm.recordLogs();
+        vm.prank(operator);
+        automation.executeOrder(p);
+
+        (,,,,,,, uint128 l1,,,,) = INonfungiblePositionManager(NFPM).positions(id);
+        assertGt(l1, l0, "liquidity not increased");
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        assertEq(IERC20(AERO).balanceOf(feeTaker) - ft0, fee, "performance fee");
+        assertEq(IERC20(AERO).balanceOf(user) - uA, net - c.amountIn0 - c.amountIn1, "unswapped AERO swept to user");
+        address h = address(helper);
+        assertEq(IERC20(AERO).balanceOf(h), 0);
+        assertEq(IERC20(WETH).balanceOf(h), 0);
+        assertEq(IERC20(USDC_BASE).balanceOf(h), 0);
+        assertEq(IERC721(NFPM).balanceOf(h), 0);
+        assertEq(IERC20(AERO).allowance(h, V3UTILS), 0);
+        assertEq(IERC20(WETH).allowance(h, V3UTILS), 0);
+        assertEq(IERC20(USDC_BASE).allowance(h, V3UTILS), 0);
+        (uint256 found,) = _farmActions(vm.getRecordedLogs(), id, AeroFarmingCore.Action.COMPOUND, true);
+        assertEq(found, 1);
+    }
+}
+
 contract AeroFarmingHelperAutoHarvestTest is AutomationBase {
     int24 constant TS = 200;
     address internal feeTaker;
@@ -620,5 +681,71 @@ contract AeroFarmingHelperAutoHarvestTest is AutomationBase {
         vm.prank(operator);
         vm.expectRevert(AeroFarmingCore.SlippageError.selector);
         automation.executeOrder(p);
+    }
+
+    function _etchRouter(string memory label, address routerCode) internal returns (address router) {
+        router = makeAddr(label);
+        vm.etch(router, routerCode.code);
+        vm.mockCall(V3UTILS, abi.encodeWithSignature("swapRouter()"), abi.encode(router));
+    }
+
+    function test_autoHarvest_routerReverts_swapFailed() public {
+        AeroFarmingCore.HarvestParams memory h;
+        h.targetToken = WETH;
+        // the router holds no WETH, so its payout reverts
+        _etchRouter("aeroRevertRouter", address(new MockSwapRouter()));
+        h.swapData = abi.encodeCall(MockSwapRouter.swap, (IERC20(AERO), IERC20(WETH), 2 ether));
+        AeroFarmingCore.OrderParams memory p = _harvestOrder(h);
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(AeroFarmingCore.SwapFailed.selector, h.swapData, 0));
+        automation.executeOrder(p);
+    }
+
+    function test_autoHarvest_partialFill_leftoverToUser() public {
+        uint256 claimed = _earned();
+        AeroFarmingCore.HarvestParams memory h;
+        h.gasFeeX64 = 1 << 62;
+        h.targetToken = WETH;
+        uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
+        uint256 net = claimed - fee;
+        uint256 pulled = net / 4;
+        address router = _etchRouter("aeroPartialRouter", address(new PartialFillRouter()));
+        deal(WETH, router, 5 ether);
+        h.swapData = abi.encodeCall(PartialFillRouter.swap, (IERC20(AERO), IERC20(WETH), pulled, 2 ether));
+        AeroFarmingCore.OrderParams memory p = _harvestOrder(h);
+        uint256 uA = IERC20(AERO).balanceOf(user);
+        uint256 uW = IERC20(WETH).balanceOf(user);
+        vm.prank(operator);
+        automation.executeOrder(p);
+        assertEq(IERC20(WETH).balanceOf(user) - uW, 2 ether);
+        assertEq(IERC20(AERO).balanceOf(user) - uA, net - pulled, "unpulled reward goes to the user");
+        assertEq(IERC20(AERO).balanceOf(router), pulled);
+        assertEq(IERC20(AERO).allowance(address(helper), router), 0);
+        assertEq(IERC20(AERO).balanceOf(address(helper)), 0);
+        assertEq(IERC20(WETH).balanceOf(address(helper)), 0);
+    }
+
+    function test_autoHarvest_targetIsReward_noSwap() public {
+        uint256 claimed = _earned();
+        AeroFarmingCore.HarvestParams memory h;
+        h.gasFeeX64 = 1 << 62;
+        h.targetToken = AERO;
+        h.swapData = hex"deadbeef"; // would fail if a swap were attempted
+        uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
+        AeroFarmingCore.OrderParams memory p = _harvestOrder(h);
+        uint256 uA = IERC20(AERO).balanceOf(user);
+        vm.expectCall(V3UTILS, abi.encodeWithSignature("swapRouter()"), 0);
+        vm.prank(operator);
+        automation.executeOrder(p);
+        assertEq(IERC20(AERO).balanceOf(user) - uA, claimed - fee);
+        assertEq(IERC20(AERO).balanceOf(address(helper)), 0);
+    }
+}
+
+/// @dev Pulls only `pull` of `tokenIn` from the caller (less than the allowance) and pays `amountOut` of `tokenOut`.
+contract PartialFillRouter {
+    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 pull, uint256 amountOut) external {
+        tokenIn.transferFrom(msg.sender, address(this), pull);
+        tokenOut.transfer(msg.sender, amountOut);
     }
 }

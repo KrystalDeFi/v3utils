@@ -73,6 +73,31 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         assertTrue(impl != h.automationModule());
         // the operator path works through the deployed proxy
         assertEq(IAeroAutomation(proxy).domainSeparator(), AeroAutomationModule(proxy).domainSeparator());
+
+        // Base: COMPOUND_ENABLED must be true (env is process-global, so restored right after)
+        vm.setEnv("COMPOUND_ENABLED", "false");
+        vm.expectRevert(bytes("COMPOUND_ENABLED must be true on Base"));
+        script.run();
+        vm.setEnv("COMPOUND_ENABLED", "true");
+
+        // non-Base chain: REWARD_TOKEN must equal the leaf voter's RECEIPT_TOKEN
+        vm.chainId(10);
+        vm.mockCall(LEAF_VOTER, abi.encodeWithSelector(ILeafVoter.RECEIPT_TOKEN.selector), abi.encode(XAERO));
+        vm.expectRevert(bytes("REWARD_TOKEN must be the leaf voter RECEIPT_TOKEN"));
+        script.run(); // REWARD_TOKEN is still AERO
+        vm.setEnv("REWARD_TOKEN", vm.toString(XAERO));
+        vm.setEnv("COMPOUND_ENABLED", "false");
+        vm.recordLogs();
+        script.run();
+        logs = vm.getRecordedLogs();
+        proxy = address(0);
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].topics[0] == keccak256("Upgraded(address)")) proxy = logs[i].emitter;
+        }
+        assertEq(AeroFarmingHelper(payable(proxy)).rewardToken(), XAERO);
+        assertFalse(AeroFarmingHelper(payable(proxy)).compoundEnabled());
+        vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
+        vm.setEnv("COMPOUND_ENABLED", "true");
     }
 
     function test_automationInterface_throughProxy() public {

@@ -16,6 +16,14 @@ contract AeroFarmingHelperScript is Script {
         address v3utils = _required("V3UTILS");
         address gaugeFactory = _required("GAUGE_FACTORY");
         address structHash = _required("STRUCT_HASH");
+        address rewardToken = _required("REWARD_TOKEN");
+        bool compoundEnabled = block.chainid == 8453 ? vm.envBool("COMPOUND_ENABLED") : vm.envOr("COMPOUND_ENABLED", false);
+        if (block.chainid == 8453) {
+            require(compoundEnabled, "COMPOUND_ENABLED must be true on Base");
+        } else {
+            address receipt = ILeafVoter(ICLGaugeFactory(gaugeFactory).leafVoter()).RECEIPT_TOKEN();
+            require(rewardToken == receipt, "REWARD_TOKEN must be the leaf voter RECEIPT_TOKEN");
+        }
         vm.startBroadcast(deployerPrivateKey);
 
         AeroAutomationModule module = new AeroAutomationModule();
@@ -30,8 +38,8 @@ contract AeroFarmingHelperScript is Script {
                     withdrawer,
                     v3utils,
                     gaugeFactory,
-                    vm.envAddress("REWARD_TOKEN"),
-                    vm.envBool("COMPOUND_ENABLED"),
+                    rewardToken,
+                    compoundEnabled,
                     vm.envAddress("NATIVE_WETH"),
                     structHash,
                     address(module)

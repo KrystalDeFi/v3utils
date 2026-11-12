@@ -147,6 +147,23 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         assertEq(_farmActionCount(vm.getRecordedLogs(), id, AeroFarmingCore.Action.REMOVE_LIQUIDITY), 1);
     }
 
+    function test_remove_unwrap_paysNative() public {
+        uint128 part = _liq() / 3;
+        V3Utils.Instructions memory ins = _ins(part);
+        ins.unwrap = true;
+        uint256 e0 = user.balance;
+        uint256 w0 = _bal(WETH, user);
+        uint256 u0 = _bal(USDC_BASE, user);
+        vm.prank(user);
+        helper.removeLiquidity(GAUGE_A_BASE, id, ins);
+        assertGt(user.balance, e0, "WETH not paid as native");
+        assertEq(_bal(WETH, user), w0, "WETH must not be paid as token");
+        assertGt(_bal(USDC_BASE, user), u0);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        assertEq(address(helper).balance, 0);
+        _assertHelperClean(0, 0, 0);
+    }
+
     function test_remove_fullLiquidityReverts() public {
         V3Utils.Instructions memory ins = _ins(_liq());
         vm.prank(user);

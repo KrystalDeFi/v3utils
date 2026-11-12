@@ -6,6 +6,14 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../../src/aero/AeroFarmingHelper.sol";
 import "../../src/aero/AeroAutomationModule.sol";
 
+/// @dev Pulls the caller's whole allowance of `tokenIn`, pays `amountOut` of `tokenOut`.
+contract MockSwapRouter {
+    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountOut) external {
+        tokenIn.transferFrom(msg.sender, address(this), tokenIn.allowance(msg.sender, address(this)));
+        tokenOut.transfer(msg.sender, amountOut);
+    }
+}
+
 abstract contract AeroForkBase is Test {
     uint256 internal constant BASE_BLOCK = 56384489;
     uint256 internal constant OP_BLOCK = 159434366;
