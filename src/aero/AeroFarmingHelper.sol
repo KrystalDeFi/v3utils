@@ -165,6 +165,7 @@ contract AeroFarmingHelper is AeroFarmingCore, UUPSUpgradeable, IERC721Receiver 
     }
 
     /// @notice Withdraw part of a staked position's liquidity (and collect fees); the NFT is restaked under the same id.
+    /// @dev Reverts GaugeNotLive on a dead gauge because the restake needs a live gauge; `exit` is the way out.
     function removeLiquidity(address gauge, uint256 tokenId, V3Utils.Instructions memory ins)
         external
         nonReentrant

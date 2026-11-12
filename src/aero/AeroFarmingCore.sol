@@ -139,6 +139,8 @@ abstract contract AeroFarmingCore is Initializable, AccessControl, Pausable, Ree
         if (unwrap && weth == address(0)) revert NativeDisabled();
     }
 
+    /// @dev The claim includes the account's deferredEmissions from all its positions in this gauge; they are
+    /// compounded into `tokenId` and charged the performance fee. A zero fee emits no DeductFees.
     function _compound(address account, address gauge, uint256 tokenId, CompoundParams memory p, bool automated)
         internal
     {
@@ -230,6 +232,7 @@ abstract contract AeroFarmingCore is Initializable, AccessControl, Pausable, Ree
     }
 
     /// @dev Sends `amount * feeX64 / 2^64` of the reward token to V3Utils' FEE_TAKER and emits DeductFees.
+    /// A zero fee transfers nothing and emits no DeductFees (unlike Common's NoFees revert).
     function _takeFee(
         address nfpm,
         uint256 tokenId,
