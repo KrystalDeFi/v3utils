@@ -243,6 +243,117 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         assertFalse(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
     }
 
+    function _rebalanceIns() internal view returns (V3Utils.Instructions memory ins) {
+        (, int24 tick,,,,) = ICLPoolSlot0(POOL_A_BASE).slot0();
+        int24 base = (tick / TS) * TS;
+        ins = _ins(_liq());
+        ins.whatToDo = V3Utils.WhatToDo.CHANGE_RANGE;
+        ins.tickLower = base - 5 * TS;
+        ins.tickUpper = base + 5 * TS;
+    }
+
+    function test_rebalance_restakesNewId() public {
+        V3Utils.Instructions memory ins = _rebalanceIns();
+        uint256 a0 = _bal(AERO, user);
+        vm.prank(user);
+        uint256 newId = helper.rebalance(GAUGE_A_BASE, id, ins);
+        assertTrue(newId != id);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId));
+        assertEq(IERC721(NFPM).ownerOf(newId), GAUGE_A_BASE);
+        assertEq(IERC721(NFPM).ownerOf(id), user);
+        assertFalse(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        assertEq(_liq(), 0);
+        (,,,,,,, uint128 nl,,,,) = INonfungiblePositionManager(NFPM).positions(newId);
+        assertGt(nl, 0);
+        _assertHelperClean(0, 0, 0);
+        assertGe(_bal(AERO, user), a0);
+    }
+
+    function test_rebalance_emitsFarmAction() public {
+        V3Utils.Instructions memory ins = _rebalanceIns();
+        vm.recordLogs();
+        vm.prank(user);
+        uint256 newId = helper.rebalance(GAUGE_A_BASE, id, ins);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 found;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(helper) || logs[i].topics[0] != FarmAction.selector) continue;
+            assertEq(logs[i].topics[1], bytes32(uint256(uint160(user))));
+            assertEq(logs[i].topics[2], bytes32(uint256(uint160(GAUGE_A_BASE))));
+            assertEq(logs[i].topics[3], bytes32(id));
+            (uint256 n, AeroFarmingHelper.Action a, bool automated) =
+                abi.decode(logs[i].data, (uint256, AeroFarmingHelper.Action, bool));
+            assertEq(n, newId);
+            assertEq(uint8(a), uint8(AeroFarmingHelper.Action.REBALANCE));
+            assertFalse(automated);
+            ++found;
+        }
+        assertEq(found, 1);
+    }
+
+    function test_rebalance_withStrayNftHeld() public {
+        address eoa = makeAddr("aeroStrayOwner");
+        (, int24 tick,,,,) = ICLPoolSlot0(POOL_A_BASE).slot0();
+        int24 base = (tick / TS) * TS;
+        deal(WETH, eoa, 1 ether);
+        deal(USDC_BASE, eoa, 5000e6);
+        vm.startPrank(eoa);
+        IERC20(WETH).approve(NFPM, type(uint256).max);
+        IERC20(USDC_BASE).approve(NFPM, type(uint256).max);
+        INonfungiblePositionManager.AerodromeMintParams memory mp = INonfungiblePositionManager.AerodromeMintParams(
+            WETH, USDC_BASE, TS, base - 10 * TS, base + 10 * TS, 0.1 ether, 500e6, 0, 0, eoa, block.timestamp + 1 hours, 0
+        );
+        (uint256 stray,,,) = INonfungiblePositionManager(NFPM).mint(mp);
+        IERC721(NFPM).transferFrom(eoa, address(helper), stray);
+        vm.stopPrank();
+        assertEq(IERC721(NFPM).ownerOf(stray), address(helper));
+
+        V3Utils.Instructions memory ins = _rebalanceIns();
+        vm.prank(user);
+        uint256 newId = helper.rebalance(GAUGE_A_BASE, id, ins);
+        assertTrue(newId != stray);
+        assertEq(IERC721(NFPM).ownerOf(stray), address(helper));
+        assertEq(IERC721(NFPM).balanceOf(address(helper)), 1);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId));
+        assertEq(IERC721(NFPM).ownerOf(id), user);
+    }
+
+    function test_rebalance_insidePenaltyWindow_succeedsAndForfeits() public {
+        // fresh stake, then rebalance in the next block (inside the penalty window)
+        V3Utils.Instructions memory ins = _rebalanceIns();
+        vm.prank(user);
+        uint256 newId = helper.rebalance(GAUGE_A_BASE, id, ins);
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 2);
+        V3Utils.Instructions memory ins2 = _rebalanceIns();
+        (,,,,,,, uint128 l,,,,) = INonfungiblePositionManager(NFPM).positions(newId);
+        ins2.liquidity = l;
+        uint256 a0 = _bal(AERO, user);
+        uint256 h0 = _bal(AERO, address(helper));
+        vm.prank(user);
+        uint256 newId2 = helper.rebalance(GAUGE_A_BASE, newId, ins2);
+        assertTrue(newId2 != newId);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId2));
+        assertEq(_bal(AERO, user), a0);
+        assertEq(_bal(AERO, address(helper)), h0);
+    }
+
+    function test_rebalance_wrongWhatToDoReverts() public {
+        V3Utils.Instructions memory ins = _rebalanceIns();
+        ins.whatToDo = V3Utils.WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP;
+        vm.prank(user);
+        vm.expectRevert(AeroFarmingHelper.InvalidInstructions.selector);
+        helper.rebalance(GAUGE_A_BASE, id, ins);
+    }
+
+    function test_removeWithChangeRangeReverts() public {
+        V3Utils.Instructions memory ins = _rebalanceIns();
+        ins.liquidity = _liq() / 2;
+        vm.prank(user);
+        vm.expectRevert(AeroFarmingHelper.InvalidInstructions.selector);
+        helper.removeLiquidity(GAUGE_A_BASE, id, ins);
+    }
+
     function test_compoundFeesInstructionReverts() public {
         V3Utils.Instructions memory ins = _ins(_liq() / 2);
         ins.whatToDo = V3Utils.WhatToDo.COMPOUND_FEES;

@@ -263,7 +263,18 @@ contract AeroFarmingHelper is
         _modify(msg.sender, gauge, tokenId, ins, Action.EXIT, false);
     }
 
-    /// @dev Unstake, run `ins` through V3Utils, then restake (REMOVE_LIQUIDITY) or hand the NFT to `account` (EXIT).
+    /// @notice Move a staked position to a new range: V3Utils mints the new position, which is staked for the caller.
+    /// The old (emptied) NFT is returned, unstaked, to the caller.
+    function rebalance(address gauge, uint256 tokenId, V3Utils.Instructions calldata ins)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 newTokenId)
+    {
+        newTokenId = _modify(msg.sender, gauge, tokenId, ins, Action.REBALANCE, false);
+    }
+
+    /// @dev Unstake, run `ins` through V3Utils, then restake (REMOVE_LIQUIDITY), restake the new NFT (REBALANCE) or hand the NFT to `account` (EXIT).
     function _modify(
         address account,
         address gauge,
@@ -283,27 +294,35 @@ contract AeroFarmingHelper is
         nfpm.safeTransferFrom(address(this), v3utils, tokenId, abi.encode(ins));
         if (action == Action.REMOVE_LIQUIDITY) {
             _stake(gauge, nfpm, tokenId, account);
+            tokenIdAfter = tokenId;
+        } else if (action == Action.REBALANCE) {
+            // V3Utils sends the new NFT first and returns the old one last, so the enumeration ends [..., new, old]
+            tokenIdAfter = nfpm.tokenOfOwnerByIndex(address(this), nfpm.balanceOf(address(this)) - 2);
+            if (tokenIdAfter == tokenId || nfpm.ownerOf(tokenIdAfter) != address(this)) revert UnexpectedNft();
+            _stake(gauge, nfpm, tokenIdAfter, account);
+            nfpm.transferFrom(address(this), account, tokenId);
         } else {
             nfpm.transferFrom(address(this), account, tokenId);
+            tokenIdAfter = tokenId;
         }
         _sweep(list, before, account, unwrap);
-        tokenIdAfter = tokenId;
         emit FarmAction(account, gauge, tokenId, tokenIdAfter, action, automated);
     }
 
-    /// @dev Validates `ins` for `action` against the position and returns the tokens to track. REBALANCE is not supported yet.
+    /// @dev Validates `ins` for `action` against the position and returns the tokens to track.
     function _prepareModify(
         INonfungiblePositionManager nfpm,
         uint256 tokenId,
         V3Utils.Instructions memory ins,
         Action action
     ) internal view returns (address[] memory list) {
-        if (action == Action.REBALANCE) revert NotSupportedAction();
         (address token0, address token1, uint128 liquidity) = _positionInfo(nfpm, tokenId);
-        if (ins.protocol != Nfpm.Protocol.AERODROME || ins.whatToDo != V3Utils.WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP) {
-            revert InvalidInstructions();
-        }
-        if (action == Action.REMOVE_LIQUIDITY) {
+        V3Utils.WhatToDo expected =
+            action == Action.REBALANCE ? V3Utils.WhatToDo.CHANGE_RANGE : V3Utils.WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP;
+        if (ins.protocol != Nfpm.Protocol.AERODROME || ins.whatToDo != expected) revert InvalidInstructions();
+        if (action == Action.REBALANCE) {
+            // any liquidity: V3Utils bounds it by the position
+        } else if (action == Action.REMOVE_LIQUIDITY) {
             if (ins.liquidity == 0 || ins.liquidity >= liquidity) revert InvalidInstructions();
         } else if (action == Action.EXIT) {
             if (ins.liquidity != liquidity) revert InvalidInstructions();
