@@ -321,7 +321,7 @@ contract AeroFarmingHelper is
             action == Action.REBALANCE ? V3Utils.WhatToDo.CHANGE_RANGE : V3Utils.WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP;
         if (ins.protocol != Nfpm.Protocol.AERODROME || ins.whatToDo != expected) revert InvalidInstructions();
         if (action == Action.REBALANCE) {
-            // any liquidity: V3Utils bounds it by the position
+            if (ins.liquidity != liquidity) revert InvalidInstructions();
         } else if (action == Action.REMOVE_LIQUIDITY) {
             if (ins.liquidity == 0 || ins.liquidity >= liquidity) revert InvalidInstructions();
         } else if (action == Action.EXIT) {

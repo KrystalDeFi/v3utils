@@ -263,6 +263,8 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         assertEq(IERC721(NFPM).ownerOf(id), user);
         assertFalse(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(_liq(), 0);
+        assertEq(IERC721(NFPM).getApproved(newId), address(0));
+        assertEq(IERC721(NFPM).getApproved(id), address(0));
         (,,,,,,, uint128 nl,,,,) = INonfungiblePositionManager(NFPM).positions(newId);
         assertGt(nl, 0);
         _assertHelperClean(0, 0, 0);
@@ -304,16 +306,19 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
             WETH, USDC_BASE, TS, base - 10 * TS, base + 10 * TS, 0.1 ether, 500e6, 0, 0, eoa, block.timestamp + 1 hours, 0
         );
         (uint256 stray,,,) = INonfungiblePositionManager(NFPM).mint(mp);
+        (uint256 stray2,,,) = INonfungiblePositionManager(NFPM).mint(mp);
         IERC721(NFPM).transferFrom(eoa, address(helper), stray);
+        IERC721(NFPM).transferFrom(eoa, address(helper), stray2);
         vm.stopPrank();
-        assertEq(IERC721(NFPM).ownerOf(stray), address(helper));
+        assertEq(IERC721(NFPM).balanceOf(address(helper)), 2);
 
         V3Utils.Instructions memory ins = _rebalanceIns();
         vm.prank(user);
         uint256 newId = helper.rebalance(GAUGE_A_BASE, id, ins);
-        assertTrue(newId != stray);
+        assertTrue(newId != stray && newId != stray2);
         assertEq(IERC721(NFPM).ownerOf(stray), address(helper));
-        assertEq(IERC721(NFPM).balanceOf(address(helper)), 1);
+        assertEq(IERC721(NFPM).ownerOf(stray2), address(helper));
+        assertEq(IERC721(NFPM).balanceOf(address(helper)), 2);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId));
         assertEq(IERC721(NFPM).ownerOf(id), user);
     }
@@ -344,6 +349,16 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         vm.prank(user);
         vm.expectRevert(AeroFarmingHelper.InvalidInstructions.selector);
         helper.rebalance(GAUGE_A_BASE, id, ins);
+    }
+
+    function test_rebalance_partialLiquidityReverts() public {
+        V3Utils.Instructions memory ins = _rebalanceIns();
+        ins.liquidity = _liq() / 2;
+        vm.prank(user);
+        vm.expectRevert(AeroFarmingHelper.InvalidInstructions.selector);
+        helper.rebalance(GAUGE_A_BASE, id, ins);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        assertEq(IERC721(NFPM).ownerOf(id), GAUGE_A_BASE);
     }
 
     function test_removeWithChangeRangeReverts() public {
