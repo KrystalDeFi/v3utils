@@ -11,6 +11,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "../Common.sol";
+import "../V3Utils.sol";
 import "./IAero.sol";
 
 interface V3UtilsLike {
@@ -18,6 +19,10 @@ interface V3UtilsLike {
         external
         payable
         returns (Common.SwapAndMintResult memory result);
+    function swapAndIncreaseLiquidity(Common.SwapAndIncreaseLiquidityParams calldata params)
+        external
+        payable
+        returns (Common.SwapAndIncreaseLiquidityResult memory result);
 }
 
 interface IWETHLike {
@@ -69,10 +74,7 @@ contract AeroFarmingHelper is
         bool automated
     );
     event DeductFees(
-        address indexed nfpm,
-        uint256 indexed tokenId,
-        address indexed userAddress,
-        Common.DeductFeesEventData data
+        address indexed nfpm, uint256 indexed tokenId, address indexed userAddress, Common.DeductFeesEventData data
     );
     event CancelOrder(address user, bytes32 hash, bytes signature);
     event ConfigUpdated(address v3utils, address structHash);
@@ -206,9 +208,163 @@ contract AeroFarmingHelper is
         emit FarmAction(msg.sender, gauge, tokenId, tokenId, Action.ZAP_IN, false);
     }
 
+    /// @notice Add liquidity to a staked position: unstake, increase through V3Utils, restake. Leftovers go back to the caller.
+    function addLiquidity(address gauge, Common.SwapAndIncreaseLiquidityParams calldata params, bool unwrap)
+        external
+        payable
+        nonReentrant
+        whenNotPaused
+    {
+        INonfungiblePositionManager nfpm = _validateGauge(gauge);
+        if (address(params.nfpm) != address(nfpm) || params.protocol != Nfpm.Protocol.AERODROME) {
+            revert InvalidInstructions();
+        }
+        if (unwrap && weth == address(0)) revert NativeDisabled();
+        uint256 tokenId = params.tokenId;
+        Common.SwapAndIncreaseLiquidityParams memory p = params;
+        p.recipient = address(this);
+
+        (address[3] memory tokens, uint256[3] memory amounts) = _increaseInputs(nfpm, p);
+        address[] memory list = _tokenSet(tokens[0], tokens[1], tokens[2], rewardToken);
+        uint256[] memory before = _snapshot(list);
+
+        _unstake(gauge, tokenId, msg.sender);
+        _pullInputs(tokens, amounts);
+
+        address v = v3utils;
+        for (uint256 i; i < 3; ++i) {
+            if (tokens[i] != address(0)) IERC20(tokens[i]).forceApprove(v, amounts[i]);
+        }
+        V3UtilsLike(v).swapAndIncreaseLiquidity(p);
+        for (uint256 i; i < 3; ++i) {
+            if (tokens[i] != address(0)) IERC20(tokens[i]).forceApprove(v, 0);
+        }
+
+        _stake(gauge, nfpm, tokenId, msg.sender);
+        _sweep(list, before, msg.sender, unwrap);
+        emit FarmAction(msg.sender, gauge, tokenId, tokenId, Action.ADD_LIQUIDITY, false);
+    }
+
+    /// @notice Withdraw part of a staked position's liquidity (and collect fees); the NFT is restaked under the same id.
+    function removeLiquidity(address gauge, uint256 tokenId, V3Utils.Instructions calldata ins)
+        external
+        nonReentrant
+        whenNotPaused
+    {
+        _modify(msg.sender, gauge, tokenId, ins, Action.REMOVE_LIQUIDITY, false);
+    }
+
+    /// @notice Withdraw all liquidity of a staked position and return the (empty) NFT, unstaked, to the caller.
+    function exit(address gauge, uint256 tokenId, V3Utils.Instructions calldata ins)
+        external
+        nonReentrant
+        whenNotPaused
+    {
+        _modify(msg.sender, gauge, tokenId, ins, Action.EXIT, false);
+    }
+
+    /// @dev Unstake, run `ins` through V3Utils, then restake (REMOVE_LIQUIDITY) or hand the NFT to `account` (EXIT).
+    function _modify(
+        address account,
+        address gauge,
+        uint256 tokenId,
+        V3Utils.Instructions memory ins,
+        Action action,
+        bool automated
+    ) internal returns (uint256 tokenIdAfter) {
+        INonfungiblePositionManager nfpm = _validateGauge(gauge);
+        address[] memory list = _prepareModify(nfpm, tokenId, ins, action);
+        bool unwrap = ins.unwrap;
+        ins.recipient = address(this);
+        ins.unwrap = false;
+        uint256[] memory before = _snapshot(list);
+
+        _unstake(gauge, tokenId, account);
+        nfpm.safeTransferFrom(address(this), v3utils, tokenId, abi.encode(ins));
+        if (action == Action.REMOVE_LIQUIDITY) {
+            _stake(gauge, nfpm, tokenId, account);
+        } else {
+            nfpm.transferFrom(address(this), account, tokenId);
+        }
+        _sweep(list, before, account, unwrap);
+        tokenIdAfter = tokenId;
+        emit FarmAction(account, gauge, tokenId, tokenIdAfter, action, automated);
+    }
+
+    /// @dev Validates `ins` for `action` against the position and returns the tokens to track. REBALANCE is not supported yet.
+    function _prepareModify(
+        INonfungiblePositionManager nfpm,
+        uint256 tokenId,
+        V3Utils.Instructions memory ins,
+        Action action
+    ) internal view returns (address[] memory list) {
+        if (action == Action.REBALANCE) revert NotSupportedAction();
+        (address token0, address token1, uint128 liquidity) = _positionInfo(nfpm, tokenId);
+        if (ins.protocol != Nfpm.Protocol.AERODROME || ins.whatToDo != V3Utils.WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP) {
+            revert InvalidInstructions();
+        }
+        if (action == Action.REMOVE_LIQUIDITY) {
+            if (ins.liquidity == 0 || ins.liquidity >= liquidity) revert InvalidInstructions();
+        } else if (action == Action.EXIT) {
+            if (ins.liquidity != liquidity) revert InvalidInstructions();
+        } else {
+            revert NotSupportedAction();
+        }
+        if (ins.unwrap && weth == address(0)) revert NativeDisabled();
+        list = _tokenSet(token0, token1, ins.targetToken, rewardToken);
+    }
+
+    function _positionInfo(INonfungiblePositionManager nfpm, uint256 tokenId)
+        internal
+        view
+        returns (address token0, address token1, uint128 liquidity)
+    {
+        (,, token0, token1,,,, liquidity,,,,) = nfpm.positions(tokenId);
+    }
+
+    /// @dev Token slots (token0, token1, optional swap source) and the amounts to pull for an increase.
+    function _increaseInputs(INonfungiblePositionManager nfpm, Common.SwapAndIncreaseLiquidityParams memory p)
+        internal
+        view
+        returns (address[3] memory tokens, uint256[3] memory amounts)
+    {
+        (address t0, address t1,) = _positionInfo(nfpm, p.tokenId);
+        tokens = [t0, t1, address(0)];
+        amounts = [p.amount0, p.amount1, uint256(0)];
+        if (
+            address(p.swapSourceToken) != address(0) && address(p.swapSourceToken) != t0
+                && address(p.swapSourceToken) != t1
+        ) {
+            tokens[2] = address(p.swapSourceToken);
+            amounts[2] = p.amount2;
+        }
+    }
+
+    /// @dev De-duplicated list of the non-zero addresses among a, b, c, d.
+    function _tokenSet(address a, address b, address c, address d) internal pure returns (address[] memory list) {
+        address[4] memory all = [a, b, c, d];
+        list = new address[](4);
+        uint256 n;
+        for (uint256 i; i < 4; ++i) {
+            address t = all[i];
+            if (t == address(0)) continue;
+            bool seen;
+            for (uint256 j; j < n; ++j) {
+                if (list[j] == t) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) list[n++] = t;
+        }
+        assembly {
+            mstore(list, n)
+        }
+    }
+
     function _unstake(address gauge, uint256 tokenId, address account) internal {
         _activeGauge = gauge;
-        ICLGauge(gauge).withdrawFrom(account, tokenId, address(this));
+        ICLGauge(gauge).withdrawFrom(tokenId, account);
         _activeGauge = address(0);
     }
 
