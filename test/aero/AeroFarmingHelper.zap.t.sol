@@ -67,11 +67,26 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
         uint256 w0 = _bal(WETH, user);
         uint256 u0 = _bal(USDC_BASE, user);
-        vm.expectEmit(true, true, false, false, address(helper));
-        emit FarmAction(user, GAUGE_A_BASE, 0, 0, AeroFarmingHelper.Action.ZAP_IN, false);
+        vm.recordLogs();
         vm.prank(user);
         uint256 id = helper.zapInAndStake(GAUGE_A_BASE, p, false);
         _check(id, w0, u0, 0, 0, 1 ether);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 sig = FarmAction.selector;
+        uint256 found;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(helper) || logs[i].topics[0] != sig) continue;
+            ++found;
+            assertEq(logs[i].topics[1], bytes32(uint256(uint160(user))));
+            assertEq(logs[i].topics[2], bytes32(uint256(uint160(GAUGE_A_BASE))));
+            assertEq(logs[i].topics[3], bytes32(id));
+            (uint256 newId, AeroFarmingHelper.Action a, bool automated) =
+                abi.decode(logs[i].data, (uint256, AeroFarmingHelper.Action, bool));
+            assertEq(newId, id);
+            assertEq(uint8(a), uint8(AeroFarmingHelper.Action.ZAP_IN));
+            assertFalse(automated);
+        }
+        assertEq(found, 1);
     }
 
     function test_zapIn_withNativeEth() public {
@@ -133,8 +148,46 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         ICLGaugeWithdraw(GAUGE_A_BASE).withdraw(id);
         address h = address(helper);
         vm.prank(user);
-        vm.expectRevert();
+        vm.expectRevert(AeroFarmingHelper.UnexpectedNft.selector);
         IERC721(NFPM).safeTransferFrom(user, h, id);
+    }
+
+    function test_onERC721Received_wrongSenderReverts() public {
+        address h = address(helper);
+        vm.expectRevert(AeroFarmingHelper.UnexpectedNft.selector);
+        AeroFarmingHelper(payable(h)).onERC721Received(GAUGE_A_BASE, GAUGE_A_BASE, 1, "");
+    }
+
+    function test_onERC721Received_noActiveGaugeSpoofedReverts() public {
+        AeroFarmingHelper h = helper;
+        vm.prank(NFPM);
+        vm.expectRevert(AeroFarmingHelper.UnexpectedNft.selector);
+        h.onERC721Received(GAUGE_A_BASE, GAUGE_A_BASE, 1, "");
+    }
+
+    function test_zapIn_unwrapNativeDisabledReverts() public {
+        _deployHelper(AERO, true, address(0));
+        AeroFarmingHelper h = helper;
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        vm.prank(user);
+        vm.expectRevert(AeroFarmingHelper.NativeDisabled.selector);
+        h.zapInAndStake(GAUGE_A_BASE, p, true);
+    }
+
+    function test_zapIn_nfpmMismatchReverts() public {
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        p.nfpm = INonfungiblePositionManager(makeAddr("otherNfpm"));
+        vm.prank(user);
+        vm.expectRevert(AeroFarmingHelper.InvalidInstructions.selector);
+        helper.zapInAndStake(GAUGE_A_BASE, p, false);
+    }
+
+    function test_zapIn_sameTokenReverts() public {
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        p.token1 = p.token0;
+        vm.prank(user);
+        vm.expectRevert(AeroFarmingHelper.InvalidInstructions.selector);
+        helper.zapInAndStake(GAUGE_A_BASE, p, false);
     }
 }
 
