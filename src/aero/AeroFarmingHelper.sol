@@ -57,6 +57,7 @@ contract AeroFarmingHelper is AeroFarmingCore, UUPSUpgradeable, IERC721Receiver 
     }
 
     function _setAutomationModule(address module) internal {
+        if (module != address(0) && module.code.length == 0) revert ModuleNotSet();
         automationModule = module;
         emit AutomationModuleUpdated(module);
     }
@@ -255,7 +256,8 @@ contract AeroFarmingHelper is AeroFarmingCore, UUPSUpgradeable, IERC721Receiver 
         if (msg.sender != weth) revert UnexpectedNative();
     }
 
-    /// @dev Delegates every unknown selector to `automationModule` and bubbles its return or revert data.
+    /// @dev Helper selectors must never equal module selectors, or the helper function would shadow the module's.
+    /// Delegates every unknown selector to `automationModule` and bubbles its return or revert data.
     fallback() external payable {
         address module = automationModule;
         if (module == address(0)) revert ModuleNotSet();

@@ -242,6 +242,21 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
         assertEq(automation.domainSeparator(), _domain(address(h)));
     }
 
+    function test_setAutomationModule_codelessReverts() public {
+        vm.prank(admin);
+        vm.expectRevert(AeroFarmingCore.ModuleNotSet.selector);
+        h.setAutomationModule(makeAddr("aeroCodelessModule"));
+        assertEq(h.automationModule(), address(moduleImpl));
+
+        AeroFarmingHelper impl = new AeroFarmingHelper();
+        bytes memory init = abi.encodeCall(
+            AeroFarmingHelper.initialize,
+            (admin, operator, withdrawer, V3UTILS, GAUGE_FACTORY, AERO, true, WETH, STRUCT_HASH, makeAddr("aeroCodelessModule"))
+        );
+        vm.expectRevert(AeroFarmingCore.ModuleNotSet.selector);
+        new ERC1967Proxy(address(impl), init);
+    }
+
     function test_fallback_moduleNotSetReverts() public {
         vm.prank(admin);
         h.setAutomationModule(address(0));

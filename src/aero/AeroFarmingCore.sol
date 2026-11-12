@@ -86,6 +86,13 @@ abstract contract AeroFarmingCore is Initializable, AccessControl, Pausable, Ree
         bool unwrap;
     }
 
+    struct HarvestParams {
+        address targetToken; // 0 or the reward token => pay the reward token as is
+        uint256 amountOutMin;
+        bytes swapData;
+        uint64 gasFeeX64;
+    }
+
     struct OrderParams {
         AutoAction action;
         address account;
@@ -125,6 +132,8 @@ abstract contract AeroFarmingCore is Initializable, AccessControl, Pausable, Ree
     error NativeTransferFailed();
     error UnexpectedNative();
     error ModuleNotSet();
+    error SlippageError();
+    error SwapFailed(bytes swapData, uint256 index);
 
     function _checkUnwrap(bool unwrap) internal view {
         if (unwrap && weth == address(0)) revert NativeDisabled();
