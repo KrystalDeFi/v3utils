@@ -13,6 +13,18 @@ import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "../Common.sol";
 import "./IAero.sol";
 
+interface V3UtilsLike {
+    function swapAndMint(Common.SwapAndMintParams calldata params)
+        external
+        payable
+        returns (Common.SwapAndMintResult memory result);
+}
+
+interface IWETHLike {
+    function deposit() external payable;
+    function withdraw(uint256) external;
+}
+
 contract AeroFarmingHelper is
     Initializable,
     UUPSUpgradeable,
@@ -138,9 +150,135 @@ contract AeroFarmingHelper is
 
     function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
-    /// @dev Task 2 replaces this with the real guard.
-    function onERC721Received(address, address, uint256, bytes calldata) external pure override returns (bytes4) {
-        revert UnexpectedNft();
+    /// @dev Accepts the NFT only while a flow is withdrawing it from the active gauge.
+    function onERC721Received(address operator, address from, uint256, bytes calldata)
+        external
+        view
+        override
+        returns (bytes4)
+    {
+        address active = _activeGauge;
+        if (msg.sender != gaugeFactory.nft() || active == address(0) || operator != active || from != active) {
+            revert UnexpectedNft();
+        }
+        return IERC721Receiver.onERC721Received.selector;
+    }
+
+    /// @notice Zap tokens (and/or native coin) into a new Aero CL position and stake it in `gauge` for the caller.
+    function zapInAndStake(address gauge, Common.SwapAndMintParams calldata params, bool unwrap)
+        external
+        payable
+        nonReentrant
+        whenNotPaused
+        returns (uint256 tokenId)
+    {
+        INonfungiblePositionManager nfpm = _validateGauge(gauge);
+        Common.SwapAndMintParams memory p = params;
+        if (address(p.nfpm) != address(nfpm) || p.protocol != Nfpm.Protocol.AERODROME || p.token0 == p.token1) {
+            revert InvalidInstructions();
+        }
+        p.recipient = address(this);
+
+        address[3] memory tokens = [address(p.token0), address(p.token1), address(0)];
+        uint256[3] memory amounts = [p.amount0, p.amount1, uint256(0)];
+        if (p.swapSourceToken != p.token0 && p.swapSourceToken != p.token1 && address(p.swapSourceToken) != address(0))
+        {
+            tokens[2] = address(p.swapSourceToken);
+            amounts[2] = p.amount2;
+        }
+        address[] memory list = _nonZero(tokens);
+        if (unwrap && weth == address(0)) revert NativeDisabled();
+        uint256[] memory before = _snapshot(list);
+
+        _pullInputs(tokens, amounts);
+
+        address v = v3utils;
+        for (uint256 i; i < 3; ++i) {
+            if (tokens[i] != address(0)) IERC20(tokens[i]).forceApprove(v, amounts[i]);
+        }
+        tokenId = V3UtilsLike(v).swapAndMint(p).tokenId;
+        for (uint256 i; i < 3; ++i) {
+            if (tokens[i] != address(0)) IERC20(tokens[i]).forceApprove(v, 0);
+        }
+
+        _stake(gauge, nfpm, tokenId, msg.sender);
+        _sweep(list, before, msg.sender, unwrap);
+        emit FarmAction(msg.sender, gauge, tokenId, tokenId, Action.ZAP_IN, false);
+    }
+
+    function _unstake(address gauge, uint256 tokenId, address account) internal {
+        _activeGauge = gauge;
+        ICLGauge(gauge).withdrawFrom(account, tokenId, address(this));
+        _activeGauge = address(0);
+    }
+
+    function _stake(address gauge, INonfungiblePositionManager nfpm, uint256 tokenId, address account) internal {
+        _requireLive(gauge);
+        IERC721(address(nfpm)).approve(gauge, tokenId);
+        ICLGauge(gauge).depositFor(tokenId, account);
+    }
+
+    function _snapshot(address[] memory tokens) internal view returns (uint256[] memory snap) {
+        snap = new uint256[](tokens.length);
+        for (uint256 i; i < tokens.length; ++i) {
+            snap[i] = IERC20(tokens[i]).balanceOf(address(this));
+        }
+    }
+
+    /// @dev Forwards `balance - snapshot` of each token to `to`. WETH delta is sent as native coin iff `unwrap`.
+    function _sweep(address[] memory tokens, uint256[] memory before, address to, bool unwrap) internal {
+        address w = weth;
+        for (uint256 i; i < tokens.length; ++i) {
+            uint256 bal = IERC20(tokens[i]).balanceOf(address(this));
+            if (bal <= before[i]) continue;
+            uint256 delta = bal - before[i];
+            if (unwrap && tokens[i] == w) {
+                if (w == address(0)) revert NativeDisabled();
+                IWETHLike(w).withdraw(delta);
+                (bool ok,) = to.call{value: delta}("");
+                require(ok, "native transfer failed");
+            } else {
+                IERC20(tokens[i]).safeTransfer(to, delta);
+            }
+        }
+    }
+
+    /// @dev Pulls `amounts` from msg.sender. msg.value is wrapped and counts toward the WETH slot.
+    function _pullInputs(address[3] memory tokens, uint256[3] memory amounts_) internal {
+        uint256[3] memory amounts = [amounts_[0], amounts_[1], amounts_[2]]; // real copy: caller keeps full amounts
+        uint256 native = msg.value;
+        if (native > 0) {
+            address w = weth;
+            if (w == address(0)) revert NativeDisabled();
+            bool matched;
+            for (uint256 i; i < 3; ++i) {
+                if (tokens[i] == w) {
+                    if (native > amounts[i]) revert NativeDisabled();
+                    amounts[i] -= native;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) revert NativeDisabled();
+            IWETHLike(w).deposit{value: native}();
+        }
+        for (uint256 i; i < 3; ++i) {
+            if (tokens[i] != address(0) && amounts[i] > 0) {
+                IERC20(tokens[i]).safeTransferFrom(msg.sender, address(this), amounts[i]);
+            }
+        }
+    }
+
+    function _nonZero(address[3] memory tokens) internal pure returns (address[] memory list) {
+        uint256 n;
+        for (uint256 i; i < 3; ++i) {
+            if (tokens[i] != address(0)) ++n;
+        }
+        list = new address[](n);
+        n = 0;
+        for (uint256 i; i < 3; ++i) {
+            if (tokens[i] != address(0)) list[n++] = tokens[i];
+        }
     }
 
     function _validateGauge(address gauge) internal view returns (INonfungiblePositionManager nfpm) {

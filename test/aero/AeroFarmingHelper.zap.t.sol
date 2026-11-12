@@ -1,0 +1,147 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity ^0.8.0;
+
+import "./AeroForkBase.sol";
+
+contract AeroFarmingHelperZapTest is AeroForkBase {
+    address user;
+    int24 constant TS = 50;
+
+    event FarmAction(
+        address indexed user,
+        address indexed gauge,
+        uint256 indexed tokenId,
+        uint256 newTokenId,
+        AeroFarmingHelper.Action action,
+        bool automated
+    );
+
+    function setUp() public {
+        _forkBase();
+        _deployHelper(AERO, true, WETH);
+        user = makeAddr("aeroZapUser");
+        deal(WETH, user, 10 ether);
+        deal(USDC_BASE, user, 50_000e6);
+        vm.deal(user, 10 ether);
+        _approveGauge(user, GAUGE_A_BASE, false);
+        vm.startPrank(user);
+        IERC20(WETH).approve(address(helper), type(uint256).max);
+        IERC20(USDC_BASE).approve(address(helper), type(uint256).max);
+        vm.stopPrank();
+    }
+
+    function _params(uint256 a0, uint256 a1) internal view returns (Common.SwapAndMintParams memory p) {
+        // pool tokens: token0 = WETH (0x42..06 < 0x83..), token1 = USDC
+        (, int24 tick,,,,) = ICLPoolSlot0(POOL_A_BASE).slot0();
+        int24 base = (tick / TS) * TS;
+        p.protocol = Nfpm.Protocol.AERODROME;
+        p.nfpm = INonfungiblePositionManager(NFPM);
+        p.token0 = IERC20(WETH);
+        p.token1 = IERC20(USDC_BASE);
+        p.fee = 0;
+        p.tickSpacing = TS;
+        p.tickLower = base - 10 * TS;
+        p.tickUpper = base + 10 * TS;
+        p.amount0 = a0;
+        p.amount1 = a1;
+        p.deadline = block.timestamp + 1 hours;
+        p.swapSourceToken = IERC20(address(0));
+        p.recipient = user; // must be overridden by helper
+    }
+
+    function _bal(address t, address a) internal view returns (uint256) {
+        return IERC20(t).balanceOf(a);
+    }
+
+    function _check(uint256 id, uint256 w0, uint256 u0, uint256 h0w, uint256 h0u, uint256 suppliedW) internal {
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        assertEq(IERC721(NFPM).ownerOf(id), GAUGE_A_BASE);
+        assertEq(_bal(WETH, address(helper)), h0w);
+        assertEq(_bal(USDC_BASE, address(helper)), h0u);
+        assertEq(IERC721(NFPM).balanceOf(address(helper)), 0);
+        assertLe(w0 > _bal(WETH, user) ? w0 - _bal(WETH, user) : 0, suppliedW);
+        assertLe(u0 - _bal(USDC_BASE, user), 5000e6);
+    }
+
+    function test_zapIn_stakesForUser() public {
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        uint256 w0 = _bal(WETH, user);
+        uint256 u0 = _bal(USDC_BASE, user);
+        vm.expectEmit(true, true, false, false, address(helper));
+        emit FarmAction(user, GAUGE_A_BASE, 0, 0, AeroFarmingHelper.Action.ZAP_IN, false);
+        vm.prank(user);
+        uint256 id = helper.zapInAndStake(GAUGE_A_BASE, p, false);
+        _check(id, w0, u0, 0, 0, 1 ether);
+    }
+
+    function test_zapIn_withNativeEth() public {
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        uint256 w0 = _bal(WETH, user);
+        uint256 u0 = _bal(USDC_BASE, user);
+        uint256 e0 = user.balance;
+        vm.prank(user);
+        uint256 id = helper.zapInAndStake{value: 1 ether}(GAUGE_A_BASE, p, false);
+        _check(id, w0, u0, 0, 0, 0);
+        assertGe(_bal(WETH, user), w0); // WETH untouched; leftovers of the wrapped ETH come back as WETH
+        assertLe(e0 - user.balance, 1 ether);
+        assertEq(address(helper).balance, 0);
+    }
+
+    function test_zapIn_nativeDisabledReverts() public {
+        _deployHelper(AERO, true, address(0));
+        _approveGauge(user, GAUGE_A_BASE, false);
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        AeroFarmingHelper h = helper;
+        vm.startPrank(user);
+        IERC20(USDC_BASE).approve(address(h), type(uint256).max);
+        IERC20(WETH).approve(address(h), type(uint256).max);
+        vm.expectRevert(AeroFarmingHelper.NativeDisabled.selector);
+        h.zapInAndStake{value: 1 ether}(GAUGE_A_BASE, p, false);
+        vm.stopPrank();
+    }
+
+    function test_zapIn_wrongProtocolReverts() public {
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        p.protocol = Nfpm.Protocol.UNI_V3;
+        vm.prank(user);
+        vm.expectRevert(AeroFarmingHelper.InvalidInstructions.selector);
+        helper.zapInAndStake(GAUGE_A_BASE, p, false);
+    }
+
+    function test_zapIn_deadGaugeReverts() public {
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        vm.mockCall(LEAF_VOTER, abi.encodeWithSelector(ILeafVoter.isActivated.selector, GAUGE_A_BASE), abi.encode(false));
+        vm.prank(user);
+        vm.expectRevert(AeroFarmingHelper.GaugeNotLive.selector);
+        helper.zapInAndStake(GAUGE_A_BASE, p, false);
+    }
+
+    function test_zapIn_preexistingBalanceNotForwarded() public {
+        deal(USDC_BASE, address(helper), 5e6);
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        vm.prank(user);
+        helper.zapInAndStake(GAUGE_A_BASE, p, false);
+        assertEq(_bal(USDC_BASE, address(helper)), 5e6);
+    }
+
+    function test_onERC721Received_rejectsUnsolicited() public {
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        vm.prank(user);
+        uint256 id = helper.zapInAndStake(GAUGE_A_BASE, p, false);
+        // unstake directly through gauge to get an NFT in user's hands
+        vm.prank(user);
+        ICLGaugeWithdraw(GAUGE_A_BASE).withdraw(id);
+        address h = address(helper);
+        vm.prank(user);
+        vm.expectRevert();
+        IERC721(NFPM).safeTransferFrom(user, h, id);
+    }
+}
+
+interface ICLPoolSlot0 {
+    function slot0() external view returns (uint160, int24, uint16, uint16, uint16, bool);
+}
+
+interface ICLGaugeWithdraw {
+    function withdraw(uint256 tokenId) external;
+}
