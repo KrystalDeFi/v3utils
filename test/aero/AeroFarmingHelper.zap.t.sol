@@ -141,7 +141,9 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
 
     function test_zapIn_deadGaugeReverts() public {
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
-        vm.mockCall(LEAF_VOTER, abi.encodeWithSelector(ILeafVoter.isActivated.selector, GAUGE_A_BASE), abi.encode(false));
+        vm.mockCall(
+            LEAF_VOTER, abi.encodeWithSelector(ILeafVoter.isActivated.selector, GAUGE_A_BASE), abi.encode(false)
+        );
         vm.prank(user);
         vm.expectRevert(AeroFarmingCore.GaugeNotLive.selector);
         helper.zapInAndStake(GAUGE_A_BASE, p, false);

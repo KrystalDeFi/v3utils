@@ -17,7 +17,8 @@ contract AeroFarmingHelperScript is Script {
         address gaugeFactory = _required("GAUGE_FACTORY");
         address structHash = _required("STRUCT_HASH");
         address rewardToken = _required("REWARD_TOKEN");
-        bool compoundEnabled = block.chainid == 8453 ? vm.envBool("COMPOUND_ENABLED") : vm.envOr("COMPOUND_ENABLED", false);
+        bool compoundEnabled =
+            block.chainid == 8453 ? vm.envBool("COMPOUND_ENABLED") : vm.envOr("COMPOUND_ENABLED", false);
         if (block.chainid == 8453) {
             require(compoundEnabled, "COMPOUND_ENABLED must be true on Base");
         } else {

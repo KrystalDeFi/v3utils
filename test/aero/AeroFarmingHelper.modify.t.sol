@@ -320,7 +320,18 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         IERC20(WETH).approve(NFPM, type(uint256).max);
         IERC20(USDC_BASE).approve(NFPM, type(uint256).max);
         INonfungiblePositionManager.AerodromeMintParams memory mp = INonfungiblePositionManager.AerodromeMintParams(
-            WETH, USDC_BASE, TS, base - 10 * TS, base + 10 * TS, 0.1 ether, 500e6, 0, 0, eoa, block.timestamp + 1 hours, 0
+            WETH,
+            USDC_BASE,
+            TS,
+            base - 10 * TS,
+            base + 10 * TS,
+            0.1 ether,
+            500e6,
+            0,
+            0,
+            eoa,
+            block.timestamp + 1 hours,
+            0
         );
         (uint256 stray,,,) = INonfungiblePositionManager(NFPM).mint(mp);
         (uint256 stray2,,,) = INonfungiblePositionManager(NFPM).mint(mp);

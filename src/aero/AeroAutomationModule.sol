@@ -102,13 +102,10 @@ contract AeroAutomationModule is AeroFarmingCore {
     }
 
     /// @dev Same logic as CommonLib.swap, inline so the helper needs no library link.
-    function _swap(
-        IERC20 tokenIn,
-        IERC20 tokenOut,
-        uint256 amountIn,
-        uint256 amountOutMin,
-        bytes memory swapData
-    ) internal returns (uint256 amountInDelta, uint256 amountOutDelta) {
+    function _swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 amountOutMin, bytes memory swapData)
+        internal
+        returns (uint256 amountInDelta, uint256 amountOutDelta)
+    {
         if (amountIn != 0 && swapData.length != 0 && address(tokenOut) != address(0)) {
             address router = V3Utils(payable(v3utils)).swapRouter();
             uint256 inBefore = tokenIn.balanceOf(address(this));

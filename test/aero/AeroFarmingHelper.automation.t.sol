@@ -16,9 +16,13 @@ contract StructHashHarness {
 
 interface ICLPoolAuto {
     function slot0() external view returns (uint160, int24, uint16, uint16, uint16, bool);
-    function swap(address recipient, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96, bytes calldata data)
-        external
-        returns (int256, int256);
+    function swap(
+        address recipient,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        bytes calldata data
+    ) external returns (int256, int256);
 }
 
 /// @dev Not a gauge of the factory, but claims every account stakes every token.
@@ -47,16 +51,10 @@ abstract contract AutomationBase is AeroForkBase {
     );
     event CancelOrder(address user, bytes32 hash, bytes signature);
 
-    function _mint(
-        address gauge,
-        address pool,
-        address t0,
-        address t1,
-        int24 ts,
-        uint256 a0,
-        uint256 a1,
-        int24 half
-    ) internal returns (int24 base) {
+    function _mint(address gauge, address pool, address t0, address t1, int24 ts, uint256 a0, uint256 a1, int24 half)
+        internal
+        returns (int24 base)
+    {
         (, int24 tick,,,,) = ICLPoolAuto(pool).slot0();
         base = (tick / ts) * ts;
         Common.SwapAndMintParams memory p;
@@ -208,7 +206,8 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
         assertEq(automation.domainSeparator(), expected);
         bytes memory o = _order();
         assertEq(
-            automation.hashOrder(o), keccak256(abi.encodePacked("\x19\x01", expected, IStructHash(STRUCT_HASH)._hash(o)))
+            automation.hashOrder(o),
+            keccak256(abi.encodePacked("\x19\x01", expected, IStructHash(STRUCT_HASH)._hash(o)))
         );
     }
 
@@ -223,8 +222,7 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
         assertEq(IERC721(NFPM).ownerOf(id), user);
         assertEq(_liq(), 0);
         _assertClean();
-        (uint256 found, uint256 n) =
-            _farmActions(vm.getRecordedLogs(), id, AeroFarmingCore.Action.REBALANCE, true);
+        (uint256 found, uint256 n) = _farmActions(vm.getRecordedLogs(), id, AeroFarmingCore.Action.REBALANCE, true);
         assertEq(found, 1);
         assertEq(n, newId);
     }
@@ -427,9 +425,8 @@ contract AeroFarmingHelperAutoCompoundTest is AutomationBase {
         int24 base = _mint(GAUGE_B_BASE, POOL_B_BASE, AERO, WETH, TS, 10_000 ether, 10 ether, 10);
         // sell AERO until the tick is below the range so the claim can be added with no swap
         deal(AERO, address(this), 50_000_000 ether);
-        ICLPoolAuto(POOL_B_BASE).swap(
-            address(this), true, int256(50_000_000 ether), TickMath.getSqrtRatioAtTick(base - 10 * TS - 100), ""
-        );
+        ICLPoolAuto(POOL_B_BASE)
+            .swap(address(this), true, int256(50_000_000 ether), TickMath.getSqrtRatioAtTick(base - 10 * TS - 100), "");
     }
 
     function uniswapV3SwapCallback(int256 amount0Delta, int256, bytes calldata) external {

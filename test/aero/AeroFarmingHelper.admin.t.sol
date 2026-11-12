@@ -181,7 +181,10 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
 
     function _missingRole(address account, bytes32 role) internal pure returns (bytes memory) {
         return abi.encodePacked(
-            "AccessControl: account ", Strings.toHexString(account), " is missing role ", Strings.toHexString(uint256(role), 32)
+            "AccessControl: account ",
+            Strings.toHexString(account),
+            " is missing role ",
+            Strings.toHexString(uint256(role), 32)
         );
     }
 
@@ -325,7 +328,18 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
         AeroFarmingHelper impl = new AeroFarmingHelper();
         bytes memory init = abi.encodeCall(
             AeroFarmingHelper.initialize,
-            (admin, operator, withdrawer, V3UTILS, GAUGE_FACTORY, AERO, true, WETH, STRUCT_HASH, makeAddr("aeroCodelessModule"))
+            (
+                admin,
+                operator,
+                withdrawer,
+                V3UTILS,
+                GAUGE_FACTORY,
+                AERO,
+                true,
+                WETH,
+                STRUCT_HASH,
+                makeAddr("aeroCodelessModule")
+            )
         );
         vm.expectRevert(AeroFarmingCore.ModuleNotSet.selector);
         new ERC1967Proxy(address(impl), init);

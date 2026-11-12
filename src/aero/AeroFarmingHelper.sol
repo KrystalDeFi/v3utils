@@ -175,11 +175,7 @@ contract AeroFarmingHelper is AeroFarmingCore, UUPSUpgradeable, IERC721Receiver 
     }
 
     /// @notice Withdraw all liquidity of a staked position and return the (empty) NFT, unstaked, to the caller.
-    function exit(address gauge, uint256 tokenId, V3Utils.Instructions memory ins)
-        external
-        nonReentrant
-        whenNotPaused
-    {
+    function exit(address gauge, uint256 tokenId, V3Utils.Instructions memory ins) external nonReentrant whenNotPaused {
         _modify(msg.sender, gauge, tokenId, ins, Action.EXIT, false);
     }
 
