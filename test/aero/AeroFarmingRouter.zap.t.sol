@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import "./AeroForkBase.sol";
 
-contract AeroFarmingHelperZapTest is AeroForkBase {
+contract AeroFarmingRouterZapTest is AeroForkBase {
     address user;
     int24 constant TS = 50;
 
@@ -126,7 +126,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         IERC20(USDC_BASE).approve(address(router), type(uint256).max);
         IERC20(WETH).approve(address(router), type(uint256).max);
         vm.expectRevert(IAeroFarmingLogic.NativeDisabled.selector);
-        _zapIn(1 ether, GAUGE_A_BASE, p, false);
+        _zapInExpectRevert(1 ether, GAUGE_A_BASE, p, false);
         vm.stopPrank();
     }
 
@@ -135,7 +135,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         p.protocol = Nfpm.Protocol.UNI_V3;
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
-        _zapIn(GAUGE_A_BASE, p, false);
+        _zapInExpectRevert(GAUGE_A_BASE, p, false);
     }
 
     function test_zapIn_deadGaugeReverts() public {
@@ -145,7 +145,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         );
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.GaugeNotLive.selector);
-        _zapIn(GAUGE_A_BASE, p, false);
+        _zapInExpectRevert(GAUGE_A_BASE, p, false);
     }
 
     function test_zapIn_preexistingBalanceNotForwarded() public {
@@ -186,7 +186,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.NativeDisabled.selector);
-        _zapIn(GAUGE_A_BASE, p, true);
+        _zapInExpectRevert(GAUGE_A_BASE, p, true);
     }
 
     function test_zapIn_nfpmMismatchReverts() public {
@@ -194,7 +194,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         p.nfpm = INonfungiblePositionManager(makeAddr("otherNfpm"));
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
-        _zapIn(GAUGE_A_BASE, p, false);
+        _zapInExpectRevert(GAUGE_A_BASE, p, false);
     }
 
     function test_zapIn_sameTokenReverts() public {
@@ -202,7 +202,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         p.token1 = p.token0;
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
-        _zapIn(GAUGE_A_BASE, p, false);
+        _zapInExpectRevert(GAUGE_A_BASE, p, false);
     }
 }
 

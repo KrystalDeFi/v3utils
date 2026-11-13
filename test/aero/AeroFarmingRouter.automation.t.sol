@@ -125,7 +125,7 @@ abstract contract AutomationBase is AeroForkBase {
     }
 }
 
-contract AeroFarmingHelperAutomationTest is AutomationBase {
+contract AeroFarmingRouterAutomationTest is AutomationBase {
     int24 constant TS = 50;
 
     function setUp() public {
@@ -394,7 +394,7 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
     }
 }
 
-contract AeroFarmingHelperAutoCompoundTest is AutomationBase {
+contract AeroFarmingRouterAutoCompoundTest is AutomationBase {
     int24 constant TS = 200;
 
     function setUp() public {
@@ -450,7 +450,7 @@ contract AeroFarmingHelperAutoCompoundTest is AutomationBase {
 }
 
 /// @dev AUTO_COMPOUND where the reward (AERO) is not a pool token: amount2 path, swaps through the etched swap router.
-contract AeroFarmingHelperAutoCompoundGaugeATest is AutomationBase {
+contract AeroFarmingRouterAutoCompoundGaugeATest is AutomationBase {
     int24 constant TS = 50;
     address internal swapRouter;
 
@@ -517,7 +517,7 @@ contract AeroFarmingHelperAutoCompoundGaugeATest is AutomationBase {
     }
 }
 
-contract AeroFarmingHelperAutoHarvestTest is AutomationBase {
+contract AeroFarmingRouterAutoHarvestTest is AutomationBase {
     int24 constant TS = 200;
     address internal feeTaker;
 

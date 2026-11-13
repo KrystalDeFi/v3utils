@@ -16,7 +16,7 @@ interface ICLPoolSlot0B {
     ) external returns (int256, int256);
 }
 
-contract AeroFarmingHelperCompoundTest is AeroForkBase {
+contract AeroFarmingRouterCompoundTest is AeroForkBase {
     address user;
     int24 constant TS = 200;
     uint256 id;
@@ -224,7 +224,7 @@ contract AeroFarmingHelperCompoundTest is AeroForkBase {
 
 /// @dev The common production path: the reward (AERO) is NOT a pool token, so it is added through V3Utils'
 /// amount2 / swapSourceToken path with swaps through the (etched) swapRouter.
-contract AeroFarmingHelperCompoundGaugeATest is AeroForkBase {
+contract AeroFarmingRouterCompoundGaugeATest is AeroForkBase {
     address user;
     int24 constant TS = 50;
     uint256 id;

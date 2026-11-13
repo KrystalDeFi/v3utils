@@ -107,7 +107,20 @@ abstract contract AeroForkBase is Test {
     {
         bytes memory ret =
             router.execute{value: value}(abi.encodeCall(IAeroFarmingLogic.zapInAndStake, (gauge, p, unwrap)));
-        if (ret.length == 32) tokenId = abi.decode(ret, (uint256));
+        assertEq(ret.length, 32, "zapInAndStake return data");
+        tokenId = abi.decode(ret, (uint256));
+    }
+
+    /// @dev For a vm.expectRevert'ed zap: an expected revert makes the call return no data, which `_zapIn` (it
+    /// requires exactly one word back) would reject.
+    function _zapInExpectRevert(address gauge, Common.SwapAndMintParams memory p, bool unwrap) internal {
+        _zapInExpectRevert(0, gauge, p, unwrap);
+    }
+
+    function _zapInExpectRevert(uint256 value, address gauge, Common.SwapAndMintParams memory p, bool unwrap)
+        internal
+    {
+        router.execute{value: value}(abi.encodeCall(IAeroFarmingLogic.zapInAndStake, (gauge, p, unwrap)));
     }
 
     function _addLiquidity(address gauge, Common.SwapAndIncreaseLiquidityParams memory p, bool unwrap) internal {
@@ -127,7 +140,13 @@ abstract contract AeroForkBase is Test {
         returns (uint256 newTokenId)
     {
         bytes memory ret = router.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (gauge, tokenId, ins)));
-        if (ret.length == 32) newTokenId = abi.decode(ret, (uint256));
+        assertEq(ret.length, 32, "rebalance return data");
+        newTokenId = abi.decode(ret, (uint256));
+    }
+
+    /// @dev For a vm.expectRevert'ed rebalance (see `_zapInExpectRevert`).
+    function _rebalanceExpectRevert(address gauge, uint256 tokenId, V3Utils.Instructions memory ins) internal {
+        router.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (gauge, tokenId, ins)));
     }
 
     function _compound(address gauge, uint256 tokenId, IAeroFarmingLogic.CompoundParams memory p) internal {

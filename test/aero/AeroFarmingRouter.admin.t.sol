@@ -27,7 +27,7 @@ contract FakeLogic {
     }
 }
 
-contract AeroFarmingHelperAdminTest is AeroForkBase {
+contract AeroFarmingRouterAdminTest is AeroForkBase {
     AeroFarmingRouter h;
 
     event ImplementationSet(address implementation);

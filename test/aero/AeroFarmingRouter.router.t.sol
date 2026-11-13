@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
-import "./AeroFarmingHelper.automation.t.sol";
+import "./AeroFarmingRouter.automation.t.sol";
 
 /// @dev Swap router stand-in that tries to re-enter the router mid-flow (once with a user flow, once with the
 /// automated entry while the automation account is recorded), records the revert data, then pays `amountOut`.

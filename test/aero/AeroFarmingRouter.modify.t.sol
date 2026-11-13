@@ -21,7 +21,7 @@ contract MisbehavingV3Utils is IERC721Receiver {
     }
 }
 
-contract AeroFarmingHelperModifyTest is AeroForkBase {
+contract AeroFarmingRouterModifyTest is AeroForkBase {
     address user;
     int24 constant TS = 50;
     uint256 id;
@@ -393,7 +393,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         ins.whatToDo = V3Utils.WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP;
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
-        _rebalance(GAUGE_A_BASE, id, ins);
+        _rebalanceExpectRevert(GAUGE_A_BASE, id, ins);
     }
 
     function test_rebalance_partialLiquidityReverts() public {
@@ -401,7 +401,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         ins.liquidity = _liq() / 2;
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
-        _rebalance(GAUGE_A_BASE, id, ins);
+        _rebalanceExpectRevert(GAUGE_A_BASE, id, ins);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(IERC721(NFPM).ownerOf(id), GAUGE_A_BASE);
     }
@@ -464,7 +464,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         _misbehavingV3Utils(0, ins.tickLower, ins.tickUpper);
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.RebalanceMismatch.selector);
-        _rebalance(GAUGE_A_BASE, id, ins);
+        _rebalanceExpectRevert(GAUGE_A_BASE, id, ins);
         _assertRebalanceUntouched(liq);
     }
 
@@ -475,7 +475,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         _misbehavingV3Utils(2, ins.tickLower, ins.tickUpper);
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.RebalanceMismatch.selector);
-        _rebalance(GAUGE_A_BASE, id, ins);
+        _rebalanceExpectRevert(GAUGE_A_BASE, id, ins);
         _assertRebalanceUntouched(liq);
     }
 
@@ -486,12 +486,12 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         _misbehavingV3Utils(1, ins.tickLower - TS, ins.tickUpper);
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.RebalanceMismatch.selector);
-        _rebalance(GAUGE_A_BASE, id, ins);
+        _rebalanceExpectRevert(GAUGE_A_BASE, id, ins);
 
         _misbehavingV3Utils(1, ins.tickLower, ins.tickUpper + TS);
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.RebalanceMismatch.selector);
-        _rebalance(GAUGE_A_BASE, id, ins);
+        _rebalanceExpectRevert(GAUGE_A_BASE, id, ins);
         _assertRebalanceUntouched(liq);
 
         // control: one new NFT with the requested range passes the checks and is staked for the user

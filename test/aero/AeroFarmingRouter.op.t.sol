@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
-import "./AeroFarmingHelper.automation.t.sol";
+import "./AeroFarmingRouter.automation.t.sol";
 
 /// @dev Non-Base behaviour on Optimism: reward token is xAERO, compounding is disabled, native coin is WETH.
-contract AeroFarmingHelperOpTest is AutomationBase {
+contract AeroFarmingRouterOpTest is AutomationBase {
     int24 constant TS = 100;
     address internal constant USDC_OP = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85; // token0 of the OP pool
     address feeTaker;
