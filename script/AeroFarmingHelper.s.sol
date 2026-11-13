@@ -2,11 +2,11 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/Script.sol";
-import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import "../src/aero/AeroFarmingHelper.sol";
-import "../src/aero/AeroAutomationModule.sol";
+import "../src/aero/AeroFarmingRouter.sol";
+import "../src/aero/AeroFarmingLogic.sol";
 
 /// Plain CREATE (not CREATE2): per-chain init args differ anyway. Take addresses from the real broadcast.
+/// Interim: deploys the router + logic (renamed and finalised in the router deploy-script task).
 contract AeroFarmingHelperScript is Script {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -15,7 +15,6 @@ contract AeroFarmingHelperScript is Script {
         address withdrawer = _required("WITHDRAWER");
         address v3utils = _required("V3UTILS");
         address gaugeFactory = _required("GAUGE_FACTORY");
-        address structHash = _required("STRUCT_HASH");
         address rewardToken = _required("REWARD_TOKEN");
         bool compoundEnabled =
             block.chainid == 8453 ? vm.envBool("COMPOUND_ENABLED") : vm.envOr("COMPOUND_ENABLED", false);
@@ -27,32 +26,24 @@ contract AeroFarmingHelperScript is Script {
         }
         vm.startBroadcast(deployerPrivateKey);
 
-        AeroAutomationModule module = new AeroAutomationModule();
-        AeroFarmingHelper impl = new AeroFarmingHelper();
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(impl),
-            abi.encodeCall(
-                AeroFarmingHelper.initialize,
-                (
-                    admin,
-                    operator,
-                    withdrawer,
-                    v3utils,
-                    gaugeFactory,
-                    rewardToken,
-                    compoundEnabled,
-                    vm.envAddress("NATIVE_WETH"),
-                    structHash,
-                    address(module)
-                )
-            )
+        AeroFarmingLogic logic = new AeroFarmingLogic();
+        AeroFarmingRouter router = new AeroFarmingRouter();
+        router.initialize(
+            admin,
+            operator,
+            withdrawer,
+            address(logic),
+            v3utils,
+            gaugeFactory,
+            rewardToken,
+            compoundEnabled,
+            vm.envAddress("NATIVE_WETH")
         );
 
         vm.stopBroadcast();
 
-        console.log("AeroAutomationModule:", address(module));
-        console.log("AeroFarmingHelper implementation:", address(impl));
-        console.log("AeroFarmingHelper proxy:", address(proxy));
+        console.log("AeroFarmingLogic:", address(logic));
+        console.log("AeroFarmingRouter:", address(router));
     }
 
     function _required(string memory key) internal view returns (address a) {

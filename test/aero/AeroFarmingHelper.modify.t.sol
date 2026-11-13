@@ -13,20 +13,20 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         address indexed gauge,
         uint256 indexed tokenId,
         uint256 newTokenId,
-        AeroFarmingCore.Action action,
+        IAeroFarmingLogic.Action action,
         bool automated
     );
 
     function setUp() public {
         _forkBase();
-        _deployHelper(AERO, true, WETH);
+        _deployRouter(AERO, true, WETH);
         user = makeAddr("aeroModifyUser");
         deal(WETH, user, 10 ether);
         deal(USDC_BASE, user, 50_000e6);
         _approveGauge(user, GAUGE_A_BASE, false);
         vm.startPrank(user);
-        IERC20(WETH).approve(address(helper), type(uint256).max);
-        IERC20(USDC_BASE).approve(address(helper), type(uint256).max);
+        IERC20(WETH).approve(address(router), type(uint256).max);
+        IERC20(USDC_BASE).approve(address(router), type(uint256).max);
         vm.stopPrank();
 
         (, int24 tick,,,,) = ICLPoolSlot0(POOL_A_BASE).slot0();
@@ -44,7 +44,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         p.deadline = block.timestamp + 1 hours;
         p.recipient = user;
         vm.prank(user);
-        id = helper.zapInAndStake(GAUGE_A_BASE, p, false);
+        id = _zapIn(GAUGE_A_BASE, p, false);
 
         (uint256 minStakeBlocks,) = ICLGaugeFactory(GAUGE_FACTORY).effectivePenaltyConfig(GAUGE_A_BASE);
         vm.roll(block.number + minStakeBlocks + 10);
@@ -78,24 +78,24 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
     }
 
     function _assertHelperClean(uint256 w, uint256 u, uint256 a) internal {
-        assertEq(_bal(WETH, address(helper)), w);
-        assertEq(_bal(USDC_BASE, address(helper)), u);
-        assertEq(_bal(AERO, address(helper)), a);
-        assertEq(IERC721(NFPM).balanceOf(address(helper)), 0);
+        assertEq(_bal(WETH, address(router)), w);
+        assertEq(_bal(USDC_BASE, address(router)), u);
+        assertEq(_bal(AERO, address(router)), a);
+        assertEq(IERC721(NFPM).balanceOf(address(router)), 0);
     }
 
-    function _farmActionCount(Vm.Log[] memory logs, uint256 tokenId, AeroFarmingCore.Action act)
+    function _farmActionCount(Vm.Log[] memory logs, uint256 tokenId, IAeroFarmingLogic.Action act)
         internal
         view
         returns (uint256 found)
     {
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter != address(helper) || logs[i].topics[0] != FarmAction.selector) continue;
+            if (logs[i].emitter != address(router) || logs[i].topics[0] != FarmAction.selector) continue;
             assertEq(logs[i].topics[1], bytes32(uint256(uint160(user))));
             assertEq(logs[i].topics[2], bytes32(uint256(uint160(GAUGE_A_BASE))));
             assertEq(logs[i].topics[3], bytes32(tokenId));
-            (uint256 newId, AeroFarmingCore.Action a, bool automated) =
-                abi.decode(logs[i].data, (uint256, AeroFarmingCore.Action, bool));
+            (uint256 newId, IAeroFarmingLogic.Action a, bool automated) =
+                abi.decode(logs[i].data, (uint256, IAeroFarmingLogic.Action, bool));
             assertEq(newId, tokenId);
             assertEq(uint8(a), uint8(act));
             assertFalse(automated);
@@ -110,23 +110,23 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         uint256 u0 = _bal(USDC_BASE, user);
         vm.recordLogs();
         vm.prank(user);
-        helper.addLiquidity(GAUGE_A_BASE, p, false);
+        _addLiquidity(GAUGE_A_BASE, p, false);
         assertGt(_liq(), l0);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(IERC721(NFPM).ownerOf(id), GAUGE_A_BASE);
         _assertHelperClean(0, 0, 0);
         assertLe(w0 - _bal(WETH, user), 0.5 ether);
         assertLe(u0 - _bal(USDC_BASE, user), 2000e6);
-        assertEq(_farmActionCount(vm.getRecordedLogs(), id, AeroFarmingCore.Action.ADD_LIQUIDITY), 1);
+        assertEq(_farmActionCount(vm.getRecordedLogs(), id, IAeroFarmingLogic.Action.ADD_LIQUIDITY), 1);
     }
 
     function test_add_withoutGaugeApprovalReverts() public {
         vm.prank(user);
-        ICLGaugeApprovals(GAUGE_A_BASE).setApprovalForAll(address(helper), false);
+        ICLGaugeApprovals(GAUGE_A_BASE).setApprovalForAll(address(router), false);
         Common.SwapAndIncreaseLiquidityParams memory p = _addParams(0.5 ether, 2000e6);
         vm.prank(user);
         vm.expectRevert(bytes("NW"));
-        helper.addLiquidity(GAUGE_A_BASE, p, false);
+        _addLiquidity(GAUGE_A_BASE, p, false);
     }
 
     function test_remove_partialRestakesSameId() public {
@@ -137,14 +137,14 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         uint256 u0 = _bal(USDC_BASE, user);
         vm.recordLogs();
         vm.prank(user);
-        helper.removeLiquidity(GAUGE_A_BASE, id, ins);
+        _removeLiquidity(GAUGE_A_BASE, id, ins);
         assertEq(_liq(), l0 - part);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(IERC721(NFPM).ownerOf(id), GAUGE_A_BASE);
         assertGt(_bal(WETH, user), w0);
         assertGt(_bal(USDC_BASE, user), u0);
         _assertHelperClean(0, 0, 0);
-        assertEq(_farmActionCount(vm.getRecordedLogs(), id, AeroFarmingCore.Action.REMOVE_LIQUIDITY), 1);
+        assertEq(_farmActionCount(vm.getRecordedLogs(), id, IAeroFarmingLogic.Action.REMOVE_LIQUIDITY), 1);
     }
 
     function test_remove_unwrap_paysNative() public {
@@ -155,36 +155,36 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         uint256 w0 = _bal(WETH, user);
         uint256 u0 = _bal(USDC_BASE, user);
         vm.prank(user);
-        helper.removeLiquidity(GAUGE_A_BASE, id, ins);
+        _removeLiquidity(GAUGE_A_BASE, id, ins);
         assertGt(user.balance, e0, "WETH not paid as native");
         assertEq(_bal(WETH, user), w0, "WETH must not be paid as token");
         assertGt(_bal(USDC_BASE, user), u0);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
-        assertEq(address(helper).balance, 0);
+        assertEq(address(router).balance, 0);
         _assertHelperClean(0, 0, 0);
     }
 
     function test_remove_fullLiquidityReverts() public {
         V3Utils.Instructions memory ins = _ins(_liq());
         vm.prank(user);
-        vm.expectRevert(AeroFarmingCore.InvalidInstructions.selector);
-        helper.removeLiquidity(GAUGE_A_BASE, id, ins);
+        vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
+        _removeLiquidity(GAUGE_A_BASE, id, ins);
     }
 
     function test_remove_zeroLiquidityReverts() public {
         V3Utils.Instructions memory ins = _ins(0);
         vm.prank(user);
-        vm.expectRevert(AeroFarmingCore.InvalidInstructions.selector);
-        helper.removeLiquidity(GAUGE_A_BASE, id, ins);
+        vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
+        _removeLiquidity(GAUGE_A_BASE, id, ins);
     }
 
     function test_remove_withClaimApproval_forwardsRewardAndPoolTokens() public {
         vm.prank(user);
-        ICLGaugeApprovals(GAUGE_A_BASE).approveForClaim(address(helper), true);
+        ICLGaugeApprovals(GAUGE_A_BASE).approveForClaim(address(router), true);
         uint256 a0 = _bal(AERO, user);
         V3Utils.Instructions memory ins = _ins(_liq() / 2);
         vm.prank(user);
-        helper.removeLiquidity(GAUGE_A_BASE, id, ins);
+        _removeLiquidity(GAUGE_A_BASE, id, ins);
         assertGt(_bal(AERO, user), a0);
         _assertHelperClean(0, 0, 0);
     }
@@ -194,7 +194,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         uint256 u0 = _bal(USDC_BASE, user);
         V3Utils.Instructions memory ins = _ins(_liq() / 2);
         vm.prank(user);
-        helper.removeLiquidity(GAUGE_A_BASE, id, ins);
+        _removeLiquidity(GAUGE_A_BASE, id, ins);
         assertGt(_bal(WETH, user), w0);
         assertGt(_bal(USDC_BASE, user), u0);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
@@ -207,22 +207,21 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         deal(USDC_BASE, attacker, 50_000e6);
         _approveGauge(attacker, GAUGE_A_BASE, true);
         vm.startPrank(attacker);
-        IERC20(WETH).approve(address(helper), type(uint256).max);
-        IERC20(USDC_BASE).approve(address(helper), type(uint256).max);
+        IERC20(WETH).approve(address(router), type(uint256).max);
+        IERC20(USDC_BASE).approve(address(router), type(uint256).max);
         vm.stopPrank();
 
         V3Utils.Instructions memory rem = _ins(_liq() / 2);
         V3Utils.Instructions memory ex = _ins(_liq());
         Common.SwapAndIncreaseLiquidityParams memory p = _addParams(0.5 ether, 2000e6);
-        AeroFarmingHelper h = helper;
 
         vm.startPrank(attacker);
         vm.expectRevert(bytes("NA"));
-        h.removeLiquidity(GAUGE_A_BASE, id, rem);
+        _removeLiquidity(GAUGE_A_BASE, id, rem);
         vm.expectRevert(bytes("NA"));
-        h.exit(GAUGE_A_BASE, id, ex);
+        _exit(GAUGE_A_BASE, id, ex);
         vm.expectRevert(bytes("NA"));
-        h.addLiquidity(GAUGE_A_BASE, p, false);
+        _addLiquidity(GAUGE_A_BASE, p, false);
         vm.stopPrank();
 
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
@@ -234,19 +233,19 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         V3Utils.Instructions memory ins = _ins(_liq());
         vm.recordLogs();
         vm.prank(user);
-        helper.exit(GAUGE_A_BASE, id, ins);
+        _exit(GAUGE_A_BASE, id, ins);
         assertEq(IERC721(NFPM).ownerOf(id), user);
         assertFalse(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(_liq(), 0);
         _assertHelperClean(0, 0, 0);
-        assertEq(_farmActionCount(vm.getRecordedLogs(), id, AeroFarmingCore.Action.EXIT), 1);
+        assertEq(_farmActionCount(vm.getRecordedLogs(), id, IAeroFarmingLogic.Action.EXIT), 1);
     }
 
     function test_exit_partialLiquidityReverts() public {
         V3Utils.Instructions memory ins = _ins(_liq() - 1);
         vm.prank(user);
-        vm.expectRevert(AeroFarmingCore.InvalidInstructions.selector);
-        helper.exit(GAUGE_A_BASE, id, ins);
+        vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
+        _exit(GAUGE_A_BASE, id, ins);
     }
 
     function test_exit_onDeadGaugeStillWorks() public {
@@ -255,7 +254,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
             LEAF_VOTER, abi.encodeWithSelector(ILeafVoter.isActivated.selector, GAUGE_A_BASE), abi.encode(false)
         );
         vm.prank(user);
-        helper.exit(GAUGE_A_BASE, id, ins);
+        _exit(GAUGE_A_BASE, id, ins);
         assertEq(IERC721(NFPM).ownerOf(id), user);
         assertFalse(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
     }
@@ -273,7 +272,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         V3Utils.Instructions memory ins = _rebalanceIns();
         uint256 a0 = _bal(AERO, user);
         vm.prank(user);
-        uint256 newId = helper.rebalance(GAUGE_A_BASE, id, ins);
+        uint256 newId = _rebalance(GAUGE_A_BASE, id, ins);
         assertTrue(newId != id);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId));
         assertEq(IERC721(NFPM).ownerOf(newId), GAUGE_A_BASE);
@@ -292,18 +291,18 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         V3Utils.Instructions memory ins = _rebalanceIns();
         vm.recordLogs();
         vm.prank(user);
-        uint256 newId = helper.rebalance(GAUGE_A_BASE, id, ins);
+        uint256 newId = _rebalance(GAUGE_A_BASE, id, ins);
         Vm.Log[] memory logs = vm.getRecordedLogs();
         uint256 found;
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter != address(helper) || logs[i].topics[0] != FarmAction.selector) continue;
+            if (logs[i].emitter != address(router) || logs[i].topics[0] != FarmAction.selector) continue;
             assertEq(logs[i].topics[1], bytes32(uint256(uint160(user))));
             assertEq(logs[i].topics[2], bytes32(uint256(uint160(GAUGE_A_BASE))));
             assertEq(logs[i].topics[3], bytes32(id));
-            (uint256 n, AeroFarmingCore.Action a, bool automated) =
-                abi.decode(logs[i].data, (uint256, AeroFarmingCore.Action, bool));
+            (uint256 n, IAeroFarmingLogic.Action a, bool automated) =
+                abi.decode(logs[i].data, (uint256, IAeroFarmingLogic.Action, bool));
             assertEq(n, newId);
-            assertEq(uint8(a), uint8(AeroFarmingCore.Action.REBALANCE));
+            assertEq(uint8(a), uint8(IAeroFarmingLogic.Action.REBALANCE));
             assertFalse(automated);
             ++found;
         }
@@ -335,18 +334,18 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         );
         (uint256 stray,,,) = INonfungiblePositionManager(NFPM).mint(mp);
         (uint256 stray2,,,) = INonfungiblePositionManager(NFPM).mint(mp);
-        IERC721(NFPM).transferFrom(eoa, address(helper), stray);
-        IERC721(NFPM).transferFrom(eoa, address(helper), stray2);
+        IERC721(NFPM).transferFrom(eoa, address(router), stray);
+        IERC721(NFPM).transferFrom(eoa, address(router), stray2);
         vm.stopPrank();
-        assertEq(IERC721(NFPM).balanceOf(address(helper)), 2);
+        assertEq(IERC721(NFPM).balanceOf(address(router)), 2);
 
         V3Utils.Instructions memory ins = _rebalanceIns();
         vm.prank(user);
-        uint256 newId = helper.rebalance(GAUGE_A_BASE, id, ins);
+        uint256 newId = _rebalance(GAUGE_A_BASE, id, ins);
         assertTrue(newId != stray && newId != stray2);
-        assertEq(IERC721(NFPM).ownerOf(stray), address(helper));
-        assertEq(IERC721(NFPM).ownerOf(stray2), address(helper));
-        assertEq(IERC721(NFPM).balanceOf(address(helper)), 2);
+        assertEq(IERC721(NFPM).ownerOf(stray), address(router));
+        assertEq(IERC721(NFPM).ownerOf(stray2), address(router));
+        assertEq(IERC721(NFPM).balanceOf(address(router)), 2);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId));
         assertEq(IERC721(NFPM).ownerOf(id), user);
     }
@@ -355,36 +354,36 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         // fresh stake, then rebalance in the next block (inside the penalty window)
         V3Utils.Instructions memory ins = _rebalanceIns();
         vm.prank(user);
-        uint256 newId = helper.rebalance(GAUGE_A_BASE, id, ins);
+        uint256 newId = _rebalance(GAUGE_A_BASE, id, ins);
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 2);
         V3Utils.Instructions memory ins2 = _rebalanceIns();
         (,,,,,,, uint128 l,,,,) = INonfungiblePositionManager(NFPM).positions(newId);
         ins2.liquidity = l;
         uint256 a0 = _bal(AERO, user);
-        uint256 h0 = _bal(AERO, address(helper));
+        uint256 h0 = _bal(AERO, address(router));
         vm.prank(user);
-        uint256 newId2 = helper.rebalance(GAUGE_A_BASE, newId, ins2);
+        uint256 newId2 = _rebalance(GAUGE_A_BASE, newId, ins2);
         assertTrue(newId2 != newId);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId2));
         assertEq(_bal(AERO, user), a0);
-        assertEq(_bal(AERO, address(helper)), h0);
+        assertEq(_bal(AERO, address(router)), h0);
     }
 
     function test_rebalance_wrongWhatToDoReverts() public {
         V3Utils.Instructions memory ins = _rebalanceIns();
         ins.whatToDo = V3Utils.WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP;
         vm.prank(user);
-        vm.expectRevert(AeroFarmingCore.InvalidInstructions.selector);
-        helper.rebalance(GAUGE_A_BASE, id, ins);
+        vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
+        _rebalance(GAUGE_A_BASE, id, ins);
     }
 
     function test_rebalance_partialLiquidityReverts() public {
         V3Utils.Instructions memory ins = _rebalanceIns();
         ins.liquidity = _liq() / 2;
         vm.prank(user);
-        vm.expectRevert(AeroFarmingCore.InvalidInstructions.selector);
-        helper.rebalance(GAUGE_A_BASE, id, ins);
+        vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
+        _rebalance(GAUGE_A_BASE, id, ins);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(IERC721(NFPM).ownerOf(id), GAUGE_A_BASE);
     }
@@ -393,30 +392,29 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         V3Utils.Instructions memory ins = _rebalanceIns();
         ins.liquidity = _liq() / 2;
         vm.prank(user);
-        vm.expectRevert(AeroFarmingCore.InvalidInstructions.selector);
-        helper.removeLiquidity(GAUGE_A_BASE, id, ins);
+        vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
+        _removeLiquidity(GAUGE_A_BASE, id, ins);
     }
 
     function test_compoundFeesInstructionReverts() public {
         V3Utils.Instructions memory ins = _ins(_liq() / 2);
         ins.whatToDo = V3Utils.WhatToDo.COMPOUND_FEES;
         vm.startPrank(user);
-        vm.expectRevert(AeroFarmingCore.InvalidInstructions.selector);
-        helper.removeLiquidity(GAUGE_A_BASE, id, ins);
+        vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
+        _removeLiquidity(GAUGE_A_BASE, id, ins);
         ins.liquidity = _liq();
-        vm.expectRevert(AeroFarmingCore.InvalidInstructions.selector);
-        helper.exit(GAUGE_A_BASE, id, ins);
+        vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
+        _exit(GAUGE_A_BASE, id, ins);
         vm.stopPrank();
     }
 
     function test_unwrapNativeDisabledReverts() public {
-        _deployHelper(AERO, true, address(0));
-        AeroFarmingHelper h = helper;
+        _deployRouter(AERO, true, address(0));
         V3Utils.Instructions memory ins = _ins(_liq() / 2);
         ins.unwrap = true;
         vm.prank(user);
-        vm.expectRevert(AeroFarmingCore.NativeDisabled.selector);
-        h.removeLiquidity(GAUGE_A_BASE, id, ins);
+        vm.expectRevert(IAeroFarmingLogic.NativeDisabled.selector);
+        _removeLiquidity(GAUGE_A_BASE, id, ins);
     }
 }
 

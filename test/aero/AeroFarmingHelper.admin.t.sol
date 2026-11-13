@@ -2,10 +2,15 @@
 pragma solidity ^0.8.0;
 
 import "./AeroForkBase.sol";
-import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 
-contract AeroHarness is AeroFarmingHelper {
+/// @dev Exposes logic internals. Called directly (not through a router), so it reads its own AeroStorage slot,
+/// which `setFactory` fills.
+contract AeroHarness is AeroFarmingLogic {
+    function setFactory(address f) external {
+        AeroStorage.layout().gaugeFactory = f;
+    }
+
     function validateGauge(address g) external view returns (address) {
         return address(_validateGauge(g));
     }
@@ -15,71 +20,73 @@ contract AeroHarness is AeroFarmingHelper {
     }
 }
 
-/// @dev Stand-in module whose answer proves which module the proxy fallback delegates to.
-contract FakeAutomationModule {
-    function domainSeparator() external pure returns (bytes32) {
-        return bytes32(uint256(42));
+/// @dev Stand-in logic whose answer proves which implementation the router delegates to.
+contract FakeLogic {
+    function rebalance(address, uint256, V3Utils.Instructions memory) external pure returns (uint256) {
+        return 42;
     }
 }
 
 contract AeroFarmingHelperAdminTest is AeroForkBase {
-    AeroFarmingHelper h;
+    AeroFarmingRouter h;
 
-    event AutomationModuleUpdated(address module);
+    event ImplementationSet(address implementation);
 
     function setUp() public {
         _forkBase();
-        h = _deployHelper(AERO, true, WETH);
+        h = _deployRouter(AERO, true, WETH);
     }
 
     function test_initialize_setsConfig() public {
         assertEq(h.v3utils(), V3UTILS);
-        assertEq(address(h.gaugeFactory()), GAUGE_FACTORY);
+        assertEq(h.gaugeFactory(), GAUGE_FACTORY);
         assertEq(h.rewardToken(), AERO);
         assertTrue(h.compoundEnabled());
         assertEq(h.weth(), WETH);
-        assertEq(h.structHash(), STRUCT_HASH);
-        assertEq(h.automationModule(), address(moduleImpl));
+        assertEq(h.implementation(), address(logic));
+        assertFalse(h.implementationLocked());
         assertTrue(h.hasRole(h.DEFAULT_ADMIN_ROLE(), admin));
         assertTrue(h.hasRole(h.OPERATOR_ROLE(), operator));
         assertTrue(h.hasRole(h.WITHDRAWER_ROLE(), withdrawer));
     }
 
     function test_initialize_twiceReverts() public {
-        vm.expectRevert("Initializable: contract is already initialized");
-        h.initialize(
-            admin, operator, withdrawer, V3UTILS, GAUGE_FACTORY, AERO, true, WETH, STRUCT_HASH, address(moduleImpl)
-        );
+        vm.expectRevert(AeroFarmingRouter.AlreadyInitialized.selector);
+        vm.prank(tx.origin);
+        h.initialize(admin, operator, withdrawer, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
     }
 
-    function test_implementation_initializeReverts() public {
-        AeroFarmingHelper impl = new AeroFarmingHelper();
-        vm.expectRevert("Initializable: contract is already initialized");
-        impl.initialize(
-            admin, operator, withdrawer, V3UTILS, GAUGE_FACTORY, AERO, true, WETH, STRUCT_HASH, address(moduleImpl)
+    function test_logic_hasNoInitialize() public {
+        bytes memory init = abi.encodeCall(
+            AeroFarmingRouter.initialize,
+            (admin, operator, withdrawer, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH)
         );
+        vm.prank(tx.origin);
+        (bool ok, bytes memory ret) = address(logic).call(init);
+        assertFalse(ok);
+        assertEq(ret.length, 0);
     }
 
-    function test_upgrade_nonAdminReverts() public {
-        AeroFarmingHelper newImpl = new AeroFarmingHelper();
+    function test_setImplementation_nonAdminReverts() public {
+        AeroFarmingLogic newLogic = new AeroFarmingLogic();
         address rando = makeAddr("rando");
         bytes memory err = _missingRole(rando, h.DEFAULT_ADMIN_ROLE());
         vm.expectRevert(err);
         vm.prank(rando);
-        h.upgradeTo(address(newImpl));
+        h.setImplementation(address(newLogic));
+        assertEq(h.implementation(), address(logic));
     }
 
-    function test_upgrade_adminPreservesState() public {
-        AeroFarmingHelper newImpl = new AeroFarmingHelper();
+    function test_setImplementation_adminPreservesState() public {
+        AeroFarmingLogic newLogic = new AeroFarmingLogic();
         vm.prank(admin);
-        h.upgradeTo(address(newImpl));
+        h.setImplementation(address(newLogic));
+        assertEq(h.implementation(), address(newLogic));
         assertEq(h.v3utils(), V3UTILS);
-        assertEq(address(h.gaugeFactory()), GAUGE_FACTORY);
+        assertEq(h.gaugeFactory(), GAUGE_FACTORY);
         assertEq(h.rewardToken(), AERO);
         assertTrue(h.compoundEnabled());
         assertEq(h.weth(), WETH);
-        assertEq(h.structHash(), STRUCT_HASH);
-        assertEq(h.automationModule(), address(moduleImpl));
         assertTrue(h.hasRole(h.OPERATOR_ROLE(), operator));
     }
 
@@ -94,14 +101,6 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
         vm.prank(admin);
         h.setV3Utils(other);
         assertEq(h.v3utils(), other);
-
-        address sh = makeAddr("newSh");
-        vm.expectRevert(err);
-        vm.prank(rando);
-        h.setStructHash(sh);
-        vm.prank(admin);
-        h.setStructHash(sh);
-        assertEq(h.structHash(), sh);
     }
 
     function test_withdrawERC20_onlyWithdrawer() public {
@@ -204,59 +203,16 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
     }
 
     function test_validateGauge_rejectsNonGauge() public {
-        AeroHarness hh = new AeroHarness();
-        AeroHarness p = AeroHarness(
-            payable(address(
-                    new ERC1967Proxy(
-                        address(hh),
-                        abi.encodeCall(
-                            AeroFarmingHelper.initialize,
-                            (
-                                admin,
-                                operator,
-                                withdrawer,
-                                V3UTILS,
-                                GAUGE_FACTORY,
-                                AERO,
-                                true,
-                                WETH,
-                                STRUCT_HASH,
-                                address(moduleImpl)
-                            )
-                        )
-                    )
-                ))
-        );
-        vm.expectRevert(AeroFarmingCore.InvalidGauge.selector);
+        AeroHarness p = new AeroHarness();
+        p.setFactory(GAUGE_FACTORY);
+        vm.expectRevert(IAeroFarmingLogic.InvalidGauge.selector);
         p.validateGauge(address(0xdead));
         assertEq(p.validateGauge(GAUGE_A_BASE), NFPM);
     }
 
     function test_validateGauge_acceptsGaugeA() public {
-        AeroHarness hh = new AeroHarness();
-        // AeroHarness constructor disables initializers; use a proxy
-        AeroHarness p = AeroHarness(
-            payable(address(
-                    new ERC1967Proxy(
-                        address(hh),
-                        abi.encodeCall(
-                            AeroFarmingHelper.initialize,
-                            (
-                                admin,
-                                operator,
-                                withdrawer,
-                                V3UTILS,
-                                GAUGE_FACTORY,
-                                AERO,
-                                true,
-                                WETH,
-                                STRUCT_HASH,
-                                address(moduleImpl)
-                            )
-                        )
-                    )
-                ))
-        );
+        AeroHarness p = new AeroHarness();
+        p.setFactory(GAUGE_FACTORY);
         assertEq(p.validateGauge(GAUGE_A_BASE), NFPM);
         // The repo compiles with evm_version=london, and the live LeafVoter uses PUSH0, so the revm
         // hardfork here cannot execute it. Mock both branches instead of calling it live.
@@ -264,7 +220,7 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
         vm.mockCall(LEAF_VOTER, q, abi.encode(true));
         p.requireLive(GAUGE_A_BASE);
         vm.mockCall(LEAF_VOTER, q, abi.encode(false));
-        vm.expectRevert(AeroFarmingCore.GaugeNotLive.selector);
+        vm.expectRevert(IAeroFarmingLogic.GaugeNotLive.selector);
         p.requireLive(GAUGE_A_BASE);
     }
 
@@ -274,20 +230,13 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
         assertFalse(ok);
     }
 
-    function _domain(address verifyingContract) internal view returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256("AeroFarmingHelper"),
-                keccak256("1"),
-                block.chainid,
-                verifyingContract
-            )
-        );
+    function _rebalanceViaRouter() internal returns (uint256) {
+        V3Utils.Instructions memory ins;
+        return abi.decode(h.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (GAUGE_A_BASE, 1, ins))), (uint256));
     }
 
-    function test_setAutomationModule_onlyAdmin() public {
-        address fake = address(new FakeAutomationModule());
+    function test_setImplementation_onlyAdmin() public {
+        address fake = address(new FakeLogic());
         address rando = makeAddr("aeroRando");
         bytes32 role = h.DEFAULT_ADMIN_ROLE();
         vm.expectRevert(
@@ -301,73 +250,32 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
             )
         );
         vm.prank(rando);
-        h.setAutomationModule(fake);
-        assertEq(h.automationModule(), address(moduleImpl));
-        assertEq(automation.domainSeparator(), _domain(address(h)));
+        h.setImplementation(fake);
+        assertEq(h.implementation(), address(logic));
 
         vm.expectEmit(address(h));
-        emit AutomationModuleUpdated(fake);
+        emit ImplementationSet(fake);
         vm.prank(admin);
-        h.setAutomationModule(fake);
-        assertEq(h.automationModule(), fake);
-        assertEq(automation.domainSeparator(), bytes32(uint256(42))); // the fallback now reaches the new module
+        h.setImplementation(fake);
+        assertEq(h.implementation(), fake);
+        assertEq(_rebalanceViaRouter(), 42); // execute now reaches the new logic
 
-        AeroAutomationModule m2 = new AeroAutomationModule();
+        AeroFarmingLogic l2 = new AeroFarmingLogic();
         vm.prank(admin);
-        h.setAutomationModule(address(m2));
-        assertEq(h.automationModule(), address(m2));
-        assertEq(automation.domainSeparator(), _domain(address(h)));
+        h.setImplementation(address(l2));
+        assertEq(h.implementation(), address(l2));
+        V3Utils.Instructions memory ins;
+        vm.expectRevert(IAeroFarmingLogic.InvalidGauge.selector); // the real logic again: gauge 0 is rejected
+        h.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (address(0), 1, ins)));
     }
 
-    function test_setAutomationModule_codelessReverts() public {
-        vm.prank(admin);
-        vm.expectRevert(AeroFarmingCore.ModuleNotSet.selector);
-        h.setAutomationModule(makeAddr("aeroCodelessModule"));
-        assertEq(h.automationModule(), address(moduleImpl));
-
-        AeroFarmingHelper impl = new AeroFarmingHelper();
-        bytes memory init = abi.encodeCall(
-            AeroFarmingHelper.initialize,
-            (
-                admin,
-                operator,
-                withdrawer,
-                V3UTILS,
-                GAUGE_FACTORY,
-                AERO,
-                true,
-                WETH,
-                STRUCT_HASH,
-                makeAddr("aeroCodelessModule")
-            )
-        );
-        vm.expectRevert(AeroFarmingCore.ModuleNotSet.selector);
-        new ERC1967Proxy(address(impl), init);
-    }
-
-    function test_fallback_moduleNotSetReverts() public {
-        vm.prank(admin);
-        h.setAutomationModule(address(0));
-        vm.expectRevert(AeroFarmingCore.ModuleNotSet.selector);
-        automation.domainSeparator();
-
-        // a proxy initialised without a module
-        AeroFarmingHelper impl = new AeroFarmingHelper();
-        bytes memory init = abi.encodeCall(
-            AeroFarmingHelper.initialize,
-            (admin, operator, withdrawer, V3UTILS, GAUGE_FACTORY, AERO, true, WETH, STRUCT_HASH, address(0))
-        );
-        AeroAutomationModule bare = AeroAutomationModule(address(new ERC1967Proxy(address(impl), init)));
-        AeroFarmingCore.OrderParams memory p;
-        vm.expectRevert(AeroFarmingCore.ModuleNotSet.selector);
-        vm.prank(operator);
-        bare.executeOrder(p);
-    }
-
-    function test_fallback_unknownSelectorReverts() public {
+    function test_router_unknownSelectorReverts() public {
         (bool ok, bytes memory ret) = address(h).call(abi.encodeWithSelector(bytes4(0xdeadbeef)));
         assertFalse(ok);
         assertEq(ret.length, 0);
+        // an unknown selector passed through execute reaches the logic, which has no fallback either
+        vm.expectRevert(bytes(""));
+        h.execute(abi.encodeWithSelector(bytes4(0xdeadbeef)));
     }
 }
 

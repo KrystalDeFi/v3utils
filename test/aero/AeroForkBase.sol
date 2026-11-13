@@ -2,9 +2,8 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
-import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import "../../src/aero/AeroFarmingHelper.sol";
-import "../../src/aero/AeroAutomationModule.sol";
+import "../../src/aero/AeroFarmingRouter.sol";
+import "../../src/aero/AeroFarmingLogic.sol";
 
 /// @dev Pulls the caller's whole allowance of `tokenIn`, pays `amountOut` of `tokenOut`.
 contract MockSwapRouter {
@@ -37,9 +36,19 @@ abstract contract AeroForkBase is Test {
     address internal admin;
     address internal operator;
     address internal withdrawer;
-    AeroFarmingHelper internal helper;
-    AeroAutomationModule internal moduleImpl; // the module implementation (never called directly in production)
-    AeroAutomationModule internal automation; // the helper proxy, typed for the operator path served by its fallback
+    AeroFarmingRouter internal router;
+    AeroFarmingLogic internal logic; // the logic implementation (never called directly in production)
+
+    /// @dev Test-side bundle of executeAutomation's arguments.
+    struct OrderParams {
+        IAeroFarmingLogic.AutoAction action;
+        address account;
+        address gauge;
+        uint256 tokenId;
+        bytes actionData;
+        bytes order;
+        bytes signature;
+    }
 
     function _forkBase() internal {
         vm.createSelectFork(vm.envString("BASE_RPC_URL"), BASE_BLOCK);
@@ -49,41 +58,73 @@ abstract contract AeroForkBase is Test {
         vm.createSelectFork(vm.envString("OP_RPC_URL"), OP_BLOCK);
     }
 
-    function _deployHelper(address rewardToken, bool compoundEnabled, address weth)
+    /// @dev Deploys a logic and a router (tx.origin is the router's initializer) and initializes the router.
+    function _deployRouter(address rewardToken, bool compoundEnabled, address weth)
         internal
-        returns (AeroFarmingHelper)
+        returns (AeroFarmingRouter)
     {
         admin = makeAddr("admin");
         operator = makeAddr("operator");
         withdrawer = makeAddr("withdrawer");
-        AeroFarmingHelper impl = new AeroFarmingHelper();
-        moduleImpl = new AeroAutomationModule();
-        bytes memory init = abi.encodeCall(
-            AeroFarmingHelper.initialize,
-            (
-                admin,
-                operator,
-                withdrawer,
-                V3UTILS,
-                GAUGE_FACTORY,
-                rewardToken,
-                compoundEnabled,
-                weth,
-                STRUCT_HASH,
-                address(moduleImpl)
-            )
+        logic = new AeroFarmingLogic();
+        router = new AeroFarmingRouter();
+        vm.prank(tx.origin);
+        router.initialize(
+            admin, operator, withdrawer, address(logic), V3UTILS, GAUGE_FACTORY, rewardToken, compoundEnabled, weth
         );
-        helper = AeroFarmingHelper(payable(address(new ERC1967Proxy(address(impl), init))));
-        automation = AeroAutomationModule(address(helper));
-        return helper;
+        return router;
     }
 
-    /// @dev Approves the most recently deployed helper on the gauge.
+    /// @dev Approves the most recently deployed router on the gauge.
     function _approveGauge(address user, address gauge, bool claim) internal {
         vm.startPrank(user);
-        ICLGaugeApprovals(gauge).setApprovalForAll(address(helper), true);
-        if (claim) ICLGaugeApprovals(gauge).approveForClaim(address(helper), true);
+        ICLGaugeApprovals(gauge).setApprovalForAll(address(router), true);
+        if (claim) ICLGaugeApprovals(gauge).approveForClaim(address(router), true);
         vm.stopPrank();
+    }
+
+    // Call-path wrappers: each makes exactly one external call (router.execute / executeAutomation), so a
+    // vm.prank / vm.expectRevert placed before the wrapper binds to that call.
+
+    function _zapIn(address gauge, Common.SwapAndMintParams memory p, bool unwrap) internal returns (uint256) {
+        return _zapIn(0, gauge, p, unwrap);
+    }
+
+    function _zapIn(uint256 value, address gauge, Common.SwapAndMintParams memory p, bool unwrap)
+        internal
+        returns (uint256 tokenId)
+    {
+        bytes memory ret =
+            router.execute{value: value}(abi.encodeCall(IAeroFarmingLogic.zapInAndStake, (gauge, p, unwrap)));
+        if (ret.length == 32) tokenId = abi.decode(ret, (uint256));
+    }
+
+    function _addLiquidity(address gauge, Common.SwapAndIncreaseLiquidityParams memory p, bool unwrap) internal {
+        router.execute(abi.encodeCall(IAeroFarmingLogic.addLiquidity, (gauge, p, unwrap)));
+    }
+
+    function _removeLiquidity(address gauge, uint256 tokenId, V3Utils.Instructions memory ins) internal {
+        router.execute(abi.encodeCall(IAeroFarmingLogic.removeLiquidity, (gauge, tokenId, ins)));
+    }
+
+    function _exit(address gauge, uint256 tokenId, V3Utils.Instructions memory ins) internal {
+        router.execute(abi.encodeCall(IAeroFarmingLogic.exit, (gauge, tokenId, ins)));
+    }
+
+    function _rebalance(address gauge, uint256 tokenId, V3Utils.Instructions memory ins)
+        internal
+        returns (uint256 newTokenId)
+    {
+        bytes memory ret = router.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (gauge, tokenId, ins)));
+        if (ret.length == 32) newTokenId = abi.decode(ret, (uint256));
+    }
+
+    function _compound(address gauge, uint256 tokenId, IAeroFarmingLogic.CompoundParams memory p) internal {
+        router.execute(abi.encodeCall(IAeroFarmingLogic.compound, (gauge, tokenId, p)));
+    }
+
+    function _executeOrder(OrderParams memory p) internal returns (uint256) {
+        return router.executeAutomation(p.account, p.gauge, p.tokenId, p.action, p.actionData, p.order, p.signature);
     }
 }
 

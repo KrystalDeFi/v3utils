@@ -46,7 +46,7 @@ abstract contract AutomationBase is AeroForkBase {
         address indexed gauge,
         uint256 indexed tokenId,
         uint256 newTokenId,
-        AeroFarmingCore.Action action,
+        IAeroFarmingLogic.Action action,
         bool automated
     );
     event CancelOrder(address user, bytes32 hash, bytes signature);
@@ -70,7 +70,7 @@ abstract contract AutomationBase is AeroForkBase {
         p.deadline = block.timestamp + 1 hours;
         p.recipient = user;
         vm.prank(user);
-        id = helper.zapInAndStake(gauge, p, false);
+        id = _zapIn(gauge, p, false);
         (uint256 minStakeBlocks,) = ICLGaugeFactory(GAUGE_FACTORY).effectivePenaltyConfig(gauge);
         vm.roll(block.number + minStakeBlocks + 1000);
         vm.warp(block.timestamp + 2 * (minStakeBlocks + 1000));
@@ -87,15 +87,15 @@ abstract contract AutomationBase is AeroForkBase {
     }
 
     function _sign(uint256 key, bytes memory order) internal view returns (bytes memory) {
-        bytes32 digest = automation.hashOrder(order);
+        bytes32 digest = router.hashOrder(order);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
         return abi.encodePacked(r, s, v);
     }
 
-    function _params(AeroFarmingCore.AutoAction a, address gauge, bytes memory data, address account)
+    function _params(IAeroFarmingLogic.AutoAction a, address gauge, bytes memory data, address account)
         internal
         view
-        returns (AeroFarmingCore.OrderParams memory p)
+        returns (OrderParams memory p)
     {
         p.action = a;
         p.account = account;
@@ -106,17 +106,17 @@ abstract contract AutomationBase is AeroForkBase {
         p.signature = _sign(userKey, p.order);
     }
 
-    function _farmActions(Vm.Log[] memory logs, uint256 tokenId, AeroFarmingCore.Action act, bool automated)
+    function _farmActions(Vm.Log[] memory logs, uint256 tokenId, IAeroFarmingLogic.Action act, bool automated)
         internal
         view
         returns (uint256 found, uint256 newId)
     {
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter != address(helper) || logs[i].topics[0] != FarmAction.selector) continue;
+            if (logs[i].emitter != address(router) || logs[i].topics[0] != FarmAction.selector) continue;
             if (logs[i].topics[3] != bytes32(tokenId)) continue;
             assertEq(logs[i].topics[1], bytes32(uint256(uint160(user))));
-            (uint256 n, AeroFarmingCore.Action a, bool au) =
-                abi.decode(logs[i].data, (uint256, AeroFarmingCore.Action, bool));
+            (uint256 n, IAeroFarmingLogic.Action a, bool au) =
+                abi.decode(logs[i].data, (uint256, IAeroFarmingLogic.Action, bool));
             assertEq(uint8(a), uint8(act));
             assertEq(au, automated);
             newId = n;
@@ -130,14 +130,14 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
 
     function setUp() public {
         _forkBase();
-        _deployHelper(AERO, true, WETH);
+        _deployRouter(AERO, true, WETH);
         (user, userKey) = makeAddrAndKey("aeroOrderUser");
         deal(WETH, user, 10 ether);
         deal(USDC_BASE, user, 50_000e6);
         _approveGauge(user, GAUGE_A_BASE, false);
         vm.startPrank(user);
-        IERC20(WETH).approve(address(helper), type(uint256).max);
-        IERC20(USDC_BASE).approve(address(helper), type(uint256).max);
+        IERC20(WETH).approve(address(router), type(uint256).max);
+        IERC20(USDC_BASE).approve(address(router), type(uint256).max);
         vm.stopPrank();
         _mint(GAUGE_A_BASE, POOL_A_BASE, WETH, USDC_BASE, TS, 1 ether, 5000e6, 10);
     }
@@ -162,15 +162,15 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
         ins.tickUpper = base + 5 * TS;
     }
 
-    function _adjustParams() internal view returns (AeroFarmingCore.OrderParams memory) {
-        return _params(AeroFarmingCore.AutoAction.AUTO_ADJUST, GAUGE_A_BASE, abi.encode(_rebalanceIns()), user);
+    function _adjustParams() internal view returns (OrderParams memory) {
+        return _params(IAeroFarmingLogic.AutoAction.AUTO_ADJUST, GAUGE_A_BASE, abi.encode(_rebalanceIns()), user);
     }
 
     function _assertClean() internal {
-        assertEq(IERC20(WETH).balanceOf(address(helper)), 0);
-        assertEq(IERC20(USDC_BASE).balanceOf(address(helper)), 0);
-        assertEq(IERC20(AERO).balanceOf(address(helper)), 0);
-        assertEq(IERC721(NFPM).balanceOf(address(helper)), 0);
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0);
+        assertEq(IERC20(USDC_BASE).balanceOf(address(router)), 0);
+        assertEq(IERC20(AERO).balanceOf(address(router)), 0);
+        assertEq(IERC721(NFPM).balanceOf(address(router)), 0);
     }
 
     function test_structHashParity_deployedLibMatchesSource() public {
@@ -193,57 +193,56 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
         assertEq(IStructHash(STRUCT_HASH)._hash(encZ), h.hashOrder(encZ));
     }
 
-    function test_domainSeparator_usesProxyAddress() public {
+    function test_domainSeparator_usesRouterAddress() public {
         bytes32 expected = keccak256(
             abi.encode(
                 keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256("AeroFarmingHelper"),
+                keccak256("AeroFarmingRouter"),
                 keccak256("1"),
                 block.chainid,
-                address(helper)
+                address(router)
             )
         );
-        assertEq(automation.domainSeparator(), expected);
+        assertEq(router.DOMAIN_SEPARATOR(), expected);
         bytes memory o = _order();
         assertEq(
-            automation.hashOrder(o),
-            keccak256(abi.encodePacked("\x19\x01", expected, IStructHash(STRUCT_HASH)._hash(o)))
+            router.hashOrder(o), keccak256(abi.encodePacked("\x19\x01", expected, IStructHash(STRUCT_HASH)._hash(o)))
         );
     }
 
     function test_autoAdjust_validOrder() public {
-        AeroFarmingCore.OrderParams memory p = _adjustParams();
+        OrderParams memory p = _adjustParams();
         vm.recordLogs();
         vm.prank(operator);
-        uint256 newId = automation.executeOrder(p);
+        uint256 newId = _executeOrder(p);
         assertTrue(newId != id);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId));
         assertEq(IERC721(NFPM).ownerOf(newId), GAUGE_A_BASE);
         assertEq(IERC721(NFPM).ownerOf(id), user);
         assertEq(_liq(), 0);
         _assertClean();
-        (uint256 found, uint256 n) = _farmActions(vm.getRecordedLogs(), id, AeroFarmingCore.Action.REBALANCE, true);
+        (uint256 found, uint256 n) = _farmActions(vm.getRecordedLogs(), id, IAeroFarmingLogic.Action.REBALANCE, true);
         assertEq(found, 1);
         assertEq(n, newId);
     }
 
     function test_autoExit_validOrder() public {
-        AeroFarmingCore.OrderParams memory p =
-            _params(AeroFarmingCore.AutoAction.AUTO_EXIT, GAUGE_A_BASE, abi.encode(_ins(_liq())), user);
+        OrderParams memory p =
+            _params(IAeroFarmingLogic.AutoAction.AUTO_EXIT, GAUGE_A_BASE, abi.encode(_ins(_liq())), user);
         vm.recordLogs();
         vm.prank(operator);
-        automation.executeOrder(p);
+        _executeOrder(p);
         assertEq(IERC721(NFPM).ownerOf(id), user);
         assertFalse(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(_liq(), 0);
         _assertClean();
-        (uint256 found,) = _farmActions(vm.getRecordedLogs(), id, AeroFarmingCore.Action.EXIT, true);
+        (uint256 found,) = _farmActions(vm.getRecordedLogs(), id, IAeroFarmingLogic.Action.EXIT, true);
         assertEq(found, 1);
     }
 
     function test_execute_nonOperatorReverts() public {
-        AeroFarmingCore.OrderParams memory p = _adjustParams();
-        bytes32 role = helper.OPERATOR_ROLE();
+        OrderParams memory p = _adjustParams();
+        bytes32 role = router.OPERATOR_ROLE();
         address caller = makeAddr("aeroNotOperator");
         vm.expectRevert(
             bytes(
@@ -256,16 +255,16 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
             )
         );
         vm.prank(caller);
-        automation.executeOrder(p);
+        _executeOrder(p);
     }
 
     function test_execute_wrongSignerReverts() public {
         (, uint256 otherKey) = makeAddrAndKey("aeroOrderOther");
-        AeroFarmingCore.OrderParams memory p = _adjustParams();
+        OrderParams memory p = _adjustParams();
         p.signature = _sign(otherKey, p.order);
         vm.prank(operator);
-        vm.expectRevert(AeroFarmingCore.InvalidSignature.selector);
-        automation.executeOrder(p);
+        vm.expectRevert(IAeroFarmingLogic.InvalidSignature.selector);
+        _executeOrder(p);
     }
 
     function test_execute_signerNotStakeOwnerReverts() public {
@@ -277,8 +276,8 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
         deal(USDC_BASE, other, 50_000e6);
         _approveGauge(other, GAUGE_A_BASE, false);
         vm.startPrank(other);
-        IERC20(WETH).approve(address(helper), type(uint256).max);
-        IERC20(USDC_BASE).approve(address(helper), type(uint256).max);
+        IERC20(WETH).approve(address(router), type(uint256).max);
+        IERC20(USDC_BASE).approve(address(router), type(uint256).max);
         vm.stopPrank();
         user = other;
         _mint(GAUGE_A_BASE, POOL_A_BASE, WETH, USDC_BASE, TS, 1 ether, 5000e6, 10);
@@ -291,13 +290,13 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
         // the operator points A's order at the victim B's tokenId
         id = victimId;
         uint128 victimLiq = _liq();
-        AeroFarmingCore.OrderParams memory p = _adjustParams();
+        OrderParams memory p = _adjustParams();
         p.account = other;
         p.order = otherOrder;
         p.signature = otherSig;
         vm.prank(operator);
-        vm.expectRevert(AeroFarmingCore.NotStakeOwner.selector);
-        automation.executeOrder(p);
+        vm.expectRevert(IAeroFarmingLogic.NotStakeOwner.selector);
+        _executeOrder(p);
 
         // B's position is untouched
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(victim, victimId));
@@ -306,93 +305,80 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
 
         // positive control: the same signed order does act on A's own stake
         id = otherId;
-        p = _params(AeroFarmingCore.AutoAction.AUTO_EXIT, GAUGE_A_BASE, abi.encode(_ins(_liq())), other);
+        p = _params(IAeroFarmingLogic.AutoAction.AUTO_EXIT, GAUGE_A_BASE, abi.encode(_ins(_liq())), other);
         p.order = otherOrder;
         p.signature = otherSig;
         vm.prank(operator);
-        automation.executeOrder(p);
+        _executeOrder(p);
         assertEq(IERC721(NFPM).ownerOf(otherId), other);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(victim, victimId));
     }
 
     function test_execute_cancelledReverts() public {
-        AeroFarmingCore.OrderParams memory p = _adjustParams();
-        bytes32 digest = automation.hashOrder(p.order);
+        OrderParams memory p = _adjustParams();
+        bytes32 digest = router.hashOrder(p.order);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(userKey, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
-        assertFalse(automation.isOrderCancelled(user, digest));
-        vm.expectEmit(address(helper));
+        assertFalse(router.isOrderCancelled(user, digest));
+        vm.expectEmit(address(router));
         emit CancelOrder(user, digest, sig);
         vm.prank(user);
-        automation.cancelOrder(digest, sig);
-        assertTrue(automation.isOrderCancelled(user, digest));
-        assertFalse(automation.isOrderCancelled(operator, digest));
+        router.cancelOrder(digest, sig);
+        assertTrue(router.isOrderCancelled(user, digest));
+        assertFalse(router.isOrderCancelled(operator, digest));
         vm.prank(operator);
-        vm.expectRevert(AeroFarmingCore.OrderCancelled.selector);
-        automation.executeOrder(p);
+        vm.expectRevert(IAeroFarmingLogic.OrderCancelled.selector);
+        _executeOrder(p);
     }
 
     function test_cancelOrder_badSignatureReverts() public {
         bytes memory o = _order();
-        bytes32 digest = automation.hashOrder(o);
+        bytes32 digest = router.hashOrder(o);
         (, uint256 otherKey) = makeAddrAndKey("aeroOrderOther");
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(otherKey, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
         vm.prank(user);
-        vm.expectRevert(AeroFarmingCore.InvalidSignature.selector);
-        automation.cancelOrder(digest, sig);
+        vm.expectRevert(IAeroFarmingLogic.InvalidSignature.selector);
+        router.cancelOrder(digest, sig);
     }
 
     function test_orderValidAcrossUpgrade() public {
-        AeroFarmingCore.OrderParams memory p = _adjustParams();
-        AeroFarmingHelper newImpl = new AeroFarmingHelper();
+        OrderParams memory p = _adjustParams();
+        AeroFarmingLogic newLogic = new AeroFarmingLogic();
         vm.prank(admin);
-        helper.upgradeTo(address(newImpl));
+        router.setImplementation(address(newLogic));
         vm.prank(operator);
-        uint256 newId = automation.executeOrder(p);
+        uint256 newId = _executeOrder(p);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId));
     }
 
     function test_execute_whenPausedReverts() public {
-        AeroFarmingCore.OrderParams memory p = _adjustParams();
+        OrderParams memory p = _adjustParams();
         vm.prank(admin);
-        helper.pause();
+        router.pause();
         vm.prank(operator);
         vm.expectRevert(bytes("Pausable: paused"));
-        automation.executeOrder(p);
+        _executeOrder(p);
     }
 
-    function test_module_directCallCannotAct() public {
-        AeroFarmingCore.OrderParams memory p = _adjustParams(); // a valid order signed by the stake owner
+    function test_logic_directCallCannotAct() public {
+        OrderParams memory p = _adjustParams(); // a valid order signed by the stake owner
         uint128 liq = _liq();
-        bytes32 role = moduleImpl.OPERATOR_ROLE();
-        // no roles exist in the module's own storage, so even the proxy's operator is rejected
-        assertFalse(moduleImpl.hasRole(role, operator));
-        assertFalse(moduleImpl.hasRole(moduleImpl.DEFAULT_ADMIN_ROLE(), admin));
-        vm.expectRevert(
-            bytes(
-                string.concat(
-                    "AccessControl: account ",
-                    Strings.toHexString(operator),
-                    " is missing role ",
-                    Strings.toHexString(uint256(role), 32)
-                )
-            )
-        );
+        // the logic has no roles, no order check and no recorded automation account of its own: a direct call
+        // to its automated entry is rejected before anything else
+        vm.expectRevert(IAeroFarmingLogic.NotDelegateCall.selector);
         vm.prank(operator);
-        moduleImpl.executeOrder(p);
+        logic.executeAutomated(p.action, p.account, p.gauge, p.tokenId, p.actionData);
 
-        // the module has no initialize (no fallback either) and its initializers are disabled
+        // the logic has no initialize (no fallback either)
         bytes memory init = abi.encodeCall(
-            AeroFarmingHelper.initialize,
-            (operator, operator, operator, V3UTILS, GAUGE_FACTORY, AERO, true, WETH, STRUCT_HASH, address(moduleImpl))
+            AeroFarmingRouter.initialize,
+            (operator, operator, operator, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH)
         );
         vm.prank(operator);
-        (bool ok, bytes memory ret) = address(moduleImpl).call(init);
+        (bool ok, bytes memory ret) = address(logic).call(init);
         assertFalse(ok);
         assertEq(ret.length, 0);
-        assertEq(uint256(vm.load(address(moduleImpl), bytes32(0))) & 0xff, type(uint8).max);
-        assertFalse(moduleImpl.hasRole(role, operator));
 
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(_liq(), liq);
@@ -400,11 +386,11 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
 
     function test_execute_invalidGaugeReverts() public {
         address fake = address(new FakeGaugeAlwaysStaked());
-        AeroFarmingCore.OrderParams memory p = _adjustParams();
+        OrderParams memory p = _adjustParams();
         p.gauge = fake;
         vm.prank(operator);
-        vm.expectRevert(AeroFarmingCore.InvalidGauge.selector);
-        automation.executeOrder(p);
+        vm.expectRevert(IAeroFarmingLogic.InvalidGauge.selector);
+        _executeOrder(p);
     }
 }
 
@@ -413,14 +399,14 @@ contract AeroFarmingHelperAutoCompoundTest is AutomationBase {
 
     function setUp() public {
         _forkBase();
-        _deployHelper(AERO, true, WETH);
+        _deployRouter(AERO, true, WETH);
         (user, userKey) = makeAddrAndKey("aeroOrderCompoundUser");
         deal(AERO, user, 100_000 ether);
         deal(WETH, user, 100 ether);
         _approveGauge(user, GAUGE_B_BASE, true);
         vm.startPrank(user);
-        IERC20(AERO).approve(address(helper), type(uint256).max);
-        IERC20(WETH).approve(address(helper), type(uint256).max);
+        IERC20(AERO).approve(address(router), type(uint256).max);
+        IERC20(WETH).approve(address(router), type(uint256).max);
         vm.stopPrank();
         int24 base = _mint(GAUGE_B_BASE, POOL_B_BASE, AERO, WETH, TS, 10_000 ether, 10 ether, 10);
         // sell AERO until the tick is below the range so the claim can be added with no swap
@@ -440,52 +426,51 @@ contract AeroFarmingHelperAutoCompoundTest is AutomationBase {
         uint256 claimed = ICLGauge(GAUGE_B_BASE).earned(user, ids);
         assertGt(claimed, 0);
         (,,,,,,, uint128 l0,,,,) = INonfungiblePositionManager(NFPM).positions(id);
-        AeroFarmingCore.CompoundParams memory c;
+        IAeroFarmingLogic.CompoundParams memory c;
         c.deadline = block.timestamp + 1 hours;
         c.performanceFeeX64 = 1 << 62;
         uint256 expectedFee = FullMath.mulDiv(claimed, c.performanceFeeX64, 2 ** 64);
         assertGt(expectedFee, 0);
         address feeTaker = V3Utils(payable(V3UTILS)).FEE_TAKER();
         uint256 ft0 = IERC20(AERO).balanceOf(feeTaker);
-        AeroFarmingCore.OrderParams memory p =
-            _params(AeroFarmingCore.AutoAction.AUTO_COMPOUND, GAUGE_B_BASE, abi.encode(c), user);
+        OrderParams memory p = _params(IAeroFarmingLogic.AutoAction.AUTO_COMPOUND, GAUGE_B_BASE, abi.encode(c), user);
         vm.recordLogs();
         vm.prank(operator);
-        automation.executeOrder(p);
+        _executeOrder(p);
         (,,,,,,, uint128 l1,,,,) = INonfungiblePositionManager(NFPM).positions(id);
         assertGt(l1, l0);
         assertEq(IERC20(AERO).balanceOf(feeTaker) - ft0, expectedFee);
         assertTrue(ICLGauge(GAUGE_B_BASE).stakedContains(user, id));
-        assertEq(IERC20(AERO).balanceOf(address(helper)), 0);
-        assertEq(IERC20(WETH).balanceOf(address(helper)), 0);
-        assertEq(IERC721(NFPM).balanceOf(address(helper)), 0);
-        (uint256 found,) = _farmActions(vm.getRecordedLogs(), id, AeroFarmingCore.Action.COMPOUND, true);
+        assertEq(IERC20(AERO).balanceOf(address(router)), 0);
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0);
+        assertEq(IERC721(NFPM).balanceOf(address(router)), 0);
+        (uint256 found,) = _farmActions(vm.getRecordedLogs(), id, IAeroFarmingLogic.Action.COMPOUND, true);
         assertEq(found, 1);
     }
 }
 
-/// @dev AUTO_COMPOUND where the reward (AERO) is not a pool token: amount2 path, swaps through the etched router.
+/// @dev AUTO_COMPOUND where the reward (AERO) is not a pool token: amount2 path, swaps through the etched swapRouter.
 contract AeroFarmingHelperAutoCompoundGaugeATest is AutomationBase {
     int24 constant TS = 50;
-    address internal router;
+    address internal swapRouter;
 
     function setUp() public {
         _forkBase();
-        _deployHelper(AERO, true, WETH);
+        _deployRouter(AERO, true, WETH);
         (user, userKey) = makeAddrAndKey("aeroOrderCompoundAUser");
         deal(WETH, user, 10 ether);
         deal(USDC_BASE, user, 50_000e6);
         _approveGauge(user, GAUGE_A_BASE, true);
         vm.startPrank(user);
-        IERC20(WETH).approve(address(helper), type(uint256).max);
-        IERC20(USDC_BASE).approve(address(helper), type(uint256).max);
+        IERC20(WETH).approve(address(router), type(uint256).max);
+        IERC20(USDC_BASE).approve(address(router), type(uint256).max);
         vm.stopPrank();
         _mint(GAUGE_A_BASE, POOL_A_BASE, WETH, USDC_BASE, TS, 1 ether, 5000e6, 10);
-        // V3Utils reads its own swapRouter from storage, so the mock code goes at the real router address
-        router = V3Utils(payable(V3UTILS)).swapRouter();
-        vm.etch(router, address(new MockSwapRouter()).code);
-        deal(WETH, router, 100 ether);
-        deal(USDC_BASE, router, 1_000_000e6);
+        // V3Utils reads its own swapRouter from storage, so the mock code goes at the real swapRouter address
+        swapRouter = V3Utils(payable(V3UTILS)).swapRouter();
+        vm.etch(swapRouter, address(new MockSwapRouter()).code);
+        deal(WETH, swapRouter, 100 ether);
+        deal(USDC_BASE, swapRouter, 1_000_000e6);
     }
 
     function test_autoCompound_gaugeA_rewardNotPoolToken() public {
@@ -493,7 +478,7 @@ contract AeroFarmingHelperAutoCompoundGaugeATest is AutomationBase {
         ids[0] = id;
         uint256 claimed = ICLGauge(GAUGE_A_BASE).earned(user, ids);
         assertGt(claimed, 0);
-        AeroFarmingCore.CompoundParams memory c;
+        IAeroFarmingLogic.CompoundParams memory c;
         c.deadline = block.timestamp + 1 hours;
         c.performanceFeeX64 = 1 << 62;
         uint256 fee = FullMath.mulDiv(claimed, c.performanceFeeX64, 2 ** 64);
@@ -508,19 +493,18 @@ contract AeroFarmingHelperAutoCompoundGaugeATest is AutomationBase {
         address feeTaker = V3Utils(payable(V3UTILS)).FEE_TAKER();
         uint256 ft0 = IERC20(AERO).balanceOf(feeTaker);
         uint256 uA = IERC20(AERO).balanceOf(user);
-        AeroFarmingCore.OrderParams memory p =
-            _params(AeroFarmingCore.AutoAction.AUTO_COMPOUND, GAUGE_A_BASE, abi.encode(c), user);
+        OrderParams memory p = _params(IAeroFarmingLogic.AutoAction.AUTO_COMPOUND, GAUGE_A_BASE, abi.encode(c), user);
 
         vm.recordLogs();
         vm.prank(operator);
-        automation.executeOrder(p);
+        _executeOrder(p);
 
         (,,,,,,, uint128 l1,,,,) = INonfungiblePositionManager(NFPM).positions(id);
         assertGt(l1, l0, "liquidity not increased");
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(IERC20(AERO).balanceOf(feeTaker) - ft0, fee, "performance fee");
         assertEq(IERC20(AERO).balanceOf(user) - uA, net - c.amountIn0 - c.amountIn1, "unswapped AERO swept to user");
-        address h = address(helper);
+        address h = address(router);
         assertEq(IERC20(AERO).balanceOf(h), 0);
         assertEq(IERC20(WETH).balanceOf(h), 0);
         assertEq(IERC20(USDC_BASE).balanceOf(h), 0);
@@ -528,7 +512,7 @@ contract AeroFarmingHelperAutoCompoundGaugeATest is AutomationBase {
         assertEq(IERC20(AERO).allowance(h, V3UTILS), 0);
         assertEq(IERC20(WETH).allowance(h, V3UTILS), 0);
         assertEq(IERC20(USDC_BASE).allowance(h, V3UTILS), 0);
-        (uint256 found,) = _farmActions(vm.getRecordedLogs(), id, AeroFarmingCore.Action.COMPOUND, true);
+        (uint256 found,) = _farmActions(vm.getRecordedLogs(), id, IAeroFarmingLogic.Action.COMPOUND, true);
         assertEq(found, 1);
     }
 }
@@ -543,14 +527,14 @@ contract AeroFarmingHelperAutoHarvestTest is AutomationBase {
 
     function setUp() public {
         _forkBase();
-        _deployHelper(AERO, true, WETH);
+        _deployRouter(AERO, true, WETH);
         (user, userKey) = makeAddrAndKey("aeroOrderHarvestUser");
         deal(AERO, user, 100_000 ether);
         deal(WETH, user, 100 ether);
         _approveGauge(user, GAUGE_B_BASE, true);
         vm.startPrank(user);
-        IERC20(AERO).approve(address(helper), type(uint256).max);
-        IERC20(WETH).approve(address(helper), type(uint256).max);
+        IERC20(AERO).approve(address(router), type(uint256).max);
+        IERC20(WETH).approve(address(router), type(uint256).max);
         vm.stopPrank();
         _mint(GAUGE_B_BASE, POOL_B_BASE, AERO, WETH, TS, 10_000 ether, 10 ether, 10);
         feeTaker = V3Utils(payable(V3UTILS)).FEE_TAKER();
@@ -562,19 +546,15 @@ contract AeroFarmingHelperAutoHarvestTest is AutomationBase {
         return ICLGauge(GAUGE_B_BASE).earned(user, ids);
     }
 
-    function _harvestOrder(AeroFarmingCore.HarvestParams memory h)
-        internal
-        view
-        returns (AeroFarmingCore.OrderParams memory)
-    {
-        return _params(AeroFarmingCore.AutoAction.AUTO_HARVEST, GAUGE_B_BASE, abi.encode(h), user);
+    function _harvestOrder(IAeroFarmingLogic.HarvestParams memory h) internal view returns (OrderParams memory) {
+        return _params(IAeroFarmingLogic.AutoAction.AUTO_HARVEST, GAUGE_B_BASE, abi.encode(h), user);
     }
 
     function _assertHarvestLogs(Vm.Log[] memory logs, uint256 claimed, uint256 fee, uint64 feeX64) internal view {
         uint256 fees;
         uint256 actions;
         for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter != address(helper)) continue;
+            if (logs[i].emitter != address(router)) continue;
             if (logs[i].topics[0] == DeductFees.selector) {
                 ++fees;
                 assertEq(logs[i].topics[1], bytes32(uint256(uint160(NFPM))));
@@ -597,10 +577,10 @@ contract AeroFarmingHelperAutoHarvestTest is AutomationBase {
                 assertEq(logs[i].topics[1], bytes32(uint256(uint160(user))));
                 assertEq(logs[i].topics[2], bytes32(uint256(uint160(GAUGE_B_BASE))));
                 assertEq(logs[i].topics[3], bytes32(id));
-                (uint256 newId, AeroFarmingCore.Action a, bool automated) =
-                    abi.decode(logs[i].data, (uint256, AeroFarmingCore.Action, bool));
+                (uint256 newId, IAeroFarmingLogic.Action a, bool automated) =
+                    abi.decode(logs[i].data, (uint256, IAeroFarmingLogic.Action, bool));
                 assertEq(newId, id);
-                assertEq(uint8(a), uint8(AeroFarmingCore.Action.HARVEST));
+                assertEq(uint8(a), uint8(IAeroFarmingLogic.Action.HARVEST));
                 assertTrue(automated);
             }
         }
@@ -611,131 +591,131 @@ contract AeroFarmingHelperAutoHarvestTest is AutomationBase {
     function test_autoHarvest_noSwap_paysAeroMinusGasFee() public {
         uint256 claimed = _earned();
         assertGt(claimed, 0);
-        AeroFarmingCore.HarvestParams memory h;
+        IAeroFarmingLogic.HarvestParams memory h;
         h.gasFeeX64 = 1 << 62;
         uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
         assertGt(fee, 0);
-        AeroFarmingCore.OrderParams memory p = _harvestOrder(h);
+        OrderParams memory p = _harvestOrder(h);
         uint256 u0 = IERC20(AERO).balanceOf(user);
         uint256 ft0 = IERC20(AERO).balanceOf(feeTaker);
         vm.recordLogs();
         vm.prank(operator);
-        automation.executeOrder(p);
+        _executeOrder(p);
         assertEq(IERC20(AERO).balanceOf(user) - u0, claimed - fee);
         assertEq(IERC20(AERO).balanceOf(feeTaker) - ft0, fee);
-        assertEq(IERC20(AERO).balanceOf(address(helper)), 0);
-        assertEq(IERC721(NFPM).balanceOf(address(helper)), 0);
+        assertEq(IERC20(AERO).balanceOf(address(router)), 0);
+        assertEq(IERC721(NFPM).balanceOf(address(router)), 0);
         assertTrue(ICLGauge(GAUGE_B_BASE).stakedContains(user, id));
         assertEq(IERC721(NFPM).ownerOf(id), GAUGE_B_BASE);
         _assertHarvestLogs(vm.getRecordedLogs(), claimed, fee, h.gasFeeX64);
     }
 
     function test_autoHarvest_gasFeeAboveCapReverts() public {
-        AeroFarmingCore.HarvestParams memory h;
+        IAeroFarmingLogic.HarvestParams memory h;
         h.gasFeeX64 = 5534023222112865280 + 1;
-        AeroFarmingCore.OrderParams memory p = _harvestOrder(h);
+        OrderParams memory p = _harvestOrder(h);
         vm.prank(operator);
-        vm.expectRevert(AeroFarmingCore.FeeTooHigh.selector);
-        automation.executeOrder(p);
+        vm.expectRevert(IAeroFarmingLogic.FeeTooHigh.selector);
+        _executeOrder(p);
     }
 
     function test_autoHarvest_swapPath_routerCalled() public {
         uint256 claimed = _earned();
-        AeroFarmingCore.HarvestParams memory h;
+        IAeroFarmingLogic.HarvestParams memory h;
         h.gasFeeX64 = 1 << 62;
         h.targetToken = WETH;
         h.amountOutMin = 1 ether;
         uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
-        address router = makeAddr("aeroMockRouter");
-        vm.etch(router, address(new MockSwapRouter()).code);
-        vm.mockCall(V3UTILS, abi.encodeWithSignature("swapRouter()"), abi.encode(router));
-        deal(WETH, router, 5 ether);
+        address swapRouter = makeAddr("aeroMockRouter");
+        vm.etch(swapRouter, address(new MockSwapRouter()).code);
+        vm.mockCall(V3UTILS, abi.encodeWithSignature("swapRouter()"), abi.encode(swapRouter));
+        deal(WETH, swapRouter, 5 ether);
         h.swapData = abi.encodeCall(MockSwapRouter.swap, (IERC20(AERO), IERC20(WETH), 2 ether));
-        AeroFarmingCore.OrderParams memory p = _harvestOrder(h);
+        OrderParams memory p = _harvestOrder(h);
         uint256 uA = IERC20(AERO).balanceOf(user);
         uint256 uW = IERC20(WETH).balanceOf(user);
         vm.prank(operator);
-        automation.executeOrder(p);
+        _executeOrder(p);
         assertEq(IERC20(WETH).balanceOf(user) - uW, 2 ether);
         assertEq(IERC20(AERO).balanceOf(user), uA); // all post-fee AERO went into the swap
-        assertEq(IERC20(AERO).balanceOf(router), claimed - fee);
-        assertEq(IERC20(AERO).allowance(address(helper), router), 0);
-        assertEq(IERC20(AERO).balanceOf(address(helper)), 0);
-        assertEq(IERC20(WETH).balanceOf(address(helper)), 0);
+        assertEq(IERC20(AERO).balanceOf(swapRouter), claimed - fee);
+        assertEq(IERC20(AERO).allowance(address(router), swapRouter), 0);
+        assertEq(IERC20(AERO).balanceOf(address(router)), 0);
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0);
         assertTrue(ICLGauge(GAUGE_B_BASE).stakedContains(user, id));
     }
 
     function test_autoHarvest_swapBelowMinReverts() public {
-        AeroFarmingCore.HarvestParams memory h;
+        IAeroFarmingLogic.HarvestParams memory h;
         h.targetToken = WETH;
         h.amountOutMin = 3 ether;
-        address router = makeAddr("aeroMockRouter2");
-        vm.etch(router, address(new MockSwapRouter()).code);
-        vm.mockCall(V3UTILS, abi.encodeWithSignature("swapRouter()"), abi.encode(router));
-        deal(WETH, router, 5 ether);
+        address swapRouter = makeAddr("aeroMockRouter2");
+        vm.etch(swapRouter, address(new MockSwapRouter()).code);
+        vm.mockCall(V3UTILS, abi.encodeWithSignature("swapRouter()"), abi.encode(swapRouter));
+        deal(WETH, swapRouter, 5 ether);
         h.swapData = abi.encodeCall(MockSwapRouter.swap, (IERC20(AERO), IERC20(WETH), 2 ether));
-        AeroFarmingCore.OrderParams memory p = _harvestOrder(h);
+        OrderParams memory p = _harvestOrder(h);
         vm.prank(operator);
-        vm.expectRevert(AeroFarmingCore.SlippageError.selector);
-        automation.executeOrder(p);
+        vm.expectRevert(IAeroFarmingLogic.SlippageError.selector);
+        _executeOrder(p);
     }
 
-    function _etchRouter(string memory label, address routerCode) internal returns (address router) {
-        router = makeAddr(label);
-        vm.etch(router, routerCode.code);
-        vm.mockCall(V3UTILS, abi.encodeWithSignature("swapRouter()"), abi.encode(router));
+    function _etchRouter(string memory label, address routerCode) internal returns (address swapRouter) {
+        swapRouter = makeAddr(label);
+        vm.etch(swapRouter, routerCode.code);
+        vm.mockCall(V3UTILS, abi.encodeWithSignature("swapRouter()"), abi.encode(swapRouter));
     }
 
     function test_autoHarvest_routerReverts_swapFailed() public {
-        AeroFarmingCore.HarvestParams memory h;
+        IAeroFarmingLogic.HarvestParams memory h;
         h.targetToken = WETH;
-        // the router holds no WETH, so its payout reverts
+        // the swapRouter holds no WETH, so its payout reverts
         _etchRouter("aeroRevertRouter", address(new MockSwapRouter()));
         h.swapData = abi.encodeCall(MockSwapRouter.swap, (IERC20(AERO), IERC20(WETH), 2 ether));
-        AeroFarmingCore.OrderParams memory p = _harvestOrder(h);
+        OrderParams memory p = _harvestOrder(h);
         vm.prank(operator);
-        vm.expectRevert(abi.encodeWithSelector(AeroFarmingCore.SwapFailed.selector, h.swapData, 0));
-        automation.executeOrder(p);
+        vm.expectRevert(abi.encodeWithSelector(IAeroFarmingLogic.SwapFailed.selector, h.swapData, 0));
+        _executeOrder(p);
     }
 
     function test_autoHarvest_partialFill_leftoverToUser() public {
         uint256 claimed = _earned();
-        AeroFarmingCore.HarvestParams memory h;
+        IAeroFarmingLogic.HarvestParams memory h;
         h.gasFeeX64 = 1 << 62;
         h.targetToken = WETH;
         uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
         uint256 net = claimed - fee;
         uint256 pulled = net / 4;
-        address router = _etchRouter("aeroPartialRouter", address(new PartialFillRouter()));
-        deal(WETH, router, 5 ether);
+        address swapRouter = _etchRouter("aeroPartialRouter", address(new PartialFillRouter()));
+        deal(WETH, swapRouter, 5 ether);
         h.swapData = abi.encodeCall(PartialFillRouter.swap, (IERC20(AERO), IERC20(WETH), pulled, 2 ether));
-        AeroFarmingCore.OrderParams memory p = _harvestOrder(h);
+        OrderParams memory p = _harvestOrder(h);
         uint256 uA = IERC20(AERO).balanceOf(user);
         uint256 uW = IERC20(WETH).balanceOf(user);
         vm.prank(operator);
-        automation.executeOrder(p);
+        _executeOrder(p);
         assertEq(IERC20(WETH).balanceOf(user) - uW, 2 ether);
         assertEq(IERC20(AERO).balanceOf(user) - uA, net - pulled, "unpulled reward goes to the user");
-        assertEq(IERC20(AERO).balanceOf(router), pulled);
-        assertEq(IERC20(AERO).allowance(address(helper), router), 0);
-        assertEq(IERC20(AERO).balanceOf(address(helper)), 0);
-        assertEq(IERC20(WETH).balanceOf(address(helper)), 0);
+        assertEq(IERC20(AERO).balanceOf(swapRouter), pulled);
+        assertEq(IERC20(AERO).allowance(address(router), swapRouter), 0);
+        assertEq(IERC20(AERO).balanceOf(address(router)), 0);
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0);
     }
 
     function test_autoHarvest_targetIsReward_noSwap() public {
         uint256 claimed = _earned();
-        AeroFarmingCore.HarvestParams memory h;
+        IAeroFarmingLogic.HarvestParams memory h;
         h.gasFeeX64 = 1 << 62;
         h.targetToken = AERO;
         h.swapData = hex"deadbeef"; // would fail if a swap were attempted
         uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
-        AeroFarmingCore.OrderParams memory p = _harvestOrder(h);
+        OrderParams memory p = _harvestOrder(h);
         uint256 uA = IERC20(AERO).balanceOf(user);
         vm.expectCall(V3UTILS, abi.encodeWithSignature("swapRouter()"), 0);
         vm.prank(operator);
-        automation.executeOrder(p);
+        _executeOrder(p);
         assertEq(IERC20(AERO).balanceOf(user) - uA, claimed - fee);
-        assertEq(IERC20(AERO).balanceOf(address(helper)), 0);
+        assertEq(IERC20(AERO).balanceOf(address(router)), 0);
     }
 }
 

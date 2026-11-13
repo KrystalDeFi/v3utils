@@ -3,11 +3,8 @@ pragma solidity ^0.8.0;
 
 import "./AeroForkBase.sol";
 import "../../script/AeroFarmingHelper.s.sol";
-import "../../src/aero/IAeroAutomation.sol";
 
 contract AeroFarmingHelperDeployTest is AeroForkBase {
-    bytes32 constant IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
-
     function test_deployScript_base() public {
         _forkBase();
         address adm = makeAddr("deployAdmin");
@@ -24,7 +21,6 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
         vm.setEnv("COMPOUND_ENABLED", "true");
         vm.setEnv("NATIVE_WETH", vm.toString(WETH));
-        vm.setEnv("STRUCT_HASH", vm.toString(STRUCT_HASH));
 
         // env is process-global and forge runs tests in parallel, so the zero-address check shares this test
         AeroFarmingHelperScript script = new AeroFarmingHelperScript();
@@ -37,20 +33,16 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         script.run();
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        // the proxy is the ERC1967Proxy whose Upgraded event is emitted by it
-        address proxy;
-        for (uint256 i; i < logs.length; i++) {
-            if (logs[i].topics[0] == keccak256("Upgraded(address)")) proxy = logs[i].emitter;
-        }
-        assertTrue(proxy != address(0), "proxy found");
-        AeroFarmingHelper h = AeroFarmingHelper(payable(proxy));
+        // the router is the emitter of ImplementationSet (emitted by initialize)
+        address proxy = _routerFrom(logs);
+        assertTrue(proxy != address(0), "router found");
+        AeroFarmingRouter h = AeroFarmingRouter(payable(proxy));
 
         assertEq(h.v3utils(), V3UTILS);
-        assertEq(address(h.gaugeFactory()), GAUGE_FACTORY);
+        assertEq(h.gaugeFactory(), GAUGE_FACTORY);
         assertEq(h.rewardToken(), AERO);
         assertTrue(h.compoundEnabled());
         assertEq(h.weth(), WETH);
-        assertEq(h.structHash(), STRUCT_HASH);
         assertTrue(h.hasRole(h.DEFAULT_ADMIN_ROLE(), adm));
         assertTrue(h.hasRole(h.OPERATOR_ROLE(), op));
         assertTrue(h.hasRole(h.WITHDRAWER_ROLE(), wd));
@@ -66,13 +58,12 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         assertFalse(h.hasRole(wRole, op));
         assertFalse(h.hasRole(aRole, wd));
         assertFalse(h.hasRole(oRole, wd));
-        assertTrue(h.automationModule() != address(0));
-        assertGt(h.automationModule().code.length, 0);
-        address impl = address(uint160(uint256(vm.load(proxy, IMPL_SLOT))));
+        address impl = h.implementation();
         assertGt(impl.code.length, 0);
-        assertTrue(impl != h.automationModule());
-        // the operator path works through the deployed proxy
-        assertEq(IAeroAutomation(proxy).domainSeparator(), AeroAutomationModule(proxy).domainSeparator());
+        assertTrue(impl != proxy);
+        assertFalse(h.implementationLocked());
+        // the operator path's domain is bound to the deployed router
+        assertEq(h.DOMAIN_SEPARATOR(), _domain(proxy));
 
         // Base: COMPOUND_ENABLED must be true (env is process-global, so restored right after)
         vm.setEnv("COMPOUND_ENABLED", "false");
@@ -90,49 +81,67 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         vm.recordLogs();
         script.run();
         logs = vm.getRecordedLogs();
-        proxy = address(0);
-        for (uint256 i; i < logs.length; i++) {
-            if (logs[i].topics[0] == keccak256("Upgraded(address)")) proxy = logs[i].emitter;
-        }
-        assertEq(AeroFarmingHelper(payable(proxy)).rewardToken(), XAERO);
-        assertFalse(AeroFarmingHelper(payable(proxy)).compoundEnabled());
+        proxy = _routerFrom(logs);
+        assertEq(AeroFarmingRouter(payable(proxy)).rewardToken(), XAERO);
+        assertFalse(AeroFarmingRouter(payable(proxy)).compoundEnabled());
         vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
         vm.setEnv("COMPOUND_ENABLED", "true");
     }
 
-    function test_automationInterface_throughProxy() public {
-        _forkBase();
-        _deployHelper(AERO, true, WETH);
-        bytes32 expected = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256("AeroFarmingHelper"),
-                keccak256("1"),
-                block.chainid,
-                address(helper)
-            )
-        );
-        assertEq(IAeroAutomation(address(helper)).domainSeparator(), expected);
-        assertFalse(IAeroAutomation(address(helper)).isOrderCancelled(address(this), bytes32(uint256(1))));
+    function _routerFrom(Vm.Log[] memory logs) internal pure returns (address router_) {
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].topics[0] == keccak256("ImplementationSet(address)")) router_ = logs[i].emitter;
+        }
     }
 
-    /// An IAeroAutomation selector defined on the helper itself would shadow the module. A helper with the
-    /// module unset answers unknown selectors with ModuleNotSet, so reaching that revert proves the helper
-    /// has no function of its own for the selector.
-    function test_automationSelectors_notShadowedByHelper() public {
+    function _domain(address verifyingContract) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("AeroFarmingRouter"),
+                keccak256("1"),
+                block.chainid,
+                verifyingContract
+            )
+        );
+    }
+
+    function test_orderInterface_onRouter() public {
         _forkBase();
-        AeroFarmingHelper impl = new AeroFarmingHelper(); // implementation: automationModule is unset
-        bytes4[5] memory sels = [
-            IAeroAutomation.executeOrder.selector,
-            IAeroAutomation.cancelOrder.selector,
-            IAeroAutomation.isOrderCancelled.selector,
-            IAeroAutomation.domainSeparator.selector,
-            IAeroAutomation.hashOrder.selector
+        _deployRouter(AERO, true, WETH);
+        assertEq(router.DOMAIN_SEPARATOR(), _domain(address(router)));
+        assertFalse(router.isOrderCancelled(address(this), bytes32(uint256(1))));
+    }
+
+    /// The logic must expose none of the router's admin, role or order functions: everything reachable through
+    /// `execute` is a flow. Called on the logic directly, a function it has would revert NotDelegateCall (or
+    /// return, for a view); an empty revert means it has no such function (and no fallback).
+    function test_logic_hasNoRouterOnlySelectors() public {
+        _forkBase();
+        AeroFarmingLogic l = new AeroFarmingLogic();
+        bytes4[17] memory sels = [
+            AeroFarmingRouter.initialize.selector,
+            AeroFarmingRouter.setImplementation.selector,
+            AeroFarmingRouter.lockImplementation.selector,
+            AeroFarmingRouter.setV3Utils.selector,
+            AeroFarmingRouter.pause.selector,
+            AeroFarmingRouter.unpause.selector,
+            AeroFarmingRouter.withdrawERC20.selector,
+            AeroFarmingRouter.withdrawERC721.selector,
+            AeroFarmingRouter.withdrawNative.selector,
+            AeroFarmingRouter.cancelOrder.selector,
+            AeroFarmingRouter.executeAutomation.selector,
+            AeroFarmingRouter.execute.selector,
+            IAccessControl.grantRole.selector,
+            IAccessControl.revokeRole.selector,
+            IAccessControl.renounceRole.selector,
+            IERC721Receiver.onERC721Received.selector,
+            bytes4(keccak256("upgradeTo(address)"))
         ];
         for (uint256 i; i < sels.length; i++) {
-            (bool ok, bytes memory ret) = address(impl).call(abi.encodePacked(sels[i], new bytes(256)));
+            (bool ok, bytes memory ret) = address(l).call(abi.encodePacked(sels[i], new bytes(256)));
             assertFalse(ok, "must revert");
-            assertEq(bytes4(ret), AeroFarmingCore.ModuleNotSet.selector, "selector served by helper itself");
+            assertEq(ret.length, 0, "logic has a router-only selector");
         }
     }
 }
