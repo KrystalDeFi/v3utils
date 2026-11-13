@@ -36,6 +36,7 @@ abstract contract AeroForkBase is Test {
     address internal admin;
     address internal operator;
     address internal withdrawer;
+    address internal pauser;
     AeroFarmingRouter internal router;
     AeroFarmingLogic internal logic; // the logic implementation (never called directly in production)
 
@@ -66,11 +67,21 @@ abstract contract AeroForkBase is Test {
         admin = makeAddr("admin");
         operator = makeAddr("operator");
         withdrawer = makeAddr("withdrawer");
+        pauser = makeAddr("pauser");
         logic = new AeroFarmingLogic();
         router = new AeroFarmingRouter();
         vm.prank(tx.origin);
         router.initialize(
-            admin, operator, withdrawer, address(logic), V3UTILS, GAUGE_FACTORY, rewardToken, compoundEnabled, weth
+            admin,
+            operator,
+            withdrawer,
+            pauser,
+            address(logic),
+            V3UTILS,
+            GAUGE_FACTORY,
+            rewardToken,
+            compoundEnabled,
+            weth
         );
         return router;
     }

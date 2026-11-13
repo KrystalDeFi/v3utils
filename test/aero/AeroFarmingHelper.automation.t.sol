@@ -354,7 +354,7 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
 
     function test_execute_whenPausedReverts() public {
         OrderParams memory p = _adjustParams();
-        vm.prank(admin);
+        vm.prank(pauser);
         router.pause();
         vm.prank(operator);
         vm.expectRevert(bytes("Pausable: paused"));
@@ -373,7 +373,7 @@ contract AeroFarmingHelperAutomationTest is AutomationBase {
         // the logic has no initialize (no fallback either)
         bytes memory init = abi.encodeCall(
             AeroFarmingRouter.initialize,
-            (operator, operator, operator, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH)
+            (operator, operator, operator, operator, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH)
         );
         vm.prank(operator);
         (bool ok, bytes memory ret) = address(logic).call(init);

@@ -13,6 +13,7 @@ contract AeroFarmingRouterScript is Script {
         address admin = _required("ADMIN");
         address operator = _required("OPERATOR");
         address withdrawer = _required("WITHDRAWER");
+        address pauser = _required("PAUSER");
         address v3utils = _required("V3UTILS");
         address gaugeFactory = _required("GAUGE_FACTORY");
         address rewardToken = _required("REWARD_TOKEN");
@@ -32,6 +33,7 @@ contract AeroFarmingRouterScript is Script {
             admin,
             operator,
             withdrawer,
+            pauser,
             address(logic),
             v3utils,
             gaugeFactory,

@@ -10,12 +10,14 @@ contract AeroFarmingRouterDeployTest is AeroForkBase {
         address adm = makeAddr("deployAdmin");
         address op = makeAddr("deployOperator");
         address wd = makeAddr("deployWithdrawer");
+        address ps = makeAddr("deployPauser");
         uint256 pk = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
         address deployer = vm.addr(pk);
         vm.setEnv("PRIVATE_KEY", vm.toString(bytes32(pk)));
         vm.setEnv("ADMIN", vm.toString(adm));
         vm.setEnv("OPERATOR", vm.toString(op));
         vm.setEnv("WITHDRAWER", vm.toString(wd));
+        vm.setEnv("PAUSER", vm.toString(ps));
         vm.setEnv("V3UTILS", vm.toString(V3UTILS));
         vm.setEnv("GAUGE_FACTORY", vm.toString(GAUGE_FACTORY));
         vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
@@ -28,6 +30,10 @@ contract AeroFarmingRouterDeployTest is AeroForkBase {
         vm.expectRevert(bytes("ADMIN must be non-zero"));
         script.run();
         vm.setEnv("ADMIN", vm.toString(adm));
+        vm.setEnv("PAUSER", vm.toString(address(0)));
+        vm.expectRevert(bytes("PAUSER must be non-zero"));
+        script.run();
+        vm.setEnv("PAUSER", vm.toString(ps));
 
         vm.recordLogs();
         script.run();
@@ -43,21 +49,16 @@ contract AeroFarmingRouterDeployTest is AeroForkBase {
         assertEq(h.rewardToken(), AERO);
         assertTrue(h.compoundEnabled());
         assertEq(h.weth(), WETH);
-        assertTrue(h.hasRole(h.DEFAULT_ADMIN_ROLE(), adm));
-        assertTrue(h.hasRole(h.OPERATOR_ROLE(), op));
-        assertTrue(h.hasRole(h.WITHDRAWER_ROLE(), wd));
-        bytes32 aRole = h.DEFAULT_ADMIN_ROLE();
-        bytes32 oRole = h.OPERATOR_ROLE();
-        bytes32 wRole = h.WITHDRAWER_ROLE();
-        assertFalse(h.hasRole(aRole, deployer));
-        assertFalse(h.hasRole(oRole, deployer));
-        assertFalse(h.hasRole(wRole, deployer));
-        assertFalse(h.hasRole(oRole, adm));
-        assertFalse(h.hasRole(wRole, adm));
-        assertFalse(h.hasRole(aRole, op));
-        assertFalse(h.hasRole(wRole, op));
-        assertFalse(h.hasRole(aRole, wd));
-        assertFalse(h.hasRole(oRole, wd));
+        // exact role layout: admin holds DEFAULT_ADMIN_ROLE + ADMIN_ROLE, each other role one holder, deployer none
+        bytes32[5] memory roles =
+            [h.DEFAULT_ADMIN_ROLE(), h.ADMIN_ROLE(), h.PAUSER_ROLE(), h.OPERATOR_ROLE(), h.WITHDRAWER_ROLE()];
+        address[5] memory holders = [adm, adm, ps, op, wd];
+        address[5] memory who = [adm, ps, op, wd, deployer];
+        for (uint256 r; r < roles.length; ++r) {
+            for (uint256 a; a < who.length; ++a) {
+                assertEq(h.hasRole(roles[r], who[a]), who[a] == holders[r], "role layout");
+            }
+        }
         address impl = h.implementation();
         assertGt(impl.code.length, 0);
         assertTrue(impl != router_);

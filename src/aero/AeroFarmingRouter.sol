@@ -20,9 +20,16 @@ import "./AeroStorage.sol";
 /// signed order). Roles, pause, reentrancy, order checks, cancel, rescue and the NFT receive guard live here.
 /// @dev Shared config/flow state is in the AeroStorage slot. The router's own storage (roles, pause, reentrancy,
 /// implementation, cancelled orders) is never written by the logic, which declares no storage.
+///
+/// Roles: DEFAULT_ADMIN_ROLE administers roles only; ADMIN_ROLE sets/locks the implementation and V3Utils;
+/// PAUSER_ROLE pauses; OPERATOR_ROLE runs signed orders; WITHDRAWER_ROLE rescues stray assets.
+/// @custom:security ADMIN_ROLE has custody-level power over every approving user's stake until locked; hold it
+/// behind a timelock.
 contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Receiver {
     using SafeERC20 for IERC20;
 
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     bytes32 public constant WITHDRAWER_ROLE = keccak256("WITHDRAWER_ROLE");
     bytes32 internal constant DOMAIN_TYPE_HASH =
@@ -34,19 +41,22 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
     address private immutable _initializer;
 
     address public implementation;
+    /// @notice Set once by `lockImplementation`; then neither `setImplementation` nor `setV3Utils` works again
+    /// (the lock covers both: V3Utils is the other contract that handles users' NFTs).
     bool public implementationLocked;
     bool private _initialized;
     mapping(bytes32 => bool) private _cancelledOrder;
 
     event ConfigUpdated(address v3utils);
     event ImplementationSet(address implementation);
-    event ImplementationLockedForever(address implementation);
+    event ImplementationLockedForever(address implementation, address v3utils);
     event CancelOrder(address user, bytes32 hash, bytes signature);
 
     error NotInitializer();
     error AlreadyInitialized();
     error ImplementationNotSet();
     error InvalidImplementation();
+    /// @dev Raised by `setImplementation` and `setV3Utils` after `lockImplementation`.
     error ImplementationLocked();
     error WrongChainId();
     error WrongPositionManager();
@@ -58,10 +68,13 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
         );
     }
 
+    /// @notice Grants DEFAULT_ADMIN_ROLE + ADMIN_ROLE to `admin`, OPERATOR_ROLE to `operator`, WITHDRAWER_ROLE to
+    /// `withdrawer` and PAUSER_ROLE to `pauser`; the deployer gets no role.
     function initialize(
         address admin,
         address operator,
         address withdrawer,
+        address pauser,
         address implementation_,
         address v3utils_,
         address gaugeFactory_,
@@ -73,8 +86,10 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
         if (_initialized) revert AlreadyInitialized();
         _initialized = true;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(ADMIN_ROLE, admin);
         _grantRole(OPERATOR_ROLE, operator);
         _grantRole(WITHDRAWER_ROLE, withdrawer);
+        _grantRole(PAUSER_ROLE, pauser);
         _setImplementation(implementation_);
         AeroStorage.Layout storage s = AeroStorage.layout();
         s.v3utils = v3utils_;
@@ -136,26 +151,32 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
     // ---------------------------------------------------------------- admin
 
     /// @notice Replace the logic. Config, roles, approvals and signed orders are untouched (they live in the router).
-    function setImplementation(address implementation_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    /// @dev ADMIN_ROLE has custody-level power over every approving user's stake until locked; hold it behind a
+    /// timelock.
+    function setImplementation(address implementation_) external onlyRole(ADMIN_ROLE) {
         _setImplementation(implementation_);
     }
 
-    /// @notice One-way: no further `setImplementation`.
-    function lockImplementation() external onlyRole(DEFAULT_ADMIN_ROLE) {
+    /// @notice One-way: no further `setImplementation` or `setV3Utils`.
+    function lockImplementation() external onlyRole(ADMIN_ROLE) {
         implementationLocked = true;
-        emit ImplementationLockedForever(implementation);
+        emit ImplementationLockedForever(implementation, AeroStorage.layout().v3utils);
     }
 
-    function setV3Utils(address v3utils_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    /// @notice Replace the V3Utils the logic hands NFTs to. Reverts once locked.
+    /// @dev ADMIN_ROLE has custody-level power over every approving user's stake until locked; hold it behind a
+    /// timelock.
+    function setV3Utils(address v3utils_) external onlyRole(ADMIN_ROLE) {
+        if (implementationLocked) revert ImplementationLocked();
         AeroStorage.layout().v3utils = v3utils_;
         emit ConfigUpdated(v3utils_);
     }
 
-    function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function pause() external onlyRole(PAUSER_ROLE) {
         _pause();
     }
 
-    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function unpause() external onlyRole(PAUSER_ROLE) {
         _unpause();
     }
 
