@@ -3,6 +3,24 @@ pragma solidity ^0.8.0;
 
 import "./AeroForkBase.sol";
 
+/// @dev V3Utils stand-in for CHANGE_RANGE that misbehaves: on receiving the old NFT it sends back every NFT in
+/// `extras` (in order, instead of one freshly minted position), then the old NFT, all with plain transferFrom.
+contract MisbehavingV3Utils is IERC721Receiver {
+    uint256[] internal extras;
+
+    function setExtras(uint256[] memory e) external {
+        extras = e;
+    }
+
+    function onERC721Received(address, address from, uint256 tokenId, bytes calldata) external returns (bytes4) {
+        for (uint256 i; i < extras.length; ++i) {
+            IERC721(msg.sender).transferFrom(address(this), from, extras[i]);
+        }
+        IERC721(msg.sender).transferFrom(address(this), from, tokenId);
+        return IERC721Receiver.onERC721Received.selector;
+    }
+}
+
 contract AeroFarmingHelperModifyTest is AeroForkBase {
     address user;
     int24 constant TS = 50;
@@ -406,6 +424,85 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
         _exit(GAUGE_A_BASE, id, ins);
         vm.stopPrank();
+    }
+
+    // ---------------------------------------------------------------- rebalance result checks
+
+    /// @dev Points the router at a MisbehavingV3Utils holding `n` positions minted with ticks [lower, upper].
+    function _misbehavingV3Utils(uint256 n, int24 lower, int24 upper) internal returns (MisbehavingV3Utils m) {
+        m = new MisbehavingV3Utils();
+        address eoa = makeAddr("aeroMisbehavingMinter");
+        deal(WETH, eoa, 1 ether);
+        deal(USDC_BASE, eoa, 5000e6);
+        uint256[] memory ids = new uint256[](n);
+        vm.startPrank(eoa);
+        IERC20(WETH).approve(NFPM, type(uint256).max);
+        IERC20(USDC_BASE).approve(NFPM, type(uint256).max);
+        for (uint256 i; i < n; ++i) {
+            (ids[i],,,) = INonfungiblePositionManager(NFPM).mint(
+                INonfungiblePositionManager.AerodromeMintParams(
+                    WETH, USDC_BASE, TS, lower, upper, 0.1 ether, 500e6, 0, 0, address(m), block.timestamp + 1 hours, 0
+                )
+            );
+        }
+        vm.stopPrank();
+        m.setExtras(ids);
+        vm.prank(admin);
+        router.setV3Utils(address(m));
+    }
+
+    function _assertRebalanceUntouched(uint128 liq) internal view {
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        assertEq(IERC721(NFPM).ownerOf(id), GAUGE_A_BASE);
+        assertEq(_liq(), liq);
+    }
+
+    /// V3Utils returns only the old NFT (no new position): the NFT balance moved by 0, not +1.
+    function test_rebalance_noNewNftReverts() public {
+        V3Utils.Instructions memory ins = _rebalanceIns();
+        uint128 liq = _liq();
+        _misbehavingV3Utils(0, ins.tickLower, ins.tickUpper);
+        vm.prank(user);
+        vm.expectRevert(IAeroFarmingLogic.RebalanceMismatch.selector);
+        _rebalance(GAUGE_A_BASE, id, ins);
+        _assertRebalanceUntouched(liq);
+    }
+
+    /// V3Utils returns two new NFTs (with the requested range) plus the old one: +2, not +1.
+    function test_rebalance_extraNftReverts() public {
+        V3Utils.Instructions memory ins = _rebalanceIns();
+        uint128 liq = _liq();
+        _misbehavingV3Utils(2, ins.tickLower, ins.tickUpper);
+        vm.prank(user);
+        vm.expectRevert(IAeroFarmingLogic.RebalanceMismatch.selector);
+        _rebalance(GAUGE_A_BASE, id, ins);
+        _assertRebalanceUntouched(liq);
+    }
+
+    /// V3Utils returns one new NFT whose range is not the one in `ins`.
+    function test_rebalance_wrongRangeReverts() public {
+        V3Utils.Instructions memory ins = _rebalanceIns();
+        uint128 liq = _liq();
+        _misbehavingV3Utils(1, ins.tickLower - TS, ins.tickUpper);
+        vm.prank(user);
+        vm.expectRevert(IAeroFarmingLogic.RebalanceMismatch.selector);
+        _rebalance(GAUGE_A_BASE, id, ins);
+
+        _misbehavingV3Utils(1, ins.tickLower, ins.tickUpper + TS);
+        vm.prank(user);
+        vm.expectRevert(IAeroFarmingLogic.RebalanceMismatch.selector);
+        _rebalance(GAUGE_A_BASE, id, ins);
+        _assertRebalanceUntouched(liq);
+
+        // control: one new NFT with the requested range passes the checks and is staked for the user
+        MisbehavingV3Utils m = _misbehavingV3Utils(1, ins.tickLower, ins.tickUpper);
+        uint256 expected = INonfungiblePositionManager(NFPM).tokenOfOwnerByIndex(address(m), 0);
+        vm.prank(user);
+        uint256 newId = _rebalance(GAUGE_A_BASE, id, ins);
+        assertEq(newId, expected);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, newId));
+        assertEq(IERC721(NFPM).ownerOf(id), user);
+        assertEq(IERC721(NFPM).balanceOf(address(router)), 0);
     }
 
     function test_unwrapNativeDisabledReverts() public {

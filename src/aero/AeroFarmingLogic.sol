@@ -366,14 +366,14 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         uint256[] memory before = _snapshot(list);
 
         _unstake(gauge, tokenId, account);
+        // NFTs held with the old one in hand, before V3Utils gets it (REBALANCE checks the result against it)
+        uint256 held = action == Action.REBALANCE ? nfpm.balanceOf(address(this)) : 0;
         nfpm.safeTransferFrom(address(this), AeroStorage.layout().v3utils, tokenId, abi.encode(ins));
         if (action == Action.REMOVE_LIQUIDITY) {
             _stake(gauge, nfpm, tokenId, account);
             tokenIdAfter = tokenId;
         } else if (action == Action.REBALANCE) {
-            // V3Utils sends the new NFT first and returns the old one last, so the enumeration ends [..., new, old]
-            tokenIdAfter = nfpm.tokenOfOwnerByIndex(address(this), nfpm.balanceOf(address(this)) - 2);
-            if (tokenIdAfter == tokenId || nfpm.ownerOf(tokenIdAfter) != address(this)) revert UnexpectedNft();
+            tokenIdAfter = _rebalancedId(nfpm, tokenId, ins, held);
             _stake(gauge, nfpm, tokenIdAfter, account);
             nfpm.transferFrom(address(this), account, tokenId);
         } else {
@@ -382,6 +382,23 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         }
         _sweep(list, before, account, unwrap);
         emit FarmAction(account, gauge, tokenId, tokenIdAfter, action, automated);
+    }
+
+    /// @dev The position V3Utils minted for a CHANGE_RANGE. It sends the new NFT first and returns the old one last,
+    /// so exactly one NFT more than `held` is held and the enumeration ends [..., new, old]; the new position must
+    /// have the range `ins` asked for.
+    function _rebalancedId(
+        INonfungiblePositionManager nfpm,
+        uint256 tokenId,
+        V3Utils.Instructions memory ins,
+        uint256 held
+    ) internal view returns (uint256 newId) {
+        uint256 bal = nfpm.balanceOf(address(this));
+        if (bal != held + 1) revert RebalanceMismatch();
+        newId = nfpm.tokenOfOwnerByIndex(address(this), bal - 2);
+        if (newId == tokenId || nfpm.ownerOf(newId) != address(this)) revert UnexpectedNft();
+        (,,,,, int24 tickLower, int24 tickUpper,,,,,) = nfpm.positions(newId);
+        if (tickLower != ins.tickLower || tickUpper != ins.tickUpper) revert RebalanceMismatch();
     }
 
     /// @dev Validates `ins` for `action` against the position and returns the tokens to track.

@@ -79,6 +79,8 @@ interface IAeroFarmingLogic {
     error NotDelegateCall();
     /// @dev `executeAutomated` was reached without the router's executeAutomation recording `account`.
     error NotAutomation();
+    /// @dev After a rebalance V3Utils did not return exactly the old NFT plus one new position with the requested range.
+    error RebalanceMismatch();
 
     /// @notice Zap tokens (and/or native coin) into a new Aero CL position and stake it in `gauge` for the caller.
     function zapInAndStake(address gauge, Common.SwapAndMintParams memory p, bool unwrap)
