@@ -117,9 +117,7 @@ abstract contract AeroForkBase is Test {
         _zapInExpectRevert(0, gauge, p, unwrap);
     }
 
-    function _zapInExpectRevert(uint256 value, address gauge, Common.SwapAndMintParams memory p, bool unwrap)
-        internal
-    {
+    function _zapInExpectRevert(uint256 value, address gauge, Common.SwapAndMintParams memory p, bool unwrap) internal {
         router.execute{value: value}(abi.encodeCall(IAeroFarmingLogic.zapInAndStake, (gauge, p, unwrap)));
     }
 

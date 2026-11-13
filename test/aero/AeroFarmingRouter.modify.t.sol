@@ -439,11 +439,23 @@ contract AeroFarmingRouterModifyTest is AeroForkBase {
         IERC20(WETH).approve(NFPM, type(uint256).max);
         IERC20(USDC_BASE).approve(NFPM, type(uint256).max);
         for (uint256 i; i < n; ++i) {
-            (ids[i],,,) = INonfungiblePositionManager(NFPM).mint(
-                INonfungiblePositionManager.AerodromeMintParams(
-                    WETH, USDC_BASE, TS, lower, upper, 0.1 ether, 500e6, 0, 0, address(m), block.timestamp + 1 hours, 0
-                )
-            );
+            (ids[i],,,) = INonfungiblePositionManager(NFPM)
+                .mint(
+                    INonfungiblePositionManager.AerodromeMintParams(
+                        WETH,
+                        USDC_BASE,
+                        TS,
+                        lower,
+                        upper,
+                        0.1 ether,
+                        500e6,
+                        0,
+                        0,
+                        address(m),
+                        block.timestamp + 1 hours,
+                        0
+                    )
+                );
         }
         vm.stopPrank();
         m.setExtras(ids);
