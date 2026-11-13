@@ -290,7 +290,8 @@ again. Upgradeability (§4) is a backstop, not the plan for automation.
   - a non‑genuine gauge rejected;
   - caller ≠ account rejected;
   - no residual balance on the helper after each flow.
-  - the operator path: valid order, wrong signer, cancelled or expired order, non-operator caller, and an
+  - the operator path: valid order, wrong signer, cancelled order (orders have no on-chain expiry, as in
+    V3Automation), non-operator caller, and
     an order signed by someone other than the tokenId's stake owner;
   - the compound fee lands at `FEE_TAKER` with a `PERFORMANCE_FEE` event naming the user;
   - an upgrade keeps state, and the existing gauge approvals still work afterwards.
@@ -327,7 +328,8 @@ The model is `v4utils/src/V4UtilsRouter.sol`: a fixed router that users approve,
 that the router delegatecalls through **explicit** entry points.
 
 - **`AeroFarmingRouter`** — deployed directly (no proxy, not upgradeable). It is the address users approve on
-  gauges, forever. Holds: AccessControl roles (`DEFAULT_ADMIN_ROLE`, `OPERATOR_ROLE`, `WITHDRAWER_ROLE`), Pausable,
+  gauges, forever. Holds: AccessControl roles (`DEFAULT_ADMIN_ROLE`, `ADMIN_ROLE`, `PAUSER_ROLE`, `OPERATOR_ROLE`,
+  `WITHDRAWER_ROLE`; see "Admin model" below), Pausable,
   ReentrancyGuard, `initialize` (front-run‑guarded like `Common`: only the deploying `tx.origin` may call it),
   config setters, rescue (`withdrawERC20/ERC721/Native`), the NFT receive guard, `receive()` (WETH only), order
   signing/cancel, and two entry points:
@@ -336,7 +338,8 @@ that the router delegatecalls through **explicit** entry points.
     bytes order, bytes signature)` — `OPERATOR_ROLE`. Validates gauge, stake ownership, order, cancel; then the
     **router builds the calldata itself** for the logic's automated entry, records `account` as the authorised
     automation account in shared storage, delegatecalls, and clears it.
-  - `setImplementation(address)` (admin; must have code) and `lockImplementation()` (admin, one‑way), as in v4utils.
+  - `setImplementation(address)` (`ADMIN_ROLE`; must have code) and `lockImplementation()` (`ADMIN_ROLE`, one‑way),
+    as in v4utils. The lock also freezes `setV3Utils`.
 - **`AeroFarmingLogic`** — stateless (immutables only). All flows from §5 and §7. Config and flow state live in a
   namespaced storage struct at a fixed slot (`AeroStorage`, ERC‑7201 style), so the router and any future logic
   share state without inheritance layout coupling. Every external function is `onlyDelegateCall` (reverts when
@@ -346,6 +349,25 @@ that the router delegatecalls through **explicit** entry points.
   since the router is not proxied). Hashing uses the source `StructHash._hash(Order)` internally (no deployed‑library
   address, no linking). Like V4UtilsRouter, the router decodes the order and requires `order.chainId == block.chainid`
   and `order.nfpmAddress == gauge.nft()`; `tokenId` stays unbound (recurring rebalances mint new ids).
-- **Upgrades:** replace the logic with `setImplementation`; optionally freeze with `lockImplementation`. Router code
-  (roles, order checks, cancel) is fixed at deploy — accepted trade‑off, same as v4utils.
+- **Upgrades:** replace the logic with `setImplementation`; optionally freeze with `lockImplementation`, which also
+  freezes `setV3Utils` (one flag, `implementationLocked`, for both: V3Utils is the other contract users' NFTs pass
+  through). Router code (roles, order checks, cancel) is fixed at deploy — accepted trade‑off, same as v4utils.
+- **Admin model** (2026‑11‑13 final review). Roles split as in v4utils, plus a pauser:
+  - `DEFAULT_ADMIN_ROLE` — role administration only (it is the admin role of every other role).
+  - `ADMIN_ROLE` — `setImplementation`, `lockImplementation`, `setV3Utils`.
+  - `PAUSER_ROLE` — `pause`, `unpause`.
+  - `OPERATOR_ROLE` — `executeAutomation`; `WITHDRAWER_ROLE` — `withdrawERC20/ERC721/Native`.
+
+  `initialize(admin, operator, withdrawer, pauser, implementation, v3utils, gaugeFactory, rewardToken,
+  compoundEnabled, weth)` grants `DEFAULT_ADMIN_ROLE` + `ADMIN_ROLE` to `admin` and one role to each of the others;
+  the deployer gets nothing. ADMIN_ROLE has custody-level power over every approving user's stake until locked; hold
+  it behind a timelock. Deployment: `ADMIN` should be a TimelockController in front of the Safe; `PAUSER` can be the
+  Safe or an ops key (pausing must stay fast).
+- **Invariants for future logic** (any `setImplementation` target must keep them):
+  - every external function takes the account from `msg.sender` (user flows through `execute`) or from
+    `AeroStorage.automationAccount` (the automated entry); never from calldata alone;
+  - no self‑delegatecall multicall (it would reuse `msg.value` across calls);
+  - `AeroStorage` fields are append‑only (never reorder, retype or remove);
+  - the router's `_validateGauge` must stay in step with the logic's (same factory and NFT checks), since the router
+    validates the gauge for `executeAutomation` before the logic runs.
 - **Removed:** UUPS proxy, `AeroAutomationModule`, the fallback, `IAeroAutomation`, the `structHash` config.
