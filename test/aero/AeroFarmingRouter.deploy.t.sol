@@ -72,13 +72,25 @@ contract AeroFarmingRouterDeployTest is AeroForkBase {
         script.run();
         vm.setEnv("COMPOUND_ENABLED", "true");
 
-        // non-Base chain: REWARD_TOKEN must equal the leaf voter's RECEIPT_TOKEN
+        // Base: claims pay AERO, so REWARD_TOKEN must not be the leaf voter's RECEIPT_TOKEN (xAERO)
+        address baseReceipt = ILeafVoter(LEAF_VOTER).RECEIPT_TOKEN();
+        assertTrue(baseReceipt != address(0) && baseReceipt != AERO);
+        vm.setEnv("REWARD_TOKEN", vm.toString(baseReceipt));
+        vm.expectRevert(bytes("REWARD_TOKEN must not be the leaf voter RECEIPT_TOKEN on Base"));
+        script.run();
+        vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
+
+        // non-Base chain: COMPOUND_ENABLED must be false, REWARD_TOKEN must equal the leaf voter's RECEIPT_TOKEN
         vm.chainId(10);
         vm.mockCall(LEAF_VOTER, abi.encodeWithSelector(ILeafVoter.RECEIPT_TOKEN.selector), abi.encode(XAERO));
-        vm.expectRevert(bytes("REWARD_TOKEN must be the leaf voter RECEIPT_TOKEN"));
-        script.run(); // REWARD_TOKEN is still AERO
         vm.setEnv("REWARD_TOKEN", vm.toString(XAERO));
+        vm.expectRevert(bytes("COMPOUND_ENABLED must be false off Base"));
+        script.run(); // COMPOUND_ENABLED is still true
         vm.setEnv("COMPOUND_ENABLED", "false");
+        vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
+        vm.expectRevert(bytes("REWARD_TOKEN must be the leaf voter RECEIPT_TOKEN"));
+        script.run();
+        vm.setEnv("REWARD_TOKEN", vm.toString(XAERO));
         vm.recordLogs();
         script.run();
         logs = vm.getRecordedLogs();

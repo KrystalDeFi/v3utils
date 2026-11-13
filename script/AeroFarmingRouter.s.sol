@@ -19,10 +19,13 @@ contract AeroFarmingRouterScript is Script {
         address rewardToken = _required("REWARD_TOKEN");
         bool compoundEnabled =
             block.chainid == 8453 ? vm.envBool("COMPOUND_ENABLED") : vm.envOr("COMPOUND_ENABLED", false);
+        address receipt = ILeafVoter(ICLGaugeFactory(gaugeFactory).leafVoter()).RECEIPT_TOKEN();
         if (block.chainid == 8453) {
+            // claims pay AERO on Base, not the xAERO receipt token
             require(compoundEnabled, "COMPOUND_ENABLED must be true on Base");
+            require(rewardToken != receipt, "REWARD_TOKEN must not be the leaf voter RECEIPT_TOKEN on Base");
         } else {
-            address receipt = ILeafVoter(ICLGaugeFactory(gaugeFactory).leafVoter()).RECEIPT_TOKEN();
+            require(!compoundEnabled, "COMPOUND_ENABLED must be false off Base");
             require(rewardToken == receipt, "REWARD_TOKEN must be the leaf voter RECEIPT_TOKEN");
         }
         vm.startBroadcast(deployerPrivateKey);
