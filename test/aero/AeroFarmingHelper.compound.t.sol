@@ -194,7 +194,7 @@ contract AeroFarmingHelperCompoundTest is AeroForkBase {
 
     /// R2: the deployed V3Utils does not revert when amountIn0 exceeds the available claim and swapData0 is empty
     /// (the swap is a no-op), so the invariant under test is "no stuck funds": the flow succeeds, the position stays
-    /// staked, the helper keeps nothing and any AERO not added reaches the user.
+    /// staked, the router keeps nothing and any AERO not added reaches the user.
     function test_compound_quoteAboveClaim_noStuckFunds() public {
         uint256 claimed = _earned();
         uint64 feeX64 = 1 << 62;
@@ -308,10 +308,10 @@ contract AeroFarmingHelperCompoundGaugeATest is AeroForkBase {
         assertEq(IERC20(AERO).balanceOf(feeTaker) - ft0, fee, "performance fee");
         assertEq(IERC20(AERO).balanceOf(user) - uA, net - c.amountIn0 - c.amountIn1, "unswapped AERO swept to user");
         assertEq(IERC20(AERO).balanceOf(swapRouter), c.amountIn0 + c.amountIn1, "swapRouter received the swap inputs");
-        _assertHelperEmpty();
+        _assertRouterEmpty();
     }
 
-    function _assertHelperEmpty() internal view {
+    function _assertRouterEmpty() internal view {
         address h = address(router);
         assertEq(IERC20(AERO).balanceOf(h), 0);
         assertEq(IERC20(WETH).balanceOf(h), 0);

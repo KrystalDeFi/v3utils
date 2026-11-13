@@ -2,9 +2,9 @@
 pragma solidity ^0.8.0;
 
 import "./AeroForkBase.sol";
-import "../../script/AeroFarmingHelper.s.sol";
+import "../../script/AeroFarmingRouter.s.sol";
 
-contract AeroFarmingHelperDeployTest is AeroForkBase {
+contract AeroFarmingRouterDeployTest is AeroForkBase {
     function test_deployScript_base() public {
         _forkBase();
         address adm = makeAddr("deployAdmin");
@@ -23,7 +23,7 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         vm.setEnv("NATIVE_WETH", vm.toString(WETH));
 
         // env is process-global and forge runs tests in parallel, so the zero-address check shares this test
-        AeroFarmingHelperScript script = new AeroFarmingHelperScript();
+        AeroFarmingRouterScript script = new AeroFarmingRouterScript();
         vm.setEnv("ADMIN", vm.toString(address(0)));
         vm.expectRevert(bytes("ADMIN must be non-zero"));
         script.run();
@@ -34,9 +34,9 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         // the router is the emitter of ImplementationSet (emitted by initialize)
-        address proxy = _routerFrom(logs);
-        assertTrue(proxy != address(0), "router found");
-        AeroFarmingRouter h = AeroFarmingRouter(payable(proxy));
+        address router_ = _routerFrom(logs);
+        assertTrue(router_ != address(0), "router found");
+        AeroFarmingRouter h = AeroFarmingRouter(payable(router_));
 
         assertEq(h.v3utils(), V3UTILS);
         assertEq(h.gaugeFactory(), GAUGE_FACTORY);
@@ -60,10 +60,10 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         assertFalse(h.hasRole(oRole, wd));
         address impl = h.implementation();
         assertGt(impl.code.length, 0);
-        assertTrue(impl != proxy);
+        assertTrue(impl != router_);
         assertFalse(h.implementationLocked());
         // the operator path's domain is bound to the deployed router
-        assertEq(h.DOMAIN_SEPARATOR(), _domain(proxy));
+        assertEq(h.DOMAIN_SEPARATOR(), _domain(router_));
 
         // Base: COMPOUND_ENABLED must be true (env is process-global, so restored right after)
         vm.setEnv("COMPOUND_ENABLED", "false");
@@ -81,9 +81,9 @@ contract AeroFarmingHelperDeployTest is AeroForkBase {
         vm.recordLogs();
         script.run();
         logs = vm.getRecordedLogs();
-        proxy = _routerFrom(logs);
-        assertEq(AeroFarmingRouter(payable(proxy)).rewardToken(), XAERO);
-        assertFalse(AeroFarmingRouter(payable(proxy)).compoundEnabled());
+        router_ = _routerFrom(logs);
+        assertEq(AeroFarmingRouter(payable(router_)).rewardToken(), XAERO);
+        assertFalse(AeroFarmingRouter(payable(router_)).compoundEnabled());
         vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
         vm.setEnv("COMPOUND_ENABLED", "true");
     }

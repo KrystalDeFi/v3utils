@@ -64,7 +64,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         ins.protocol = Nfpm.Protocol.AERODROME;
         ins.liquidity = liquidity;
         ins.deadline = block.timestamp + 1 hours;
-        ins.recipient = user; // must be overridden by helper
+        ins.recipient = user; // must be overridden by the router
     }
 
     function _addParams(uint256 a0, uint256 a1) internal view returns (Common.SwapAndIncreaseLiquidityParams memory p) {
@@ -74,10 +74,10 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         p.amount0 = a0;
         p.amount1 = a1;
         p.deadline = block.timestamp + 1 hours;
-        p.recipient = user; // must be overridden by helper
+        p.recipient = user; // must be overridden by the router
     }
 
-    function _assertHelperClean(uint256 w, uint256 u, uint256 a) internal {
+    function _assertRouterClean(uint256 w, uint256 u, uint256 a) internal {
         assertEq(_bal(WETH, address(router)), w);
         assertEq(_bal(USDC_BASE, address(router)), u);
         assertEq(_bal(AERO, address(router)), a);
@@ -114,7 +114,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         assertGt(_liq(), l0);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(IERC721(NFPM).ownerOf(id), GAUGE_A_BASE);
-        _assertHelperClean(0, 0, 0);
+        _assertRouterClean(0, 0, 0);
         assertLe(w0 - _bal(WETH, user), 0.5 ether);
         assertLe(u0 - _bal(USDC_BASE, user), 2000e6);
         assertEq(_farmActionCount(vm.getRecordedLogs(), id, IAeroFarmingLogic.Action.ADD_LIQUIDITY), 1);
@@ -143,7 +143,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         assertEq(IERC721(NFPM).ownerOf(id), GAUGE_A_BASE);
         assertGt(_bal(WETH, user), w0);
         assertGt(_bal(USDC_BASE, user), u0);
-        _assertHelperClean(0, 0, 0);
+        _assertRouterClean(0, 0, 0);
         assertEq(_farmActionCount(vm.getRecordedLogs(), id, IAeroFarmingLogic.Action.REMOVE_LIQUIDITY), 1);
     }
 
@@ -161,7 +161,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         assertGt(_bal(USDC_BASE, user), u0);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(address(router).balance, 0);
-        _assertHelperClean(0, 0, 0);
+        _assertRouterClean(0, 0, 0);
     }
 
     function test_remove_fullLiquidityReverts() public {
@@ -186,7 +186,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         vm.prank(user);
         _removeLiquidity(GAUGE_A_BASE, id, ins);
         assertGt(_bal(AERO, user), a0);
-        _assertHelperClean(0, 0, 0);
+        _assertRouterClean(0, 0, 0);
     }
 
     function test_remove_withoutClaimApproval_userReceivesTokens() public {
@@ -198,7 +198,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         assertGt(_bal(WETH, user), w0);
         assertGt(_bal(USDC_BASE, user), u0);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
-        _assertHelperClean(0, 0, 0);
+        _assertRouterClean(0, 0, 0);
     }
 
     function test_attackerCannotActOnOthersStake() public {
@@ -237,7 +237,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         assertEq(IERC721(NFPM).ownerOf(id), user);
         assertFalse(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertEq(_liq(), 0);
-        _assertHelperClean(0, 0, 0);
+        _assertRouterClean(0, 0, 0);
         assertEq(_farmActionCount(vm.getRecordedLogs(), id, IAeroFarmingLogic.Action.EXIT), 1);
     }
 
@@ -283,7 +283,7 @@ contract AeroFarmingHelperModifyTest is AeroForkBase {
         assertEq(IERC721(NFPM).getApproved(id), address(0));
         (,,,,,,, uint128 nl,,,,) = INonfungiblePositionManager(NFPM).positions(newId);
         assertGt(nl, 0);
-        _assertHelperClean(0, 0, 0);
+        _assertRouterClean(0, 0, 0);
         assertGe(_bal(AERO, user), a0);
     }
 

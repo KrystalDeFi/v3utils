@@ -449,7 +449,7 @@ contract AeroFarmingHelperAutoCompoundTest is AutomationBase {
     }
 }
 
-/// @dev AUTO_COMPOUND where the reward (AERO) is not a pool token: amount2 path, swaps through the etched swapRouter.
+/// @dev AUTO_COMPOUND where the reward (AERO) is not a pool token: amount2 path, swaps through the etched swap router.
 contract AeroFarmingHelperAutoCompoundGaugeATest is AutomationBase {
     int24 constant TS = 50;
     address internal swapRouter;

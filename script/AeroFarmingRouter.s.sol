@@ -6,8 +6,8 @@ import "../src/aero/AeroFarmingRouter.sol";
 import "../src/aero/AeroFarmingLogic.sol";
 
 /// Plain CREATE (not CREATE2): per-chain init args differ anyway. Take addresses from the real broadcast.
-/// Interim: deploys the router + logic (renamed and finalised in the router deploy-script task).
-contract AeroFarmingHelperScript is Script {
+/// Deploys the logic, then the router, then initializes it in the same broadcast (the deployer EOA is tx.origin).
+contract AeroFarmingRouterScript is Script {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address admin = _required("ADMIN");

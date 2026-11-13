@@ -8,6 +8,7 @@ library AeroStorage {
     /// @dev keccak256(abi.encode(uint256(keccak256("krystal.aero.farming.storage")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 internal constant SLOT = 0xa60701299f10d90e57575380a0b637f0f8f9045185f73ed32c1534362756f200;
 
+    /// @custom:storage-location erc7201:krystal.aero.farming.storage
     struct Layout {
         address v3utils;
         address gaugeFactory;

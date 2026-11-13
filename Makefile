@@ -36,8 +36,8 @@ structhash:
 	$(eval CONTRACT=StructHash)
 nfpm:
 	$(eval CONTRACT=Nfpm)
-aerohelper:
-	$(eval CONTRACT=AeroFarmingHelper)
+aerorouter:
+	$(eval CONTRACT=AeroFarmingRouter)
 commonlib:
 	$(eval CONTRACT=CommonLib)
 deploy-%: %
@@ -46,7 +46,7 @@ deploy-v3utils: libs-check-v3utils
 deploy-structhash:
 deploy-nfpm:
 deploy-commonlib:
-deploy-aerohelper:
+deploy-aerorouter:
 deploy-v3automation: libs-check-v3automation
 
 verify-%: %

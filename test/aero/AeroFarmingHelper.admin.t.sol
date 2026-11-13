@@ -149,7 +149,7 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
         assertEq(address(h).balance, 0);
     }
 
-    /// @dev Mints an NFT straight to the helper (a stray transfer the helper's receive guard would not accept).
+    /// @dev Mints an NFT straight to the router (a stray transfer the router's receive guard would not accept).
     function _strayNft() internal returns (uint256 tokenId) {
         address minter = makeAddr("strayMinter");
         deal(WETH, minter, 1 ether);
@@ -173,7 +173,7 @@ contract AeroFarmingHelperAdminTest is AeroForkBase {
         IERC20(USDC_BASE).approve(V3UTILS, type(uint256).max);
         tokenId = V3UtilsLike(V3UTILS).swapAndMint(p).tokenId;
         vm.stopPrank();
-        // transferFrom (not safeTransferFrom) so the helper's onERC721Received guard is bypassed
+        // transferFrom (not safeTransferFrom) so the router's onERC721Received guard is bypassed
         vm.prank(minter);
         IERC721(NFPM).transferFrom(minter, address(h), tokenId);
     }

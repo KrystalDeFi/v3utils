@@ -46,7 +46,7 @@ contract AeroFarmingHelperZapTest is AeroForkBase {
         p.amount1 = a1;
         p.deadline = block.timestamp + 1 hours;
         p.swapSourceToken = IERC20(address(0));
-        p.recipient = user; // must be overridden by helper
+        p.recipient = user; // must be overridden by the router
     }
 
     function _bal(address t, address a) internal view returns (uint256) {

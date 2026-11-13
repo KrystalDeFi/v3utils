@@ -214,6 +214,26 @@ contract AeroFarmingRouterTest is AutomationBase {
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
     }
 
+    /// @dev `execute` is payable only for flows that take ETH; value sent to a non-payable flow reverts in the
+    /// delegatecall (which checks callvalue) and leaves the router's balance untouched.
+    function test_execute_valueToNonPayableFlow_reverts() public {
+        vm.deal(user, 1 ether);
+        uint256 before_ = address(router).balance;
+        V3Utils.Instructions memory ins = _exitIns();
+        bytes[2] memory calls = [
+            abi.encodeCall(IAeroFarmingLogic.exit, (GAUGE_A_BASE, id, ins)),
+            abi.encodeCall(IAeroFarmingLogic.removeLiquidity, (GAUGE_A_BASE, id, ins))
+        ];
+        for (uint256 i; i < calls.length; i++) {
+            vm.prank(user);
+            vm.expectRevert();
+            router.execute{value: 1 wei}(calls[i]);
+            assertEq(address(router).balance, before_, "router ETH balance changed");
+        }
+        assertEq(user.balance, 1 ether);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+    }
+
     // ------------------------------------------------------------ Review Focus 5
 
     function test_initialize_onlyDeployerOrigin() public {
