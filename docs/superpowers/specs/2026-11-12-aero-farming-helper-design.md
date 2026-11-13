@@ -317,3 +317,35 @@ Base first.
 - How the compound chain guard is expressed (§5.5).
 - The exact NFT‑receive guard mechanism (§8).
 - Gas tuning, and whether to use OZ Multicall for batching.
+
+## 12. Architecture revision (2026‑11‑13, user decision: "rework it like v4utils")
+
+This section **supersedes** §4's "upgradeable proxy" bullet, §7's proxy-domain bullet and the delegatecall‑module
+split (ruling R7). Everything else — flows, fees, account rule, chain rules, tests — is unchanged.
+
+The model is `v4utils/src/V4UtilsRouter.sol`: a fixed router that users approve, plus a stateless logic contract
+that the router delegatecalls through **explicit** entry points.
+
+- **`AeroFarmingRouter`** — deployed directly (no proxy, not upgradeable). It is the address users approve on
+  gauges, forever. Holds: AccessControl roles (`DEFAULT_ADMIN_ROLE`, `OPERATOR_ROLE`, `WITHDRAWER_ROLE`), Pausable,
+  ReentrancyGuard, `initialize` (front-run‑guarded like `Common`: only the deploying `tx.origin` may call it),
+  config setters, rescue (`withdrawERC20/ERC721/Native`), the NFT receive guard, `receive()` (WETH only), order
+  signing/cancel, and two entry points:
+  - `execute(bytes data)` — users. Delegatecalls the logic with `data`; `msg.sender` (the account) is preserved.
+  - `executeAutomation(address account, address gauge, uint256 tokenId, AutoAction action, bytes actionData,
+    bytes order, bytes signature)` — `OPERATOR_ROLE`. Validates gauge, stake ownership, order, cancel; then the
+    **router builds the calldata itself** for the logic's automated entry, records `account` as the authorised
+    automation account in shared storage, delegatecalls, and clears it.
+  - `setImplementation(address)` (admin; must have code) and `lockImplementation()` (admin, one‑way), as in v4utils.
+- **`AeroFarmingLogic`** — stateless (immutables only). All flows from §5 and §7. Config and flow state live in a
+  namespaced storage struct at a fixed slot (`AeroStorage`, ERC‑7201 style), so the router and any future logic
+  share state without inheritance layout coupling. Every external function is `onlyDelegateCall` (reverts when
+  called on the logic directly). The automated entry requires the account to equal the router‑recorded automation
+  account, so it is unreachable through `execute`.
+- **Orders:** EIP‑712 domain name `AeroFarmingRouter`, version `1`, `verifyingContract` = router (immutable, fine
+  since the router is not proxied). Hashing uses the source `StructHash._hash(Order)` internally (no deployed‑library
+  address, no linking). Like V4UtilsRouter, the router decodes the order and requires `order.chainId == block.chainid`
+  and `order.nfpmAddress == gauge.nft()`; `tokenId` stays unbound (recurring rebalances mint new ids).
+- **Upgrades:** replace the logic with `setImplementation`; optionally freeze with `lockImplementation`. Router code
+  (roles, order checks, cancel) is fixed at deploy — accepted trade‑off, same as v4utils.
+- **Removed:** UUPS proxy, `AeroAutomationModule`, the fallback, `IAeroAutomation`, the `structHash` config.
