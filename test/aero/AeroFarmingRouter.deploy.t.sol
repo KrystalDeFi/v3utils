@@ -5,19 +5,19 @@ import "./AeroForkBase.sol";
 import "../../script/AeroFarmingRouter.s.sol";
 
 contract AeroFarmingRouterDeployTest is AeroForkBase {
+    address internal constant LEGACY_AERO = 0x940181a94A35A4569E4529A3CDfB74e38FD98631;
+
     function test_deployScript_base() public {
         _forkBase();
         address adm = makeAddr("deployAdmin");
         address op = makeAddr("deployOperator");
         address wd = makeAddr("deployWithdrawer");
-        address ps = makeAddr("deployPauser");
         uint256 pk = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
         address deployer = vm.addr(pk);
         vm.setEnv("PRIVATE_KEY", vm.toString(bytes32(pk)));
         vm.setEnv("ADMIN", vm.toString(adm));
         vm.setEnv("OPERATOR", vm.toString(op));
         vm.setEnv("WITHDRAWER", vm.toString(wd));
-        vm.setEnv("PAUSER", vm.toString(ps));
         vm.setEnv("V3UTILS", vm.toString(V3UTILS));
         vm.setEnv("GAUGE_FACTORY", vm.toString(GAUGE_FACTORY));
         vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
@@ -30,10 +30,6 @@ contract AeroFarmingRouterDeployTest is AeroForkBase {
         vm.expectRevert(bytes("ADMIN must be non-zero"));
         script.run();
         vm.setEnv("ADMIN", vm.toString(adm));
-        vm.setEnv("PAUSER", vm.toString(address(0)));
-        vm.expectRevert(bytes("PAUSER must be non-zero"));
-        script.run();
-        vm.setEnv("PAUSER", vm.toString(ps));
 
         vm.recordLogs();
         script.run();
@@ -50,10 +46,9 @@ contract AeroFarmingRouterDeployTest is AeroForkBase {
         assertTrue(h.compoundEnabled());
         assertEq(h.weth(), WETH);
         // exact role layout: admin holds DEFAULT_ADMIN_ROLE + ADMIN_ROLE, each other role one holder, deployer none
-        bytes32[5] memory roles =
-            [h.DEFAULT_ADMIN_ROLE(), h.ADMIN_ROLE(), h.PAUSER_ROLE(), h.OPERATOR_ROLE(), h.WITHDRAWER_ROLE()];
-        address[5] memory holders = [adm, adm, ps, op, wd];
-        address[5] memory who = [adm, ps, op, wd, deployer];
+        bytes32[4] memory roles = [h.DEFAULT_ADMIN_ROLE(), h.ADMIN_ROLE(), h.OPERATOR_ROLE(), h.WITHDRAWER_ROLE()];
+        address[4] memory holders = [adm, adm, op, wd];
+        address[4] memory who = [adm, op, wd, deployer];
         for (uint256 r; r < roles.length; ++r) {
             for (uint256 a; a < who.length; ++a) {
                 assertEq(h.hasRole(roles[r], who[a]), who[a] == holders[r], "role layout");
@@ -76,9 +71,19 @@ contract AeroFarmingRouterDeployTest is AeroForkBase {
         address baseReceipt = ILeafVoter(LEAF_VOTER).RECEIPT_TOKEN();
         assertTrue(baseReceipt != address(0) && baseReceipt != AERO);
         vm.setEnv("REWARD_TOKEN", vm.toString(baseReceipt));
-        vm.expectRevert(bytes("REWARD_TOKEN must not be the leaf voter RECEIPT_TOKEN on Base"));
+        vm.expectRevert(bytes("REWARD_TOKEN must be the new AERO on Base"));
+        script.run();
+        // nor the legacy AERO, which is not the receipt token but is not what claims pay either
+        vm.setEnv("REWARD_TOKEN", vm.toString(LEGACY_AERO));
+        vm.expectRevert(bytes("REWARD_TOKEN must be the new AERO on Base"));
         script.run();
         vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
+
+        // the logic reads fee caps from V3Utils: a V3Utils without getMaxFeeX64 fails the deploy
+        vm.mockCallRevert(V3UTILS, abi.encodeWithSelector(Common.getMaxFeeX64.selector), "");
+        vm.expectRevert();
+        script.run();
+        vm.clearMockedCalls();
 
         // non-Base chain: COMPOUND_ENABLED must be false, REWARD_TOKEN must equal the leaf voter's RECEIPT_TOKEN
         vm.chainId(10);

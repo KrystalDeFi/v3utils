@@ -36,8 +36,7 @@ interface IAeroFarmingLogic {
         uint256 amountAddMin0;
         uint256 amountAddMin1;
         uint256 deadline;
-        uint64 performanceFeeX64;
-        uint64 gasFeeX64;
+        uint64 performanceFeeX64; // the only compound fee: gas is folded into it, as in V3Automation AUTO_COMPOUND
         bool unwrap;
     }
 

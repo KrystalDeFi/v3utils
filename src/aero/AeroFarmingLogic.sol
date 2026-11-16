@@ -34,9 +34,6 @@ interface IWETHLike {
 contract AeroFarmingLogic is IAeroFarmingLogic {
     using SafeERC20 for IERC20;
 
-    uint64 internal constant MAX_GAS_FEE_X64 = 5534023222112865280;
-    uint64 internal constant MAX_PERFORMANCE_FEE_X64 = 5902958103587057000;
-
     address private immutable self;
 
     constructor() {
@@ -252,7 +249,7 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         p.swapData1 = c.swapData1;
         p.amountAddMin0 = c.amountAddMin0;
         p.amountAddMin1 = c.amountAddMin1;
-        p.gasFeeX64 = c.gasFeeX64;
+        // p.gasFeeX64 stays 0: the performance fee above is the only compound fee
 
         address v = AeroStorage.layout().v3utils;
         IERC20(reward).forceApprove(v, amount);
@@ -322,12 +319,13 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         uint64 feeX64,
         Common.FeeType t
     ) internal returns (uint256 fee) {
-        uint64 cap = t == Common.FeeType.GAS_FEE ? MAX_GAS_FEE_X64 : MAX_PERFORMANCE_FEE_X64;
-        if (feeX64 > cap) revert FeeTooHigh();
+        // caps come from V3Utils, so lowering them there (setMaxFeeX64) also lowers them here
+        V3Utils v = V3Utils(payable(AeroStorage.layout().v3utils));
+        if (feeX64 > v.getMaxFeeX64(t)) revert FeeTooHigh();
         fee = FullMath.mulDiv(amount, feeX64, 2 ** 64);
         if (fee == 0) return 0;
         address reward = AeroStorage.layout().rewardToken;
-        IERC20(reward).safeTransfer(V3Utils(payable(AeroStorage.layout().v3utils)).FEE_TAKER(), fee);
+        IERC20(reward).safeTransfer(v.FEE_TAKER(), fee);
 
         Common.DeductFeesEventData memory d;
         d.feeX64 = feeX64;
@@ -384,9 +382,9 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         emit FarmAction(account, gauge, tokenId, tokenIdAfter, action, automated);
     }
 
-    /// @dev The position V3Utils minted for a CHANGE_RANGE. It sends the new NFT first and returns the old one last,
-    /// so exactly one NFT more than `held` is held and the enumeration ends [..., new, old]; the new position must
-    /// have the range `ins` asked for.
+    /// @dev The position V3Utils minted for a CHANGE_RANGE: exactly one NFT more than `held` is held, and it is
+    /// whichever of the last two enumerated tokens is not `tokenId` (V3Utils' transfer order does not matter). The
+    /// new position must have the range `ins` asked for.
     function _rebalancedId(
         INonfungiblePositionManager nfpm,
         uint256 tokenId,
@@ -395,8 +393,9 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
     ) internal view returns (uint256 newId) {
         uint256 bal = nfpm.balanceOf(address(this));
         if (bal != held + 1) revert RebalanceMismatch();
-        newId = nfpm.tokenOfOwnerByIndex(address(this), bal - 2);
-        if (newId == tokenId || nfpm.ownerOf(newId) != address(this)) revert UnexpectedNft();
+        newId = nfpm.tokenOfOwnerByIndex(address(this), bal - 1);
+        if (newId == tokenId) newId = nfpm.tokenOfOwnerByIndex(address(this), bal - 2);
+        if (newId == tokenId || nfpm.ownerOf(tokenId) != address(this)) revert UnexpectedNft();
         (,,,,, int24 tickLower, int24 tickUpper,,,,,) = nfpm.positions(newId);
         if (tickLower != ins.tickLower || tickUpper != ins.tickUpper) revert RebalanceMismatch();
     }

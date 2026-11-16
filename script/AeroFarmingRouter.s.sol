@@ -8,12 +8,13 @@ import "../src/aero/AeroFarmingLogic.sol";
 /// Plain CREATE (not CREATE2): per-chain init args differ anyway. Take addresses from the real broadcast.
 /// Deploys the logic, then the router, then initializes it in the same broadcast (the deployer EOA is tx.origin).
 contract AeroFarmingRouterScript is Script {
+    address internal constant BASE_AERO = 0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee;
+
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address admin = _required("ADMIN");
         address operator = _required("OPERATOR");
         address withdrawer = _required("WITHDRAWER");
-        address pauser = _required("PAUSER");
         address v3utils = _required("V3UTILS");
         address gaugeFactory = _required("GAUGE_FACTORY");
         address rewardToken = _required("REWARD_TOKEN");
@@ -21,13 +22,17 @@ contract AeroFarmingRouterScript is Script {
             block.chainid == 8453 ? vm.envBool("COMPOUND_ENABLED") : vm.envOr("COMPOUND_ENABLED", false);
         address receipt = ILeafVoter(ICLGaugeFactory(gaugeFactory).leafVoter()).RECEIPT_TOKEN();
         if (block.chainid == 8453) {
-            // claims pay AERO on Base, not the xAERO receipt token
+            // claims pay the new AERO on Base (not the legacy 0x9401... AERO, not the xAERO receipt token); the
+            // router has no reward-token setter, so a wrong one would strand every claim
             require(compoundEnabled, "COMPOUND_ENABLED must be true on Base");
+            require(rewardToken == BASE_AERO, "REWARD_TOKEN must be the new AERO on Base");
             require(rewardToken != receipt, "REWARD_TOKEN must not be the leaf voter RECEIPT_TOKEN on Base");
         } else {
             require(!compoundEnabled, "COMPOUND_ENABLED must be false off Base");
             require(rewardToken == receipt, "REWARD_TOKEN must be the leaf voter RECEIPT_TOKEN");
         }
+        // the logic reads its fee caps from V3Utils: fail here, not on the first harvest, if the getter is missing
+        V3Utils(payable(v3utils)).getMaxFeeX64(Common.FeeType.PERFORMANCE_FEE);
         vm.startBroadcast(deployerPrivateKey);
 
         AeroFarmingLogic logic = new AeroFarmingLogic();
@@ -36,7 +41,6 @@ contract AeroFarmingRouterScript is Script {
             admin,
             operator,
             withdrawer,
-            pauser,
             address(logic),
             v3utils,
             gaugeFactory,

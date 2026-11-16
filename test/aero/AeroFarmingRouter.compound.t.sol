@@ -183,6 +183,28 @@ contract AeroFarmingRouterCompoundTest is AeroForkBase {
         _compound(GAUGE_B_BASE, id, p);
     }
 
+    /// The cap is read from V3Utils, so lowering it there (setMaxFeeX64) lowers it here too.
+    function test_compound_feeCapFollowsV3Utils() public {
+        uint64 lowered = 1 << 60; // 6.25%
+        vm.mockCall(
+            V3UTILS,
+            abi.encodeWithSelector(Common.getMaxFeeX64.selector, Common.FeeType.PERFORMANCE_FEE),
+            abi.encode(lowered)
+        );
+        IAeroFarmingLogic.CompoundParams memory p = _params(lowered + 1);
+        vm.prank(user);
+        vm.expectRevert(IAeroFarmingLogic.FeeTooHigh.selector);
+        _compound(GAUGE_B_BASE, id, p);
+
+        p = _params(lowered);
+        uint256 ft0 = _bal(AERO, feeTaker);
+        uint256 claimed = _earned();
+        vm.prank(user);
+        _compound(GAUGE_B_BASE, id, p);
+        // the performance fee is the only compound fee: nothing else reaches the fee taker
+        assertEq(_bal(AERO, feeTaker) - ft0, FullMath.mulDiv(claimed, lowered, 2 ** 64));
+    }
+
     function test_compound_disabledReverts() public {
         _deployRouter(AERO, false, WETH);
         _approveGauge(user, GAUGE_B_BASE, true);

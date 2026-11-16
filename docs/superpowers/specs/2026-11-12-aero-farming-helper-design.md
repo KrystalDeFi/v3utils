@@ -189,12 +189,15 @@ today. Harvest has no fee.
 **Compound is the exception: the helper takes the fee itself**, so it is labelled `PERFORMANCE_FEE`
 (user asked for the correct label). The deployed V3Utils can't do this: `swapAndIncreaseLiquidity` has
 only `protocolFeeX64`, hardcoded as `FeeType.LIQUIDITY_FEE` (`V3Utils.sol:578`). The helper:
-1. Deducts `performanceFeeX64` from the claimed AERO. Use the same X64 math and the same cap as V3Utils's
-   performance fee (`Common.sol` caps).
+1. Deducts `performanceFeeX64` from the claimed AERO. Use the same X64 math as V3Utils, and read the cap live
+   from `V3Utils.getMaxFeeX64(feeType)` (harvest's gas fee too), so V3Utils' `setMaxFeeX64` is the one place to
+   change caps. (2026‑11‑16 review; the deploy script checks that the getter exists.)
 2. Sends the fee to `V3Utils.FEE_TAKER()`, read live so it follows V3Utils.
 3. Emits `DeductFees` with the same struct and semantics as `Common`, with `FeeType.PERFORMANCE_FEE`, and
    `userAddress` set to the **user**.
-4. Calls `swapAndIncreaseLiquidity` with `protocolFeeX64 = 0`. `gasFeeX64` is still passed through.
+4. Calls `swapAndIncreaseLiquidity` with `protocolFeeX64 = 0` and `gasFeeX64 = 0`. The performance fee is the only
+   compound fee: gas is folded into it, as in V3Automation's AUTO_COMPOUND. (2026‑11‑16 review: passing a gas fee
+   through as well stacked the two caps to ~52% of the claim; `CompoundParams.gasFeeX64` was removed.)
 
 The backend should index the helper's `DeductFees` the same way it indexes V3Utils's.
 
@@ -328,7 +331,7 @@ The model is `v4utils/src/V4UtilsRouter.sol`: a fixed router that users approve,
 that the router delegatecalls through **explicit** entry points.
 
 - **`AeroFarmingRouter`** — deployed directly (no proxy, not upgradeable). It is the address users approve on
-  gauges, forever. Holds: AccessControl roles (`DEFAULT_ADMIN_ROLE`, `ADMIN_ROLE`, `PAUSER_ROLE`, `OPERATOR_ROLE`,
+  gauges, forever. Holds: AccessControl roles (`DEFAULT_ADMIN_ROLE`, `ADMIN_ROLE`, `OPERATOR_ROLE`,
   `WITHDRAWER_ROLE`; see "Admin model" below), Pausable,
   ReentrancyGuard, `initialize` (front-run‑guarded like `Common`: only the deploying `tx.origin` may call it),
   config setters, rescue (`withdrawERC20/ERC721/Native`), the NFT receive guard, `receive()` (WETH only), order
@@ -352,19 +355,25 @@ that the router delegatecalls through **explicit** entry points.
 - **Upgrades:** replace the logic with `setImplementation`; optionally freeze with `lockImplementation`, which also
   freezes `setV3Utils` (one flag, `implementationLocked`, for both: V3Utils is the other contract users' NFTs pass
   through). Router code (roles, order checks, cancel) is fixed at deploy — accepted trade‑off, same as v4utils.
-- **Admin model** (2026‑11‑13 final review). Roles split as in v4utils, plus a pauser:
+- **Admin model** (2026‑11‑13 final review; 2026‑11‑16: pauser role dropped, pause/unpause on `ADMIN_ROLE` as in
+  v4utils). Roles:
   - `DEFAULT_ADMIN_ROLE` — role administration (it is the admin role of every other role). It can grant itself
     `ADMIN_ROLE`, so it carries the same custody-level power and needs the same timelock.
-  - `ADMIN_ROLE` — `setImplementation`, `lockImplementation`, `setV3Utils`.
-  - `PAUSER_ROLE` — `pause`, `unpause`.
+  - `ADMIN_ROLE` — `setImplementation`, `lockImplementation`, `setV3Utils`, `pause`, `unpause`.
   - `OPERATOR_ROLE` — `executeAutomation`; `WITHDRAWER_ROLE` — `withdrawERC20/ERC721/Native`.
 
-  `initialize(admin, operator, withdrawer, pauser, implementation, v3utils, gaugeFactory, rewardToken,
-  compoundEnabled, weth)` grants `DEFAULT_ADMIN_ROLE` + `ADMIN_ROLE` to `admin` and one role to each of the others;
-  the deployer gets nothing, and it reverts `ZeroAddress()` on a zero `admin` or `pauser` (the router is immutable,
-  so a zero admin could never be fixed). ADMIN_ROLE (and through it DEFAULT_ADMIN_ROLE) has custody-level power over every approving user's stake until locked; hold
-  it behind a timelock. Deployment: `ADMIN` should be a TimelockController in front of the Safe; `PAUSER` can be the
-  Safe or an ops key (pausing must stay fast).
+  `initialize(admin, operator, withdrawer, implementation, v3utils, gaugeFactory, rewardToken, compoundEnabled,
+  weth)` grants `DEFAULT_ADMIN_ROLE` + `ADMIN_ROLE` to `admin` and one role to each of the others; the deployer gets
+  nothing. It reverts `ZeroAddress()` on a zero `admin`, `v3utils`, `gaugeFactory` or `rewardToken`: the router is
+  immutable and the factory and reward token have no setter, so a zero could never be fixed. ADMIN_ROLE (and through
+  it DEFAULT_ADMIN_ROLE) has custody-level power over every approving user's stake until locked; hold it behind a
+  timelock. Deployment: `ADMIN` should be a TimelockController in front of the Safe. Pausing therefore takes the
+  timelock delay (accepted for simplicity, 2026‑11‑16).
+- **Operator trust** (same model as V3Automation). `_validateOrder` binds only the signer, chain, position manager
+  and cancellation; it does not bind the order type or config to the action, gauge or tokenId. One signed order can
+  drive every automated action, and the bot enforces the order's config off‑chain. `lockImplementation` freezes the
+  logic and V3Utils but not roles: DEFAULT_ADMIN_ROLE can still grant OPERATOR_ROLE, and the operator stays trusted
+  (it picks swap data and slippage) after the lock.
 - **Invariants for future logic** (any `setImplementation` target must keep them):
   - every external function takes the account from `msg.sender` (user flows through `execute`) or from
     `AeroStorage.automationAccount` (the automated entry); never from calldata alone;

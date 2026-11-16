@@ -38,6 +38,8 @@ nfpm:
 	$(eval CONTRACT=Nfpm)
 aerorouter:
 	$(eval CONTRACT=AeroFarmingRouter)
+aerologic:
+	$(eval CONTRACT=AeroFarmingLogic)
 commonlib:
 	$(eval CONTRACT=CommonLib)
 deploy-%: %
@@ -55,6 +57,8 @@ verify-v3utils: libs-check-v3utils
 verify-structhash:
 verify-nfpm:
 verify-commonlib:
+verify-aerorouter:
+verify-aerologic:
 verify-v3automation: libs-check-v3automation v3automation
 	$(VERIFY_CMD)
 init-v3utils:

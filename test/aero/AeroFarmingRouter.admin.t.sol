@@ -53,12 +53,10 @@ contract AeroFarmingRouterAdminTest is AeroForkBase {
     /// Exact layout: admin holds DEFAULT_ADMIN_ROLE + ADMIN_ROLE, every other role sits with exactly one holder,
     /// the initializer holds nothing, and DEFAULT_ADMIN_ROLE administers every role.
     function test_initialize_roleLayout() public view {
-        bytes32[5] memory roles =
-            [h.DEFAULT_ADMIN_ROLE(), h.ADMIN_ROLE(), h.PAUSER_ROLE(), h.OPERATOR_ROLE(), h.WITHDRAWER_ROLE()];
+        bytes32[4] memory roles = [h.DEFAULT_ADMIN_ROLE(), h.ADMIN_ROLE(), h.OPERATOR_ROLE(), h.WITHDRAWER_ROLE()];
         assertEq(roles[1], keccak256("ADMIN_ROLE"));
-        assertEq(roles[2], keccak256("PAUSER_ROLE"));
-        address[5] memory holders = [admin, admin, pauser, operator, withdrawer];
-        address[5] memory who = [admin, pauser, operator, withdrawer, tx.origin];
+        address[4] memory holders = [admin, admin, operator, withdrawer];
+        address[4] memory who = [admin, operator, withdrawer, tx.origin];
         for (uint256 r; r < roles.length; ++r) {
             assertEq(h.getRoleAdmin(roles[r]), h.DEFAULT_ADMIN_ROLE());
             for (uint256 a; a < who.length; ++a) {
@@ -75,7 +73,7 @@ contract AeroFarmingRouterAdminTest is AeroForkBase {
         vm.prank(admin);
         h.grantRole(defaultAdmin, roleAdminOnly);
         address newLogic = address(new AeroFarmingLogic());
-        address[5] memory callers = [operator, withdrawer, pauser, roleAdminOnly, makeAddr("rando")];
+        address[4] memory callers = [operator, withdrawer, roleAdminOnly, makeAddr("rando")];
         for (uint256 i; i < callers.length; ++i) {
             bytes memory err = _missingRole(callers[i], h.ADMIN_ROLE());
             vm.expectRevert(err);
@@ -93,12 +91,16 @@ contract AeroFarmingRouterAdminTest is AeroForkBase {
         assertFalse(h.implementationLocked());
     }
 
-    /// pause/unpause need PAUSER_ROLE: the admin (until it grants itself PAUSER_ROLE), operator and withdrawer are
-    /// rejected; the pauser can pause and unpause but not touch the implementation or V3Utils.
-    function test_pause_onlyPauser() public {
-        address[3] memory callers = [admin, operator, withdrawer];
+    /// pause/unpause need ADMIN_ROLE (as in v4utils): the operator, the withdrawer and a DEFAULT_ADMIN_ROLE-only
+    /// holder are rejected; the admin can pause and unpause.
+    function test_pause_onlyAdmin() public {
+        address roleAdminOnly = makeAddr("aeroRoleAdminOnlyPause");
+        bytes32 defaultAdmin = h.DEFAULT_ADMIN_ROLE();
+        vm.prank(admin);
+        h.grantRole(defaultAdmin, roleAdminOnly);
+        address[3] memory callers = [operator, withdrawer, roleAdminOnly];
         for (uint256 i; i < callers.length; ++i) {
-            bytes memory err = _missingRole(callers[i], h.PAUSER_ROLE());
+            bytes memory err = _missingRole(callers[i], h.ADMIN_ROLE());
             vm.expectRevert(err);
             vm.prank(callers[i]);
             h.pause();
@@ -108,24 +110,13 @@ contract AeroFarmingRouterAdminTest is AeroForkBase {
         }
         assertFalse(h.paused());
 
-        vm.prank(pauser);
-        h.pause();
-        assertTrue(h.paused());
-        bytes memory adminErr = _missingRole(admin, h.PAUSER_ROLE());
-        vm.expectRevert(adminErr);
-        vm.prank(admin);
-        h.unpause();
-        vm.prank(pauser);
-        h.unpause();
-        assertFalse(h.paused());
-
-        // the admin can pause only once it grants itself PAUSER_ROLE (DEFAULT_ADMIN_ROLE administers it)
-        bytes32 pauserRole = h.PAUSER_ROLE();
-        vm.prank(admin);
-        h.grantRole(pauserRole, admin);
         vm.prank(admin);
         h.pause();
         assertTrue(h.paused());
+        bytes memory opErr = _missingRole(operator, h.ADMIN_ROLE());
+        vm.expectRevert(opErr);
+        vm.prank(operator);
+        h.unpause();
         vm.prank(admin);
         h.unpause();
         assertFalse(h.paused());
@@ -134,13 +125,13 @@ contract AeroFarmingRouterAdminTest is AeroForkBase {
     function test_initialize_twiceReverts() public {
         vm.expectRevert(AeroFarmingRouter.AlreadyInitialized.selector);
         vm.prank(tx.origin);
-        h.initialize(admin, operator, withdrawer, pauser, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        h.initialize(admin, operator, withdrawer, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
     }
 
     function test_logic_hasNoInitialize() public {
         bytes memory init = abi.encodeCall(
             AeroFarmingRouter.initialize,
-            (admin, operator, withdrawer, pauser, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH)
+            (admin, operator, withdrawer, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH)
         );
         vm.prank(tx.origin);
         (bool ok, bytes memory ret) = address(logic).call(init);
@@ -270,15 +261,15 @@ contract AeroFarmingRouterAdminTest is AeroForkBase {
 
     function test_pause_blocksFlows() public {
         address rando = makeAddr("rando");
-        bytes memory err = _missingRole(rando, h.PAUSER_ROLE());
+        bytes memory err = _missingRole(rando, h.ADMIN_ROLE());
         vm.expectRevert(err);
         vm.prank(rando);
         h.pause();
 
-        vm.prank(pauser);
+        vm.prank(admin);
         h.pause();
         assertTrue(h.paused());
-        vm.prank(pauser);
+        vm.prank(admin);
         h.unpause();
         assertFalse(h.paused());
     }

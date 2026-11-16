@@ -181,7 +181,6 @@ contract AeroFarmingRouterTest is AutomationBase {
         assertEq(router.weth(), WETH);
         assertTrue(router.hasRole(router.DEFAULT_ADMIN_ROLE(), admin));
         assertTrue(router.hasRole(router.ADMIN_ROLE(), admin));
-        assertTrue(router.hasRole(router.PAUSER_ROLE(), pauser));
         assertTrue(router.hasRole(router.OPERATOR_ROLE(), operator));
         assertTrue(router.hasRole(router.WITHDRAWER_ROLE(), withdrawer));
         assertEq(router.hashOrder(p.order), digest);
@@ -256,13 +255,13 @@ contract AeroFarmingRouterTest is AutomationBase {
         // a front-runner (also when the deployer is only the tx.origin, not the caller) cannot initialize
         vm.prank(rando, rando);
         vm.expectRevert(AeroFarmingRouter.NotInitializer.selector);
-        r.initialize(rando, rando, rando, rando, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        r.initialize(rando, rando, rando, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
         vm.prank(rando, deployer);
         vm.expectRevert(AeroFarmingRouter.NotInitializer.selector);
-        r.initialize(rando, rando, rando, rando, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        r.initialize(rando, rando, rando, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
 
         vm.prank(deployer);
-        r.initialize(admin, operator, withdrawer, pauser, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        r.initialize(admin, operator, withdrawer, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
         assertTrue(r.hasRole(r.DEFAULT_ADMIN_ROLE(), admin));
         assertFalse(r.hasRole(r.DEFAULT_ADMIN_ROLE(), deployer));
         assertFalse(r.hasRole(r.DEFAULT_ADMIN_ROLE(), rando));
@@ -270,22 +269,28 @@ contract AeroFarmingRouterTest is AutomationBase {
         // once only, even for the deployer
         vm.prank(deployer);
         vm.expectRevert(AeroFarmingRouter.AlreadyInitialized.selector);
-        r.initialize(deployer, deployer, deployer, deployer, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        r.initialize(deployer, deployer, deployer, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
         assertFalse(r.hasRole(r.DEFAULT_ADMIN_ROLE(), deployer));
     }
 
-    function test_initialize_zeroAdminOrPauser_reverts() public {
+    /// The router is immutable and gauge factory / reward token have no setter: zeros are rejected up front.
+    function test_initialize_zeroAddresses_revert() public {
         AeroFarmingRouter r = new AeroFarmingRouter();
+        address l = address(logic);
         vm.startPrank(tx.origin);
         vm.expectRevert(AeroFarmingRouter.ZeroAddress.selector);
-        r.initialize(address(0), operator, withdrawer, pauser, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        r.initialize(address(0), operator, withdrawer, l, V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
         vm.expectRevert(AeroFarmingRouter.ZeroAddress.selector);
-        r.initialize(admin, operator, withdrawer, address(0), address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        r.initialize(admin, operator, withdrawer, l, address(0), GAUGE_FACTORY, AERO, true, WETH);
+        vm.expectRevert(AeroFarmingRouter.ZeroAddress.selector);
+        r.initialize(admin, operator, withdrawer, l, V3UTILS, address(0), AERO, true, WETH);
+        vm.expectRevert(AeroFarmingRouter.ZeroAddress.selector);
+        r.initialize(admin, operator, withdrawer, l, V3UTILS, GAUGE_FACTORY, address(0), true, WETH);
         // a failed attempt leaves the router initializable
-        r.initialize(admin, operator, withdrawer, pauser, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        r.initialize(admin, operator, withdrawer, l, V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
         vm.stopPrank();
         assertTrue(r.hasRole(r.DEFAULT_ADMIN_ROLE(), admin));
-        assertTrue(r.hasRole(r.PAUSER_ROLE(), pauser));
+        assertEq(r.v3utils(), V3UTILS);
     }
 
     // ------------------------------------------------------------ implementation guards
@@ -312,7 +317,7 @@ contract AeroFarmingRouterTest is AutomationBase {
         AeroFarmingRouter r = new AeroFarmingRouter();
         vm.prank(tx.origin);
         vm.expectRevert(AeroFarmingRouter.InvalidImplementation.selector);
-        r.initialize(admin, operator, withdrawer, pauser, codeless, V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        r.initialize(admin, operator, withdrawer, codeless, V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
     }
 
     // ------------------------------------------------------------ execute surface
