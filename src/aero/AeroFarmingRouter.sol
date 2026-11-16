@@ -58,6 +58,8 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
     error AlreadyInitialized();
     error ImplementationNotSet();
     error InvalidImplementation();
+    /// @dev `initialize` or `setV3Utils` with a V3Utils that has no code (a lock would freeze it forever).
+    error InvalidV3Utils();
     /// @dev Raised by `setImplementation` and `setV3Utils` after `lockImplementation`.
     error ImplementationLocked();
     error WrongChainId();
@@ -89,6 +91,7 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
         {
             revert ZeroAddress();
         }
+        if (v3utils_.code.length == 0) revert InvalidV3Utils();
         _initialized = true;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(ADMIN_ROLE, admin);
@@ -172,6 +175,7 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
     /// timelock.
     function setV3Utils(address v3utils_) external onlyRole(ADMIN_ROLE) {
         if (implementationLocked) revert ImplementationLocked();
+        if (v3utils_.code.length == 0) revert InvalidV3Utils();
         AeroStorage.layout().v3utils = v3utils_;
         emit ConfigUpdated(v3utils_);
     }

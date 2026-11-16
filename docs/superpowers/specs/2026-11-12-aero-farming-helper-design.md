@@ -367,7 +367,8 @@ that the router delegatecalls through **explicit** entry points.
   `initialize(admin, operator, withdrawer, implementation, v3utils, gaugeFactory, rewardToken, compoundEnabled,
   weth)` grants `DEFAULT_ADMIN_ROLE` + `ADMIN_ROLE` to `admin` and one role to each of the others; the deployer gets
   nothing. It reverts `ZeroAddress()` on a zero `admin`, `v3utils`, `gaugeFactory` or `rewardToken`: the router is
-  immutable and the factory and reward token have no setter, so a zero could never be fixed. ADMIN_ROLE (and through
+  immutable and the factory and reward token have no setter, so a zero could never be fixed. Both `initialize` and
+  `setV3Utils` revert `InvalidV3Utils()` on a V3Utils with no code, since a lock would freeze it. ADMIN_ROLE (and through
   it DEFAULT_ADMIN_ROLE) has custody-level power over every approving user's stake until locked; hold it behind a
   timelock. Deployment: `ADMIN` should be a TimelockController in front of the Safe. Pausing therefore takes the
   timelock delay (accepted for simplicity, 2026‑11‑16).

@@ -282,6 +282,8 @@ contract AeroFarmingRouterTest is AutomationBase {
         r.initialize(address(0), operator, withdrawer, l, V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
         vm.expectRevert(AeroFarmingRouter.ZeroAddress.selector);
         r.initialize(admin, operator, withdrawer, l, address(0), GAUGE_FACTORY, AERO, true, WETH);
+        vm.expectRevert(AeroFarmingRouter.InvalidV3Utils.selector);
+        r.initialize(admin, operator, withdrawer, l, makeAddr("aeroCodelessV3Utils"), GAUGE_FACTORY, AERO, true, WETH);
         vm.expectRevert(AeroFarmingRouter.ZeroAddress.selector);
         r.initialize(admin, operator, withdrawer, l, V3UTILS, address(0), AERO, true, WETH);
         vm.expectRevert(AeroFarmingRouter.ZeroAddress.selector);

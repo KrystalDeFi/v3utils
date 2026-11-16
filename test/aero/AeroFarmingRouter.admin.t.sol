@@ -170,8 +170,17 @@ contract AeroFarmingRouterAdminTest is AeroForkBase {
         vm.prank(rando);
         h.setV3Utils(other);
 
-        vm.prank(admin);
+        // zero or codeless: rejected (a later lockImplementation would freeze it forever)
+        vm.startPrank(admin);
+        vm.expectRevert(AeroFarmingRouter.InvalidV3Utils.selector);
+        h.setV3Utils(address(0));
+        vm.expectRevert(AeroFarmingRouter.InvalidV3Utils.selector);
         h.setV3Utils(other);
+        assertEq(h.v3utils(), V3UTILS);
+
+        vm.etch(other, hex"00");
+        h.setV3Utils(other);
+        vm.stopPrank();
         assertEq(h.v3utils(), other);
     }
 
