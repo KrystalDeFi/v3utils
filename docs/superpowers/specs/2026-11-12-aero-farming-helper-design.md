@@ -234,7 +234,9 @@ again. Upgradeability (§4) is a backstop, not the plan for automation.
   - **AUTO_HARVEST** claims the emissions with `claimEmissions(user, helper, [tokenId])`. The position stays
     staked; nothing is unstaked.
     - **Base:** optionally swap the AERO into `targetToken`, as V3Automation's AUTO_HARVEST does
-      (`V3Automation.sol:322-359`), then send it to the user.
+      (`V3Automation.sol:322-359`), then send it to the user. A `targetToken` with empty swap data reverts
+      `MissingSwapData` (2026‑11‑16 PR review), so a requested swap always runs and meets `amountOutMin`;
+      only a zero claim skips the swap.
     - **Other chains:** send the xAERO to the user unswapped. `targetToken` must be the reward token or
       zero.
     - **Fee:** gas fee only. There is no performance fee, consistent with "no fee on harvest".

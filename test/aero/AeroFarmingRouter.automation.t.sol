@@ -660,6 +660,20 @@ contract AeroFarmingRouterAutoHarvestTest is AutomationBase {
         _executeOrder(p);
     }
 
+    /// A target token with no swap data reverts instead of silently paying the reward token and skipping
+    /// amountOutMin.
+    function test_autoHarvest_targetWithoutSwapData_reverts() public {
+        IAeroFarmingLogic.HarvestParams memory h;
+        h.targetToken = WETH;
+        h.amountOutMin = 1 ether;
+        OrderParams memory p = _harvestOrder(h);
+        uint256 uA = IERC20(AERO).balanceOf(user);
+        vm.prank(operator);
+        vm.expectRevert(IAeroFarmingLogic.MissingSwapData.selector);
+        _executeOrder(p);
+        assertEq(IERC20(AERO).balanceOf(user), uA);
+    }
+
     function _etchRouter(string memory label, address routerCode) internal returns (address swapRouter) {
         swapRouter = makeAddr(label);
         vm.etch(swapRouter, routerCode.code);

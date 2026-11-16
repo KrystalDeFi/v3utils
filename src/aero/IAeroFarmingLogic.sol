@@ -74,6 +74,8 @@ interface IAeroFarmingLogic {
     error UnexpectedNative();
     error SlippageError();
     error SwapFailed(bytes swapData, uint256 index);
+    /// @dev Harvest asked for a target token but gave no swap data (the swap would silently be skipped).
+    error MissingSwapData();
     /// @dev A logic function was called on the logic contract itself instead of through the router.
     error NotDelegateCall();
     /// @dev `executeAutomated` was reached without the router's executeAutomation recording `account`.

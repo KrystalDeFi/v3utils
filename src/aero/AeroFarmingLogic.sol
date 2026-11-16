@@ -270,7 +270,12 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
 
         uint256 claimed = _claim(gauge, account, tokenId, reward);
         uint256 fee = _harvestFee(nfpm, tokenId, account, claimed, p.gasFeeX64);
-        if (doSwap) _swap(IERC20(reward), IERC20(target), claimed - fee, p.amountOutMin, p.swapData);
+        if (doSwap) {
+            uint256 amountIn = claimed - fee;
+            // a requested swap must run (and so meet amountOutMin); only "nothing claimed" skips it
+            if (amountIn != 0 && p.swapData.length == 0) revert MissingSwapData();
+            _swap(IERC20(reward), IERC20(target), amountIn, p.amountOutMin, p.swapData);
+        }
         _sweep(list, before, account, false);
         emit FarmAction(account, gauge, tokenId, tokenId, Action.HARVEST, true);
     }
