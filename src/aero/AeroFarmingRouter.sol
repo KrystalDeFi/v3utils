@@ -21,10 +21,10 @@ import "./AeroStorage.sol";
 /// @dev Shared config/flow state is in the AeroStorage slot. The router's own storage (roles, pause, reentrancy,
 /// implementation, cancelled orders) is never written by the logic, which declares no storage.
 ///
-/// Roles: DEFAULT_ADMIN_ROLE administers roles only; ADMIN_ROLE sets/locks the implementation and V3Utils;
+/// Roles: DEFAULT_ADMIN_ROLE administers roles; ADMIN_ROLE sets/locks the implementation and V3Utils;
 /// PAUSER_ROLE pauses; OPERATOR_ROLE runs signed orders; WITHDRAWER_ROLE rescues stray assets.
-/// @custom:security ADMIN_ROLE has custody-level power over every approving user's stake until locked; hold it
-/// behind a timelock.
+/// @custom:security ADMIN_ROLE has custody-level power over every approving user's stake until locked, and
+/// DEFAULT_ADMIN_ROLE can grant itself ADMIN_ROLE, so it carries the same power; hold both behind a timelock.
 contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Receiver {
     using SafeERC20 for IERC20;
 
@@ -53,6 +53,8 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
     event CancelOrder(address user, bytes32 hash, bytes signature);
 
     error NotInitializer();
+    /// @dev `initialize` with a zero `admin` or `pauser`: the router is immutable, so it could never be fixed.
+    error ZeroAddress();
     error AlreadyInitialized();
     error ImplementationNotSet();
     error InvalidImplementation();
@@ -84,6 +86,7 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
     ) external {
         if (msg.sender != _initializer) revert NotInitializer();
         if (_initialized) revert AlreadyInitialized();
+        if (admin == address(0) || pauser == address(0)) revert ZeroAddress();
         _initialized = true;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(ADMIN_ROLE, admin);

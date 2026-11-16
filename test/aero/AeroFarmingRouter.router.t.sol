@@ -274,6 +274,20 @@ contract AeroFarmingRouterTest is AutomationBase {
         assertFalse(r.hasRole(r.DEFAULT_ADMIN_ROLE(), deployer));
     }
 
+    function test_initialize_zeroAdminOrPauser_reverts() public {
+        AeroFarmingRouter r = new AeroFarmingRouter();
+        vm.startPrank(tx.origin);
+        vm.expectRevert(AeroFarmingRouter.ZeroAddress.selector);
+        r.initialize(address(0), operator, withdrawer, pauser, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        vm.expectRevert(AeroFarmingRouter.ZeroAddress.selector);
+        r.initialize(admin, operator, withdrawer, address(0), address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        // a failed attempt leaves the router initializable
+        r.initialize(admin, operator, withdrawer, pauser, address(logic), V3UTILS, GAUGE_FACTORY, AERO, true, WETH);
+        vm.stopPrank();
+        assertTrue(r.hasRole(r.DEFAULT_ADMIN_ROLE(), admin));
+        assertTrue(r.hasRole(r.PAUSER_ROLE(), pauser));
+    }
+
     // ------------------------------------------------------------ implementation guards
 
     function test_execute_unsetImplementation_reverts() public {

@@ -353,14 +353,16 @@ that the router delegatecalls through **explicit** entry points.
   freezes `setV3Utils` (one flag, `implementationLocked`, for both: V3Utils is the other contract users' NFTs pass
   through). Router code (roles, order checks, cancel) is fixed at deploy — accepted trade‑off, same as v4utils.
 - **Admin model** (2026‑11‑13 final review). Roles split as in v4utils, plus a pauser:
-  - `DEFAULT_ADMIN_ROLE` — role administration only (it is the admin role of every other role).
+  - `DEFAULT_ADMIN_ROLE` — role administration (it is the admin role of every other role). It can grant itself
+    `ADMIN_ROLE`, so it carries the same custody-level power and needs the same timelock.
   - `ADMIN_ROLE` — `setImplementation`, `lockImplementation`, `setV3Utils`.
   - `PAUSER_ROLE` — `pause`, `unpause`.
   - `OPERATOR_ROLE` — `executeAutomation`; `WITHDRAWER_ROLE` — `withdrawERC20/ERC721/Native`.
 
   `initialize(admin, operator, withdrawer, pauser, implementation, v3utils, gaugeFactory, rewardToken,
   compoundEnabled, weth)` grants `DEFAULT_ADMIN_ROLE` + `ADMIN_ROLE` to `admin` and one role to each of the others;
-  the deployer gets nothing. ADMIN_ROLE has custody-level power over every approving user's stake until locked; hold
+  the deployer gets nothing, and it reverts `ZeroAddress()` on a zero `admin` or `pauser` (the router is immutable,
+  so a zero admin could never be fixed). ADMIN_ROLE (and through it DEFAULT_ADMIN_ROLE) has custody-level power over every approving user's stake until locked; hold
   it behind a timelock. Deployment: `ADMIN` should be a TimelockController in front of the Safe; `PAUSER` can be the
   Safe or an ops key (pausing must stay fast).
 - **Invariants for future logic** (any `setImplementation` target must keep them):
