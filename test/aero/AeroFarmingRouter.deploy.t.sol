@@ -1,0 +1,178 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity ^0.8.0;
+
+import "./AeroForkBase.sol";
+import "../../script/AeroFarmingRouter.s.sol";
+
+contract AeroFarmingRouterDeployTest is AeroForkBase {
+    address internal constant LEGACY_AERO = 0x940181a94A35A4569E4529A3CDfB74e38FD98631;
+
+    function test_deployScript_base() public {
+        _forkBase();
+        address adm = makeAddr("deployAdmin");
+        address op = makeAddr("deployOperator");
+        address wd = makeAddr("deployWithdrawer");
+        uint256 pk = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
+        address deployer = vm.addr(pk);
+        vm.setEnv("PRIVATE_KEY", vm.toString(bytes32(pk)));
+        vm.setEnv("AERO_ADMIN", vm.toString(adm));
+        vm.setEnv("AERO_OPERATOR", vm.toString(op));
+        vm.setEnv("WITHDRAWER", vm.toString(wd));
+        vm.setEnv("V3UTILS", vm.toString(V3UTILS));
+        vm.setEnv("AERO_GAUGE_FACTORY", vm.toString(GAUGE_FACTORY));
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(AERO));
+        vm.setEnv("AERO_COMPOUND_ENABLED", "true");
+        vm.setEnv("WETH", vm.toString(WETH));
+        vm.setEnv("NATIVE_MODE", "0");
+
+        // env is process-global and forge runs tests in parallel, so the zero-address check shares this test
+        AeroFarmingRouterScript script = new AeroFarmingRouterScript();
+        vm.setEnv("AERO_ADMIN", vm.toString(address(0)));
+        vm.expectRevert(bytes("AERO_ADMIN must be non-zero"));
+        script.run();
+        vm.setEnv("AERO_ADMIN", vm.toString(adm));
+
+        vm.recordLogs();
+        script.run();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        // the router is the emitter of ImplementationSet (emitted by initialize)
+        address router_ = _routerFrom(logs);
+        assertTrue(router_ != address(0), "router found");
+        AeroFarmingRouter h = AeroFarmingRouter(payable(router_));
+
+        assertEq(h.v3utils(), V3UTILS);
+        assertEq(h.gaugeFactory(), GAUGE_FACTORY);
+        assertEq(h.rewardToken(), AERO);
+        assertTrue(h.compoundEnabled());
+        assertEq(h.weth(), WETH);
+        // exact role layout: admin holds DEFAULT_ADMIN_ROLE + ADMIN_ROLE, each other role one holder, deployer none
+        bytes32[4] memory roles = [h.DEFAULT_ADMIN_ROLE(), h.ADMIN_ROLE(), h.OPERATOR_ROLE(), h.WITHDRAWER_ROLE()];
+        address[4] memory holders = [adm, adm, op, wd];
+        address[4] memory who = [adm, op, wd, deployer];
+        for (uint256 r; r < roles.length; ++r) {
+            for (uint256 a; a < who.length; ++a) {
+                assertEq(h.hasRole(roles[r], who[a]), who[a] == holders[r], "role layout");
+            }
+        }
+        address impl = h.implementation();
+        assertGt(impl.code.length, 0);
+        assertTrue(impl != router_);
+        assertFalse(h.implementationLocked());
+        // the operator path's domain is bound to the deployed router
+        assertEq(h.DOMAIN_SEPARATOR(), _domain(router_));
+
+        // Base: COMPOUND_ENABLED must be true (env is process-global, so restored right after)
+        vm.setEnv("AERO_COMPOUND_ENABLED", "false");
+        vm.expectRevert(bytes("AERO_COMPOUND_ENABLED must be true on Base"));
+        script.run();
+        vm.setEnv("AERO_COMPOUND_ENABLED", "true");
+
+        // Base: claims pay AERO, so REWARD_TOKEN must not be the leaf voter's RECEIPT_TOKEN (xAERO)
+        address baseReceipt = ILeafVoter(LEAF_VOTER).RECEIPT_TOKEN();
+        assertTrue(baseReceipt != address(0) && baseReceipt != AERO);
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(baseReceipt));
+        vm.expectRevert(bytes("AERO_REWARD_TOKEN must be the new AERO on Base"));
+        script.run();
+        // nor the legacy AERO, which is not the receipt token but is not what claims pay either
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(LEGACY_AERO));
+        vm.expectRevert(bytes("AERO_REWARD_TOKEN must be the new AERO on Base"));
+        script.run();
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(AERO));
+
+        // the logic reads fee caps from V3Utils: a V3Utils without getMaxFeeX64 fails the deploy
+        vm.mockCallRevert(V3UTILS, abi.encodeWithSelector(Common.getMaxFeeX64.selector), "");
+        vm.expectRevert();
+        script.run();
+        vm.clearMockedCalls();
+
+        // non-Base chain: COMPOUND_ENABLED must be false, REWARD_TOKEN must equal the leaf voter's RECEIPT_TOKEN
+        vm.chainId(10);
+        vm.mockCall(LEAF_VOTER, abi.encodeWithSelector(ILeafVoter.RECEIPT_TOKEN.selector), abi.encode(XAERO));
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(XAERO));
+        vm.expectRevert(bytes("AERO_COMPOUND_ENABLED must be false off Base"));
+        script.run(); // COMPOUND_ENABLED is still true
+        vm.setEnv("AERO_COMPOUND_ENABLED", "false");
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(AERO));
+        vm.expectRevert(bytes("AERO_REWARD_TOKEN must be the leaf voter RECEIPT_TOKEN"));
+        script.run();
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(XAERO));
+        vm.recordLogs();
+        script.run();
+        logs = vm.getRecordedLogs();
+        router_ = _routerFrom(logs);
+        assertEq(AeroFarmingRouter(payable(router_)).rewardToken(), XAERO);
+        assertFalse(AeroFarmingRouter(payable(router_)).compoundEnabled());
+        assertEq(AeroFarmingRouter(payable(router_)).weth(), WETH);
+
+        // enshrined native (Arc, NATIVE_MODE=1): the router runs ERC20-only, whatever WETH says
+        vm.setEnv("NATIVE_MODE", "1");
+        vm.recordLogs();
+        script.run();
+        router_ = _routerFrom(vm.getRecordedLogs());
+        assertEq(AeroFarmingRouter(payable(router_)).weth(), address(0));
+        vm.setEnv("NATIVE_MODE", "2");
+        vm.expectRevert(bytes("NATIVE_MODE must be 0 (WRAPPED) or 1 (ENSHRINED)"));
+        script.run();
+        vm.setEnv("NATIVE_MODE", "0");
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(AERO));
+        vm.setEnv("AERO_COMPOUND_ENABLED", "true");
+    }
+
+    function _routerFrom(Vm.Log[] memory logs) internal pure returns (address router_) {
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].topics[0] == keccak256("ImplementationSet(address)")) router_ = logs[i].emitter;
+        }
+    }
+
+    function _domain(address verifyingContract) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("AeroFarmingRouter"),
+                keccak256("1"),
+                block.chainid,
+                verifyingContract
+            )
+        );
+    }
+
+    function test_orderInterface_onRouter() public {
+        _forkBase();
+        _deployRouter(AERO, true, WETH);
+        assertEq(router.DOMAIN_SEPARATOR(), _domain(address(router)));
+        assertFalse(router.isOrderCancelled(address(this), bytes32(uint256(1))));
+    }
+
+    /// The logic must expose none of the router's admin, role or order functions: everything reachable through
+    /// `execute` is a flow. Called on the logic directly, a function it has would revert NotDelegateCall (or
+    /// return, for a view); an empty revert means it has no such function (and no fallback).
+    function test_logic_hasNoRouterOnlySelectors() public {
+        _forkBase();
+        AeroFarmingLogic l = new AeroFarmingLogic();
+        bytes4[17] memory sels = [
+            AeroFarmingRouter.initialize.selector,
+            AeroFarmingRouter.setImplementation.selector,
+            AeroFarmingRouter.lockImplementation.selector,
+            AeroFarmingRouter.setV3Utils.selector,
+            AeroFarmingRouter.pause.selector,
+            AeroFarmingRouter.unpause.selector,
+            AeroFarmingRouter.withdrawERC20.selector,
+            AeroFarmingRouter.withdrawERC721.selector,
+            AeroFarmingRouter.withdrawNative.selector,
+            AeroFarmingRouter.cancelOrder.selector,
+            AeroFarmingRouter.executeAutomation.selector,
+            AeroFarmingRouter.execute.selector,
+            IAccessControl.grantRole.selector,
+            IAccessControl.revokeRole.selector,
+            IAccessControl.renounceRole.selector,
+            IERC721Receiver.onERC721Received.selector,
+            bytes4(keccak256("upgradeTo(address)"))
+        ];
+        for (uint256 i; i < sels.length; i++) {
+            (bool ok, bytes memory ret) = address(l).call(abi.encodePacked(sels[i], new bytes(256)));
+            assertFalse(ok, "must revert");
+            assertEq(ret.length, 0, "logic has a router-only selector");
+        }
+    }
+}
