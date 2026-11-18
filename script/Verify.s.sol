@@ -96,8 +96,8 @@ contract VerifyV3AutomationScript is CommonScript {
     function test() external {}
 }
 
-/// AeroFarmingRouter and AeroFarmingLogic are plain CREATE with no constructor args and no linked libraries; their
-/// addresses come from the deploy broadcast (AERO_ROUTER / AERO_LOGIC).
+/// AeroFarmingRouter and AeroFarmingLogic are plain CREATE with no constructor args and no linked libraries. The
+/// Makefile passes their addresses (AERO_ROUTER / AERO_LOGIC) from the deploy broadcast unless .env sets them.
 contract VerifyAeroFarmingRouterScript is CommonScript {
     function run() external view virtual {
         console.log(_verifyCmd(vm.envAddress("AERO_ROUTER"), "src/aero/AeroFarmingRouter.sol:AeroFarmingRouter"));

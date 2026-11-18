@@ -15,21 +15,22 @@ contract AeroFarmingRouterDeployTest is AeroForkBase {
         uint256 pk = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
         address deployer = vm.addr(pk);
         vm.setEnv("PRIVATE_KEY", vm.toString(bytes32(pk)));
-        vm.setEnv("ADMIN", vm.toString(adm));
-        vm.setEnv("OPERATOR", vm.toString(op));
+        vm.setEnv("AERO_ADMIN", vm.toString(adm));
+        vm.setEnv("AERO_OPERATOR", vm.toString(op));
         vm.setEnv("WITHDRAWER", vm.toString(wd));
         vm.setEnv("V3UTILS", vm.toString(V3UTILS));
-        vm.setEnv("GAUGE_FACTORY", vm.toString(GAUGE_FACTORY));
-        vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
-        vm.setEnv("COMPOUND_ENABLED", "true");
-        vm.setEnv("NATIVE_WETH", vm.toString(WETH));
+        vm.setEnv("AERO_GAUGE_FACTORY", vm.toString(GAUGE_FACTORY));
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(AERO));
+        vm.setEnv("AERO_COMPOUND_ENABLED", "true");
+        vm.setEnv("WETH", vm.toString(WETH));
+        vm.setEnv("NATIVE_MODE", "0");
 
         // env is process-global and forge runs tests in parallel, so the zero-address check shares this test
         AeroFarmingRouterScript script = new AeroFarmingRouterScript();
-        vm.setEnv("ADMIN", vm.toString(address(0)));
-        vm.expectRevert(bytes("ADMIN must be non-zero"));
+        vm.setEnv("AERO_ADMIN", vm.toString(address(0)));
+        vm.expectRevert(bytes("AERO_ADMIN must be non-zero"));
         script.run();
-        vm.setEnv("ADMIN", vm.toString(adm));
+        vm.setEnv("AERO_ADMIN", vm.toString(adm));
 
         vm.recordLogs();
         script.run();
@@ -62,22 +63,22 @@ contract AeroFarmingRouterDeployTest is AeroForkBase {
         assertEq(h.DOMAIN_SEPARATOR(), _domain(router_));
 
         // Base: COMPOUND_ENABLED must be true (env is process-global, so restored right after)
-        vm.setEnv("COMPOUND_ENABLED", "false");
-        vm.expectRevert(bytes("COMPOUND_ENABLED must be true on Base"));
+        vm.setEnv("AERO_COMPOUND_ENABLED", "false");
+        vm.expectRevert(bytes("AERO_COMPOUND_ENABLED must be true on Base"));
         script.run();
-        vm.setEnv("COMPOUND_ENABLED", "true");
+        vm.setEnv("AERO_COMPOUND_ENABLED", "true");
 
         // Base: claims pay AERO, so REWARD_TOKEN must not be the leaf voter's RECEIPT_TOKEN (xAERO)
         address baseReceipt = ILeafVoter(LEAF_VOTER).RECEIPT_TOKEN();
         assertTrue(baseReceipt != address(0) && baseReceipt != AERO);
-        vm.setEnv("REWARD_TOKEN", vm.toString(baseReceipt));
-        vm.expectRevert(bytes("REWARD_TOKEN must be the new AERO on Base"));
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(baseReceipt));
+        vm.expectRevert(bytes("AERO_REWARD_TOKEN must be the new AERO on Base"));
         script.run();
         // nor the legacy AERO, which is not the receipt token but is not what claims pay either
-        vm.setEnv("REWARD_TOKEN", vm.toString(LEGACY_AERO));
-        vm.expectRevert(bytes("REWARD_TOKEN must be the new AERO on Base"));
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(LEGACY_AERO));
+        vm.expectRevert(bytes("AERO_REWARD_TOKEN must be the new AERO on Base"));
         script.run();
-        vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(AERO));
 
         // the logic reads fee caps from V3Utils: a V3Utils without getMaxFeeX64 fails the deploy
         vm.mockCallRevert(V3UTILS, abi.encodeWithSelector(Common.getMaxFeeX64.selector), "");
@@ -88,22 +89,34 @@ contract AeroFarmingRouterDeployTest is AeroForkBase {
         // non-Base chain: COMPOUND_ENABLED must be false, REWARD_TOKEN must equal the leaf voter's RECEIPT_TOKEN
         vm.chainId(10);
         vm.mockCall(LEAF_VOTER, abi.encodeWithSelector(ILeafVoter.RECEIPT_TOKEN.selector), abi.encode(XAERO));
-        vm.setEnv("REWARD_TOKEN", vm.toString(XAERO));
-        vm.expectRevert(bytes("COMPOUND_ENABLED must be false off Base"));
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(XAERO));
+        vm.expectRevert(bytes("AERO_COMPOUND_ENABLED must be false off Base"));
         script.run(); // COMPOUND_ENABLED is still true
-        vm.setEnv("COMPOUND_ENABLED", "false");
-        vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
-        vm.expectRevert(bytes("REWARD_TOKEN must be the leaf voter RECEIPT_TOKEN"));
+        vm.setEnv("AERO_COMPOUND_ENABLED", "false");
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(AERO));
+        vm.expectRevert(bytes("AERO_REWARD_TOKEN must be the leaf voter RECEIPT_TOKEN"));
         script.run();
-        vm.setEnv("REWARD_TOKEN", vm.toString(XAERO));
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(XAERO));
         vm.recordLogs();
         script.run();
         logs = vm.getRecordedLogs();
         router_ = _routerFrom(logs);
         assertEq(AeroFarmingRouter(payable(router_)).rewardToken(), XAERO);
         assertFalse(AeroFarmingRouter(payable(router_)).compoundEnabled());
-        vm.setEnv("REWARD_TOKEN", vm.toString(AERO));
-        vm.setEnv("COMPOUND_ENABLED", "true");
+        assertEq(AeroFarmingRouter(payable(router_)).weth(), WETH);
+
+        // enshrined native (Arc, NATIVE_MODE=1): the router runs ERC20-only, whatever WETH says
+        vm.setEnv("NATIVE_MODE", "1");
+        vm.recordLogs();
+        script.run();
+        router_ = _routerFrom(vm.getRecordedLogs());
+        assertEq(AeroFarmingRouter(payable(router_)).weth(), address(0));
+        vm.setEnv("NATIVE_MODE", "2");
+        vm.expectRevert(bytes("NATIVE_MODE must be 0 (WRAPPED) or 1 (ENSHRINED)"));
+        script.run();
+        vm.setEnv("NATIVE_MODE", "0");
+        vm.setEnv("AERO_REWARD_TOKEN", vm.toString(AERO));
+        vm.setEnv("AERO_COMPOUND_ENABLED", "true");
     }
 
     function _routerFrom(Vm.Log[] memory logs) internal pure returns (address router_) {

@@ -36,10 +36,6 @@ structhash:
 	$(eval CONTRACT=StructHash)
 nfpm:
 	$(eval CONTRACT=Nfpm)
-aerorouter:
-	$(eval CONTRACT=AeroFarmingRouter)
-aerologic:
-	$(eval CONTRACT=AeroFarmingLogic)
 commonlib:
 	$(eval CONTRACT=CommonLib)
 deploy-%: %
@@ -48,7 +44,6 @@ deploy-v3utils: libs-check-v3utils
 deploy-structhash:
 deploy-nfpm:
 deploy-commonlib:
-deploy-aerorouter:
 deploy-v3automation: libs-check-v3automation
 
 verify-%: %
@@ -57,8 +52,6 @@ verify-v3utils: libs-check-v3utils
 verify-structhash:
 verify-nfpm:
 verify-commonlib:
-verify-aerorouter:
-verify-aerologic:
 verify-v3automation: libs-check-v3automation v3automation
 	$(VERIFY_CMD)
 init-v3utils:
@@ -83,3 +76,36 @@ deploy-everything:
 	make init-v3utils
 	make init-v3automation
 	make grant-role
+
+# --- Aero farming router (src/aero) ---------------------------------------------------------------
+# Plain CREATE, not CREATE2 (the init args differ per chain), and no linked libraries, so the generic
+# deploy-%/verify-% rules above do not fit. The verify targets read the deployed addresses from the
+# deploy broadcast for CHAIN_ID unless .env sets AERO_ROUTER / AERO_LOGIC.
+# FOUNDRY_EVM_VERSION=cancun is required to simulate against Aero's LeafVoter, which uses Cancun
+# opcodes. It does not change the bytecode: solc 0.8.15 still emits london. The verify targets run
+# without it, so the explorer gets the real (london) settings.
+#   make dryrun-aerorouter   simulate the deploy against RPC_URL (no transactions)
+#   make deploy-aerorouter   deploy the logic + router and initialize the router
+#   make verify-aero         verify both on the explorer (VERIFIER / VERIFIER_URL / VERIFIER_API_KEY)
+#   make deploy-aero         all of the above except the dry run
+.PHONY: dryrun-aerorouter deploy-aerorouter verify-aerorouter verify-aerologic verify-aero deploy-aero
+AERO_DEPLOY_CMD = FOUNDRY_EVM_VERSION=cancun forge script script/AeroFarmingRouter.s.sol:AeroFarmingRouterScript --rpc-url $(RPC_URL)
+AERO_BROADCAST = broadcast/AeroFarmingRouter.s.sol/$(CHAIN_ID)/run-latest.json
+aero_deployed = $(shell jq -r '[.transactions[] | select(.transactionType == "CREATE" and .contractName == "$(1)")][0].contractAddress // empty' $(AERO_BROADCAST) 2>/dev/null)
+AERO_ROUTER ?= $(call aero_deployed,AeroFarmingRouter)
+AERO_LOGIC ?= $(call aero_deployed,AeroFarmingLogic)
+
+dryrun-aerorouter:
+	$(AERO_DEPLOY_CMD)
+deploy-aerorouter:
+	$(AERO_DEPLOY_CMD) --broadcast
+verify-aerorouter:
+	@test -n "$(AERO_ROUTER)" || { echo "no AeroFarmingRouter in $(AERO_BROADCAST); set AERO_ROUTER"; exit 1; }
+	AERO_ROUTER=$(AERO_ROUTER) forge script script/Verify.s.sol:VerifyAeroFarmingRouterScript | awk 'END{print}' | bash
+verify-aerologic:
+	@test -n "$(AERO_LOGIC)" || { echo "no AeroFarmingLogic in $(AERO_BROADCAST); set AERO_LOGIC"; exit 1; }
+	AERO_LOGIC=$(AERO_LOGIC) forge script script/Verify.s.sol:VerifyAeroFarmingLogicScript | awk 'END{print}' | bash
+verify-aero: verify-aerorouter verify-aerologic
+deploy-aero:
+	make deploy-aerorouter
+	make verify-aero
