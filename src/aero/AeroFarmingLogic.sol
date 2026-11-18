@@ -258,8 +258,10 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         IERC20(reward).forceApprove(v, 0);
     }
 
-    /// @dev Claims the emissions (the position stays staked), takes the gas fee, optionally swaps the rest into
-    /// `p.targetToken` (Base only) and pays the account.
+    /// @dev Claims the emissions (the position stays staked), takes the performance fee, optionally swaps the rest
+    /// into `p.targetToken` (Base only) and pays the account. Emissions are yield, so as with V3Automation's
+    /// AUTO_HARVEST (performance fee on collected fees; its gas fee applies only to principal, none here) and with
+    /// compound, the performance fee is the only fee: gas is folded into it.
     function _harvest(address account, address gauge, uint256 tokenId, HarvestParams memory p) internal {
         INonfungiblePositionManager nfpm = _nfpm();
         address reward = AeroStorage.layout().rewardToken;
@@ -270,7 +272,7 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         uint256[] memory before = _snapshot(list);
 
         uint256 claimed = _claim(gauge, account, tokenId, reward);
-        uint256 fee = _harvestFee(nfpm, tokenId, account, claimed, p.gasFeeX64);
+        uint256 fee = _harvestFee(nfpm, tokenId, account, claimed, p.performanceFeeX64);
         if (doSwap) {
             uint256 amountIn = claimed - fee;
             // a requested swap must run (and so meet amountOutMin); only "nothing claimed" skips it
@@ -289,7 +291,8 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         uint64 feeX64
     ) private returns (uint256) {
         (address token0, address token1,) = _positionInfo(nfpm, tokenId);
-        return _takeFee(address(nfpm), tokenId, account, token0, token1, claimed, feeX64, Common.FeeType.GAS_FEE);
+        return
+            _takeFee(address(nfpm), tokenId, account, token0, token1, claimed, feeX64, Common.FeeType.PERFORMANCE_FEE);
     }
 
     /// @dev Same logic as CommonLib.swap, inline so the logic needs no library link.

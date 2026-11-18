@@ -44,7 +44,7 @@ interface IAeroFarmingLogic {
         address targetToken; // 0 or the reward token => pay the reward token as is
         uint256 amountOutMin;
         bytes swapData;
-        uint64 gasFeeX64;
+        uint64 performanceFeeX64; // the only harvest fee (gas folded in), as on V3Automation AUTO_HARVEST yield
     }
 
     event FarmAction(

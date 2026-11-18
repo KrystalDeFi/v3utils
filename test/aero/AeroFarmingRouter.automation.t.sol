@@ -573,7 +573,7 @@ contract AeroFarmingRouterAutoHarvestTest is AutomationBase {
                 assertEq(d.feeAmount1, 0);
                 assertEq(d.feeAmount2, 0);
                 assertEq(d.feeX64, feeX64);
-                assertEq(uint8(d.feeType), uint8(Common.FeeType.GAS_FEE));
+                assertEq(uint8(d.feeType), uint8(Common.FeeType.PERFORMANCE_FEE));
             } else if (logs[i].topics[0] == FarmAction.selector) {
                 ++actions;
                 assertEq(logs[i].topics[1], bytes32(uint256(uint160(user))));
@@ -590,12 +590,12 @@ contract AeroFarmingRouterAutoHarvestTest is AutomationBase {
         assertEq(actions, 1);
     }
 
-    function test_autoHarvest_noSwap_paysAeroMinusGasFee() public {
+    function test_autoHarvest_noSwap_paysAeroMinusPerformanceFee() public {
         uint256 claimed = _earned();
         assertGt(claimed, 0);
         IAeroFarmingLogic.HarvestParams memory h;
-        h.gasFeeX64 = 1 << 62;
-        uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
+        h.performanceFeeX64 = 1 << 62;
+        uint256 fee = FullMath.mulDiv(claimed, h.performanceFeeX64, 2 ** 64);
         assertGt(fee, 0);
         OrderParams memory p = _harvestOrder(h);
         uint256 u0 = IERC20(AERO).balanceOf(user);
@@ -609,12 +609,27 @@ contract AeroFarmingRouterAutoHarvestTest is AutomationBase {
         assertEq(IERC721(NFPM).balanceOf(address(router)), 0);
         assertTrue(ICLGauge(GAUGE_B_BASE).stakedContains(user, id));
         assertEq(IERC721(NFPM).ownerOf(id), GAUGE_B_BASE);
-        _assertHarvestLogs(vm.getRecordedLogs(), claimed, fee, h.gasFeeX64);
+        _assertHarvestLogs(vm.getRecordedLogs(), claimed, fee, h.performanceFeeX64);
     }
 
-    function test_autoHarvest_gasFeeAboveCapReverts() public {
+    /// The fee is checked against V3Utils' PERFORMANCE_FEE cap (32%), not the GAS_FEE cap (30%): a fee just above
+    /// 30% goes through and is charged in full.
+    function test_autoHarvest_usesPerformanceCapNotGasCap() public {
+        uint256 claimed = _earned();
         IAeroFarmingLogic.HarvestParams memory h;
-        h.gasFeeX64 = 5534023222112865280 + 1;
+        h.performanceFeeX64 = 5534023222112865280 + 1; // V3Utils GAS_FEE cap + 1
+        assertGt(h.performanceFeeX64, V3Utils(payable(V3UTILS)).getMaxFeeX64(Common.FeeType.GAS_FEE));
+        uint256 fee = FullMath.mulDiv(claimed, h.performanceFeeX64, 2 ** 64);
+        OrderParams memory p = _harvestOrder(h);
+        uint256 ft0 = IERC20(AERO).balanceOf(feeTaker);
+        vm.prank(operator);
+        _executeOrder(p);
+        assertEq(IERC20(AERO).balanceOf(feeTaker) - ft0, fee);
+    }
+
+    function test_autoHarvest_performanceFeeAboveCapReverts() public {
+        IAeroFarmingLogic.HarvestParams memory h;
+        h.performanceFeeX64 = 5902958103587057000 + 1; // V3Utils PERFORMANCE_FEE cap + 1
         OrderParams memory p = _harvestOrder(h);
         vm.prank(operator);
         vm.expectRevert(IAeroFarmingLogic.FeeTooHigh.selector);
@@ -624,10 +639,10 @@ contract AeroFarmingRouterAutoHarvestTest is AutomationBase {
     function test_autoHarvest_swapPath_routerCalled() public {
         uint256 claimed = _earned();
         IAeroFarmingLogic.HarvestParams memory h;
-        h.gasFeeX64 = 1 << 62;
+        h.performanceFeeX64 = 1 << 62;
         h.targetToken = WETH;
         h.amountOutMin = 1 ether;
-        uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
+        uint256 fee = FullMath.mulDiv(claimed, h.performanceFeeX64, 2 ** 64);
         address swapRouter = makeAddr("aeroMockRouter");
         vm.etch(swapRouter, address(new MockSwapRouter()).code);
         vm.mockCall(V3UTILS, abi.encodeWithSignature("swapRouter()"), abi.encode(swapRouter));
@@ -697,9 +712,9 @@ contract AeroFarmingRouterAutoHarvestTest is AutomationBase {
     function test_autoHarvest_partialFill_leftoverToUser() public {
         uint256 claimed = _earned();
         IAeroFarmingLogic.HarvestParams memory h;
-        h.gasFeeX64 = 1 << 62;
+        h.performanceFeeX64 = 1 << 62;
         h.targetToken = WETH;
-        uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
+        uint256 fee = FullMath.mulDiv(claimed, h.performanceFeeX64, 2 ** 64);
         uint256 net = claimed - fee;
         uint256 pulled = net / 4;
         address swapRouter = _etchRouter("aeroPartialRouter", address(new PartialFillRouter()));
@@ -721,10 +736,10 @@ contract AeroFarmingRouterAutoHarvestTest is AutomationBase {
     function test_autoHarvest_targetIsReward_noSwap() public {
         uint256 claimed = _earned();
         IAeroFarmingLogic.HarvestParams memory h;
-        h.gasFeeX64 = 1 << 62;
+        h.performanceFeeX64 = 1 << 62;
         h.targetToken = AERO;
         h.swapData = hex"deadbeef"; // would fail if a swap were attempted
-        uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
+        uint256 fee = FullMath.mulDiv(claimed, h.performanceFeeX64, 2 ** 64);
         OrderParams memory p = _harvestOrder(h);
         uint256 uA = IERC20(AERO).balanceOf(user);
         vm.expectCall(V3UTILS, abi.encodeWithSignature("swapRouter()"), 0);

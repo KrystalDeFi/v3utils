@@ -194,13 +194,14 @@ Revisit if xAERO markets appear.
 ## 6. Fees
 Same as V3Utils (user decision). For zap, add, remove, rebalance and exit, the app passes V3Utils's
 existing fee fields, the helper passes them through, and V3Utils takes and records the fee as it does
-today. Harvest has no fee.
+today. A direct `gauge.claimEmissions` harvest (§5.4) goes through no Krystal contract and has no fee;
+AUTO_HARVEST takes a performance fee (§7).
 
-**Compound is the exception: the helper takes the fee itself**, so it is labelled `PERFORMANCE_FEE`
+**Compound and AUTO_HARVEST are the exception: the helper takes the fee itself**, so it is labelled `PERFORMANCE_FEE`
 (user asked for the correct label). The deployed V3Utils can't do this: `swapAndIncreaseLiquidity` has
 only `protocolFeeX64`, hardcoded as `FeeType.LIQUIDITY_FEE` (`V3Utils.sol:578`). The helper:
 1. Deducts `performanceFeeX64` from the claimed AERO. Use the same X64 math as V3Utils, and read the cap live
-   from `V3Utils.getMaxFeeX64(feeType)` (harvest's gas fee too), so V3Utils' `setMaxFeeX64` is the one place to
+   from `V3Utils.getMaxFeeX64(feeType)` (AUTO_HARVEST too), so V3Utils' `setMaxFeeX64` is the one place to
    change caps. (2026‑11‑16 review; the deploy script checks that the getter exists.)
 2. Sends the fee to `V3Utils.FEE_TAKER()`, read live so it follows V3Utils.
 3. Emits `DeductFees` with the same struct and semantics as `Common`, with `FeeType.PERFORMANCE_FEE`, and
@@ -249,8 +250,11 @@ again. Upgradeability (§4) is a backstop, not the plan for automation.
       only a zero claim skips the swap.
     - **Other chains:** send the xAERO to the user unswapped. `targetToken` must be the reward token or
       zero.
-    - **Fee:** gas fee only. There is no performance fee, consistent with "no fee on harvest".
-      *(My call: the gas fee covers the operator's cost.)*
+    - **Fee:** `performanceFeeX64` on the claimed reward, labelled `PERFORMANCE_FEE` (2026‑11‑18, user
+      decision; replaces the earlier gas‑fee‑only call). Emissions are yield: V3Automation's AUTO_HARVEST charges
+      the performance fee on collected fees (its gas fee applies only to principal, which a harvest never
+      removes), and compound already folds gas into its performance fee. One fee, capped by V3Utils'
+      PERFORMANCE_FEE cap.
   - Add and remove liquidity stay user-only.
 - Approvals: AUTO_COMPOUND and AUTO_HARVEST need `approveForClaim(helper)`. AUTO_ADJUST and AUTO_EXIT need
   only `setApprovalForAll`.

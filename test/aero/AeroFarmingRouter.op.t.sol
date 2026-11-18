@@ -66,8 +66,8 @@ contract AeroFarmingRouterOpTest is AutomationBase {
         uint256 claimed = _earned();
         assertGt(claimed, 0, "no xAERO emissions accrued");
         IAeroFarmingLogic.HarvestParams memory h; // no target: pay the reward as is
-        h.gasFeeX64 = 1 << 62;
-        uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
+        h.performanceFeeX64 = 1 << 62;
+        uint256 fee = FullMath.mulDiv(claimed, h.performanceFeeX64, 2 ** 64);
         OrderParams memory p = _harvest(h);
         uint256 u0 = _bal(XAERO, user);
         uint256 ft0 = _bal(XAERO, feeTaker);
@@ -87,8 +87,8 @@ contract AeroFarmingRouterOpTest is AutomationBase {
         assertGt(claimed, 0, "no xAERO emissions accrued");
         IAeroFarmingLogic.HarvestParams memory h;
         h.targetToken = XAERO; // == reward: no swap, so compoundEnabled=false does not matter
-        h.gasFeeX64 = 1 << 62;
-        uint256 fee = FullMath.mulDiv(claimed, h.gasFeeX64, 2 ** 64);
+        h.performanceFeeX64 = 1 << 62;
+        uint256 fee = FullMath.mulDiv(claimed, h.performanceFeeX64, 2 ** 64);
         OrderParams memory p = _harvest(h);
         uint256 u0 = _bal(XAERO, user);
         uint256 hx = _bal(XAERO, address(router));
@@ -101,7 +101,7 @@ contract AeroFarmingRouterOpTest is AutomationBase {
     function test_op_autoHarvest_swapReverts() public {
         IAeroFarmingLogic.HarvestParams memory h;
         h.targetToken = WETH;
-        h.gasFeeX64 = 1 << 62;
+        h.performanceFeeX64 = 1 << 62;
         OrderParams memory p = _harvest(h);
         vm.prank(operator);
         vm.expectRevert(IAeroFarmingLogic.CompoundDisabled.selector);
