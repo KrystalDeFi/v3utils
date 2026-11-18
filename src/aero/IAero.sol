@@ -20,6 +20,28 @@ interface ICLGaugeFactory {
     function effectivePenaltyConfig(address gauge) external view returns (uint256 minStakeBlocks, uint256 penaltyRate);
 }
 
+/// @dev Aero CL position manager: `positions` returns tickSpacing where Uniswap v3 returns fee.
+interface IAeroNfpm {
+    function factory() external view returns (address);
+    function positions(uint256 tokenId)
+        external
+        view
+        returns (
+            uint96 nonce,
+            address operator,
+            address token0,
+            address token1,
+            int24 tickSpacing,
+            int24 tickLower,
+            int24 tickUpper,
+            uint128 liquidity,
+            uint256 feeGrowthInside0LastX128,
+            uint256 feeGrowthInside1LastX128,
+            uint128 tokensOwed0,
+            uint128 tokensOwed1
+        );
+}
+
 interface ICLPool {
     function gauge() external view returns (address);
 }

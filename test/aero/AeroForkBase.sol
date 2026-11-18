@@ -106,38 +106,35 @@ abstract contract AeroForkBase is Test {
         router.execute{value: value}(abi.encodeCall(IAeroFarmingLogic.zapInAndStake, (p, unwrap)));
     }
 
-    function _addLiquidity(address gauge, Common.SwapAndIncreaseLiquidityParams memory p, bool unwrap) internal {
-        router.execute(abi.encodeCall(IAeroFarmingLogic.addLiquidity, (gauge, p, unwrap)));
+    function _addLiquidity(Common.SwapAndIncreaseLiquidityParams memory p, bool unwrap) internal {
+        router.execute(abi.encodeCall(IAeroFarmingLogic.addLiquidity, (p, unwrap)));
     }
 
-    function _removeLiquidity(address gauge, uint256 tokenId, V3Utils.Instructions memory ins) internal {
-        router.execute(abi.encodeCall(IAeroFarmingLogic.removeLiquidity, (gauge, tokenId, ins)));
+    function _removeLiquidity(uint256 tokenId, V3Utils.Instructions memory ins) internal {
+        router.execute(abi.encodeCall(IAeroFarmingLogic.removeLiquidity, (tokenId, ins)));
     }
 
-    function _exit(address gauge, uint256 tokenId, V3Utils.Instructions memory ins) internal {
-        router.execute(abi.encodeCall(IAeroFarmingLogic.exit, (gauge, tokenId, ins)));
+    function _exit(uint256 tokenId, V3Utils.Instructions memory ins) internal {
+        router.execute(abi.encodeCall(IAeroFarmingLogic.exit, (tokenId, ins)));
     }
 
-    function _rebalance(address gauge, uint256 tokenId, V3Utils.Instructions memory ins)
-        internal
-        returns (uint256 newTokenId)
-    {
-        bytes memory ret = router.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (gauge, tokenId, ins)));
+    function _rebalance(uint256 tokenId, V3Utils.Instructions memory ins) internal returns (uint256 newTokenId) {
+        bytes memory ret = router.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (tokenId, ins)));
         assertEq(ret.length, 32, "rebalance return data");
         newTokenId = abi.decode(ret, (uint256));
     }
 
     /// @dev For a vm.expectRevert'ed rebalance (see `_zapInExpectRevert`).
-    function _rebalanceExpectRevert(address gauge, uint256 tokenId, V3Utils.Instructions memory ins) internal {
-        router.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (gauge, tokenId, ins)));
+    function _rebalanceExpectRevert(uint256 tokenId, V3Utils.Instructions memory ins) internal {
+        router.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (tokenId, ins)));
     }
 
-    function _compound(address gauge, uint256 tokenId, IAeroFarmingLogic.CompoundParams memory p) internal {
-        router.execute(abi.encodeCall(IAeroFarmingLogic.compound, (gauge, tokenId, p)));
+    function _compound(uint256 tokenId, IAeroFarmingLogic.CompoundParams memory p) internal {
+        router.execute(abi.encodeCall(IAeroFarmingLogic.compound, (tokenId, p)));
     }
 
     function _executeOrder(OrderParams memory p) internal returns (uint256) {
-        return router.executeAutomation(p.account, p.gauge, p.tokenId, p.action, p.actionData, p.order, p.signature);
+        return router.executeAutomation(p.account, p.tokenId, p.action, p.actionData, p.order, p.signature);
     }
 }
 

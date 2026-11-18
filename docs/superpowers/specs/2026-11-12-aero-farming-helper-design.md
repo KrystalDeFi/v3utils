@@ -111,21 +111,27 @@ user ──tx──▶ AeroFarmingHelper ──withdrawFrom──▶ CLGauge ─
   - `gauge.approveForClaim(helper, true)`, needed **only for compound**.
 - Zap‑in needs no gauge approval: the helper mints to itself and calls `depositFor(newId, user)`. The usual
   ERC20 approvals to the helper apply for tokens the user provides.
-- The helper takes the gauge address as a parameter and checks
-  `CLGaugeFactory(factory).isGauge(gauge)` and `gauge.nft() == nfpm`. `factory` is fixed per deployment.
+- **No flow takes a gauge from its caller** (2026‑11‑18, user decision; a caller-chosen gauge was never checked
+  against the position's pool). `AeroGauge` derives it: `nfpm = factory.nft()`, the position's (or the mint
+  params') `token0, token1, tickSpacing`, `pool = nfpm.factory().getPool(...)`, `gauge = pool.gauge()`, then
+  `CLGaugeFactory(factory).isGauge(gauge)` and `gauge.nft() == nfpm`. No pool or a foreign gauge reverts
+  `InvalidGauge`. `factory` is fixed per deployment. `AeroGauge` is an internal library compiled into both the
+  router (operator path) and the logic (user flows).
 - Leftovers are measured as **balance deltas within the call**, never as the helper's whole balance.
 
 ## 5. Flows (first version)
 
-All flows: `msg.sender` is the account (the stake owner). The gauge is validated as in §4. There is a
+All flows: `msg.sender` is the account (the stake owner). The gauge is derived as in §4 (from `tokenId`, or for
+zap‑in from the mint params): `addLiquidity(params, unwrap)`, `removeLiquidity(tokenId, ins)`, `exit(tokenId, ins)`,
+`rebalance(tokenId, ins)`, `compound(tokenId, params)`. Rebalance restakes the new NFT in the same gauge: V3Utils'
+CHANGE_RANGE keeps the position's pool. There is a
 deadline. Leftover tokens are returned to the user, with optional unwrap to native, mirroring V3Utils `unwrap`.
 
 ### 5.1 Zap in and stake
 `zapInAndStake(params, unwrap)` takes no gauge (2026‑11‑18, user decision): a gauge is tied to one pool, so it is
 derived from the mint params. `nfpm` must be the gauge factory's `nft()`; the pool is
 `nfpm.factory().getPool(token0, token1, tickSpacing)` and the gauge is `pool.gauge()`, which must pass the same
-factory check as every other flow (`isGauge`, `gauge.nft()`). No pool, or a gauge from another factory, reverts
-`InvalidGauge`.
+factory check as every other flow (§4). No pool, or a gauge from another factory, reverts `InvalidGauge`.
 1. Pull the user's input tokens, or take `msg.value`, then approve V3Utils.
 2. Call `V3Utils.swapAndMint(params)` with `recipient = helper`, `protocol = AERODROME`.
 3. Approve the gauge for `newId` and call `depositFor(newId, user)`.
@@ -343,8 +349,9 @@ that the router delegatecalls through **explicit** entry points.
   config setters, rescue (`withdrawERC20/ERC721/Native`), the NFT receive guard, `receive()` (WETH only), order
   signing/cancel, and two entry points:
   - `execute(bytes data)` — users. Delegatecalls the logic with `data`; `msg.sender` (the account) is preserved.
-  - `executeAutomation(address account, address gauge, uint256 tokenId, AutoAction action, bytes actionData,
-    bytes order, bytes signature)` — `OPERATOR_ROLE`. Validates gauge, stake ownership, order, cancel; then the
+  - `executeAutomation(address account, uint256 tokenId, AutoAction action, bytes actionData, bytes order,
+    bytes signature)` — `OPERATOR_ROLE`. Derives the gauge from `tokenId` (§4), checks stake ownership, order,
+    cancel; then the
     **router builds the calldata itself** for the logic's automated entry, records `account` as the authorised
     automation account in shared storage, delegatecalls, and clears it.
   - `setImplementation(address)` (`ADMIN_ROLE`; must have code) and `lockImplementation()` (`ADMIN_ROLE`, one‑way),
@@ -386,6 +393,6 @@ that the router delegatecalls through **explicit** entry points.
     `AeroStorage.automationAccount` (the automated entry); never from calldata alone;
   - no self‑delegatecall multicall (it would reuse `msg.value` across calls);
   - `AeroStorage` fields are append‑only (never reorder, retype or remove);
-  - the router's `_validateGauge` must stay in step with the logic's (same factory and NFT checks), since the router
-    validates the gauge for `executeAutomation` before the logic runs.
+  - gauges are derived with `AeroGauge`, never taken from calldata; the router's compiled copy is frozen, so a future
+    logic must accept the gauge the router derives for `executeAutomated`.
 - **Removed:** UUPS proxy, `AeroAutomationModule`, the fallback, `IAeroAutomation`, the `structHash` config.

@@ -8,6 +8,7 @@ import "v3-core/libraries/FullMath.sol";
 import "./IAero.sol";
 import "./IAeroFarmingLogic.sol";
 import "./AeroStorage.sol";
+import "./AeroGauge.sol";
 
 interface V3UtilsLike {
     function swapAndMint(Common.SwapAndMintParams calldata params)
@@ -53,7 +54,12 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         onlyDelegateCall
         returns (uint256 tokenId)
     {
-        (address gauge, INonfungiblePositionManager nfpm) = _gaugeOf(p);
+        if (p.protocol != Nfpm.Protocol.AERODROME || p.token0 == p.token1) {
+            revert InvalidInstructions();
+        }
+        (address gauge, address n) = AeroGauge.ofPool(address(p.token0), address(p.token1), p.tickSpacing);
+        if (address(p.nfpm) != n) revert InvalidInstructions();
+        INonfungiblePositionManager nfpm = INonfungiblePositionManager(n);
         p.recipient = address(this);
 
         (address[3] memory tokens, uint256[3] memory amounts) =
@@ -73,15 +79,14 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         emit FarmAction(msg.sender, gauge, tokenId, tokenId, Action.ZAP_IN, false);
     }
 
-    function addLiquidity(address gauge, Common.SwapAndIncreaseLiquidityParams memory p, bool unwrap)
+    function addLiquidity(Common.SwapAndIncreaseLiquidityParams memory p, bool unwrap)
         external
         payable
         onlyDelegateCall
     {
-        INonfungiblePositionManager nfpm = _validateGauge(gauge);
-        if (address(p.nfpm) != address(nfpm) || p.protocol != Nfpm.Protocol.AERODROME) {
-            revert InvalidInstructions();
-        }
+        (address gauge, address n) = AeroGauge.ofToken(p.tokenId);
+        if (address(p.nfpm) != n || p.protocol != Nfpm.Protocol.AERODROME) revert InvalidInstructions();
+        INonfungiblePositionManager nfpm = INonfungiblePositionManager(n);
         _checkUnwrap(unwrap);
         uint256 tokenId = p.tokenId;
         p.recipient = address(this);
@@ -102,34 +107,33 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         emit FarmAction(msg.sender, gauge, tokenId, tokenId, Action.ADD_LIQUIDITY, false);
     }
 
-    function removeLiquidity(address gauge, uint256 tokenId, V3Utils.Instructions memory ins)
-        external
-        onlyDelegateCall
-    {
-        _modify(msg.sender, gauge, tokenId, ins, Action.REMOVE_LIQUIDITY, false);
+    function removeLiquidity(uint256 tokenId, V3Utils.Instructions memory ins) external onlyDelegateCall {
+        _modify(msg.sender, _gauge(tokenId), tokenId, ins, Action.REMOVE_LIQUIDITY, false);
     }
 
-    function exit(address gauge, uint256 tokenId, V3Utils.Instructions memory ins) external onlyDelegateCall {
-        _modify(msg.sender, gauge, tokenId, ins, Action.EXIT, false);
+    function exit(uint256 tokenId, V3Utils.Instructions memory ins) external onlyDelegateCall {
+        _modify(msg.sender, _gauge(tokenId), tokenId, ins, Action.EXIT, false);
     }
 
-    function rebalance(address gauge, uint256 tokenId, V3Utils.Instructions memory ins)
+    /// @dev V3Utils' CHANGE_RANGE keeps the position's pool, so the new NFT is staked in the same gauge.
+    function rebalance(uint256 tokenId, V3Utils.Instructions memory ins)
         external
         onlyDelegateCall
         returns (uint256 newTokenId)
     {
-        newTokenId = _modify(msg.sender, gauge, tokenId, ins, Action.REBALANCE, false);
+        newTokenId = _modify(msg.sender, _gauge(tokenId), tokenId, ins, Action.REBALANCE, false);
     }
 
-    function compound(address gauge, uint256 tokenId, CompoundParams memory p) external onlyDelegateCall {
-        _compound(msg.sender, gauge, tokenId, p, false);
+    function compound(uint256 tokenId, CompoundParams memory p) external onlyDelegateCall {
+        _compound(msg.sender, _gauge(tokenId), tokenId, p, false);
     }
 
     // ---------------------------------------------------------------- operator flows
 
-    /// @dev The router records `account` in AeroStorage only around its own call to this function (after checking
-    /// the gauge, that `account` owns the stake, and `account`'s signed, uncancelled order); through `execute` the
-    /// recorded account is zero, so this reverts.
+    /// @dev The router records `account` in AeroStorage only around its own call to this function (after deriving
+    /// `gauge` from `tokenId` with AeroGauge, checking that `account` owns the stake, and `account`'s signed,
+    /// uncancelled order); through `execute` the recorded account is zero, so this reverts. `gauge` is therefore
+    /// router-derived, never caller-chosen.
     function executeAutomated(
         AutoAction action,
         address account,
@@ -168,7 +172,7 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         internal
     {
         if (!AeroStorage.layout().compoundEnabled) revert CompoundDisabled();
-        INonfungiblePositionManager nfpm = _validateGauge(gauge);
+        INonfungiblePositionManager nfpm = _nfpm();
         _checkUnwrap(p.unwrap);
         (address token0, address token1,) = _positionInfo(nfpm, tokenId);
         address[] memory list = _tokenSet(token0, token1, AeroStorage.layout().rewardToken, address(0));
@@ -257,7 +261,7 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
     /// @dev Claims the emissions (the position stays staked), takes the gas fee, optionally swaps the rest into
     /// `p.targetToken` (Base only) and pays the account.
     function _harvest(address account, address gauge, uint256 tokenId, HarvestParams memory p) internal {
-        INonfungiblePositionManager nfpm = _validateGauge(gauge);
+        INonfungiblePositionManager nfpm = _nfpm();
         address reward = AeroStorage.layout().rewardToken;
         address target = p.targetToken;
         bool doSwap = target != address(0) && target != reward;
@@ -358,7 +362,7 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         Action action,
         bool automated
     ) internal returns (uint256 tokenIdAfter) {
-        INonfungiblePositionManager nfpm = _validateGauge(gauge);
+        INonfungiblePositionManager nfpm = _nfpm();
         address[] memory list = _prepareModify(nfpm, tokenId, ins, action);
         bool unwrap = ins.unwrap;
         ins.recipient = address(this);
@@ -497,29 +501,14 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         if (!ok) revert NativeTransferFailed();
     }
 
-    function _validateGauge(address gauge) internal view returns (INonfungiblePositionManager nfpm) {
-        ICLGaugeFactory f = ICLGaugeFactory(AeroStorage.layout().gaugeFactory);
-        if (!f.isGauge(gauge)) revert InvalidGauge();
-        address n = ICLGauge(gauge).nft();
-        if (n != f.nft()) revert InvalidGauge();
-        nfpm = INonfungiblePositionManager(n);
+    /// @dev The gauge of `tokenId`'s pool (user flows; the operator path gets it derived by the router).
+    function _gauge(uint256 tokenId) internal view returns (address gauge) {
+        (gauge,) = AeroGauge.ofToken(tokenId);
     }
 
-    /// @dev The gauge of the pool `p` mints into: the factory's NFPM, then pool (token0, token1, tickSpacing) of
-    /// that NFPM's pool factory, then the pool's gauge, which must be one of the configured gauge factory's.
-    function _gaugeOf(Common.SwapAndMintParams memory p)
-        internal
-        view
-        returns (address gauge, INonfungiblePositionManager nfpm)
-    {
-        nfpm = INonfungiblePositionManager(ICLGaugeFactory(AeroStorage.layout().gaugeFactory).nft());
-        if (address(p.nfpm) != address(nfpm) || p.protocol != Nfpm.Protocol.AERODROME || p.token0 == p.token1) {
-            revert InvalidInstructions();
-        }
-        address pool = ICLFactory(nfpm.factory()).getPool(address(p.token0), address(p.token1), p.tickSpacing);
-        if (pool == address(0)) revert InvalidGauge();
-        gauge = ICLPool(pool).gauge();
-        _validateGauge(gauge);
+    /// @dev The position manager of the configured gauge factory (every derived gauge's NFT manager).
+    function _nfpm() internal view returns (INonfungiblePositionManager) {
+        return INonfungiblePositionManager(ICLGaugeFactory(AeroStorage.layout().gaugeFactory).nft());
     }
 
     function _requireLive(address gauge) internal view {

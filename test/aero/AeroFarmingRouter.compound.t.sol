@@ -119,7 +119,7 @@ contract AeroFarmingRouterCompoundTest is AeroForkBase {
 
         vm.recordLogs();
         vm.prank(user);
-        _compound(GAUGE_B_BASE, id, p);
+        _compound(id, p);
 
         assertGt(_liq(), l0);
         assertEq(_bal(AERO, feeTaker) - ft0, expectedFee);
@@ -173,14 +173,14 @@ contract AeroFarmingRouterCompoundTest is AeroForkBase {
         IAeroFarmingLogic.CompoundParams memory p = _params(0);
         vm.prank(user);
         vm.expectRevert(bytes("NA"));
-        _compound(GAUGE_B_BASE, id, p);
+        _compound(id, p);
     }
 
     function test_compound_feeAboveCapReverts() public {
         IAeroFarmingLogic.CompoundParams memory p = _params(5902958103587057001);
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.FeeTooHigh.selector);
-        _compound(GAUGE_B_BASE, id, p);
+        _compound(id, p);
     }
 
     /// The cap is read from V3Utils, so lowering it there (setMaxFeeX64) lowers it here too.
@@ -194,13 +194,13 @@ contract AeroFarmingRouterCompoundTest is AeroForkBase {
         IAeroFarmingLogic.CompoundParams memory p = _params(lowered + 1);
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.FeeTooHigh.selector);
-        _compound(GAUGE_B_BASE, id, p);
+        _compound(id, p);
 
         p = _params(lowered);
         uint256 ft0 = _bal(AERO, feeTaker);
         uint256 claimed = _earned();
         vm.prank(user);
-        _compound(GAUGE_B_BASE, id, p);
+        _compound(id, p);
         // the performance fee is the only compound fee: nothing else reaches the fee taker
         assertEq(_bal(AERO, feeTaker) - ft0, FullMath.mulDiv(claimed, lowered, 2 ** 64));
     }
@@ -211,7 +211,7 @@ contract AeroFarmingRouterCompoundTest is AeroForkBase {
         IAeroFarmingLogic.CompoundParams memory p = _params(0);
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.CompoundDisabled.selector);
-        _compound(GAUGE_B_BASE, id, p);
+        _compound(id, p);
     }
 
     /// R2: the deployed V3Utils does not revert when amountIn0 exceeds the available claim and swapData0 is empty
@@ -230,7 +230,7 @@ contract AeroFarmingRouterCompoundTest is AeroForkBase {
         uint256 ft0 = _bal(AERO, feeTaker);
 
         vm.prank(user);
-        _compound(GAUGE_B_BASE, id, p);
+        _compound(id, p);
 
         assertGt(_liq(), l0);
         assertTrue(ICLGauge(GAUGE_B_BASE).stakedContains(user, id));
@@ -321,7 +321,7 @@ contract AeroFarmingRouterCompoundGaugeATest is AeroForkBase {
         uint256 uA = IERC20(AERO).balanceOf(user);
 
         vm.prank(user);
-        _compound(GAUGE_A_BASE, id, c);
+        _compound(id, c);
 
         (,,,,,,, uint128 l1,,,,) = INonfungiblePositionManager(NFPM).positions(id);
         assertGt(l1, l0, "liquidity not increased");

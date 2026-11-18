@@ -11,8 +11,8 @@ contract AeroHarness is AeroFarmingLogic {
         AeroStorage.layout().gaugeFactory = f;
     }
 
-    function validateGauge(address g) external view returns (address) {
-        return address(_validateGauge(g));
+    function gaugeOfPool(address t0, address t1, int24 ts) external view returns (address gauge) {
+        (gauge,) = AeroGauge.ofPool(t0, t1, ts);
     }
 
     function requireLive(address g) external view {
@@ -22,7 +22,7 @@ contract AeroHarness is AeroFarmingLogic {
 
 /// @dev Stand-in logic whose answer proves which implementation the router delegates to.
 contract FakeLogic {
-    function rebalance(address, uint256, V3Utils.Instructions memory) external pure returns (uint256) {
+    function rebalance(uint256, V3Utils.Instructions memory) external pure returns (uint256) {
         return 42;
     }
 }
@@ -283,18 +283,22 @@ contract AeroFarmingRouterAdminTest is AeroForkBase {
         assertFalse(h.paused());
     }
 
-    function test_validateGauge_rejectsNonGauge() public {
+    function test_gaugeOfPool_rejectsNoPoolOrForeignGauge() public {
         AeroHarness p = new AeroHarness();
         p.setFactory(GAUGE_FACTORY);
         vm.expectRevert(IAeroFarmingLogic.InvalidGauge.selector);
-        p.validateGauge(address(0xdead));
-        assertEq(p.validateGauge(GAUGE_A_BASE), NFPM);
+        p.gaugeOfPool(WETH, USDC_BASE, 7); // no pool at this tickSpacing
+        vm.mockCall(POOL_A_BASE, abi.encodeWithSelector(ICLPool.gauge.selector), abi.encode(address(0xdead)));
+        vm.expectRevert(IAeroFarmingLogic.InvalidGauge.selector);
+        p.gaugeOfPool(WETH, USDC_BASE, 50); // the pool reports a gauge the factory did not create
+        vm.clearMockedCalls();
+        assertEq(p.gaugeOfPool(USDC_BASE, WETH, 50), GAUGE_A_BASE); // token order does not matter
     }
 
     function test_validateGauge_acceptsGaugeA() public {
         AeroHarness p = new AeroHarness();
         p.setFactory(GAUGE_FACTORY);
-        assertEq(p.validateGauge(GAUGE_A_BASE), NFPM);
+        assertEq(p.gaugeOfPool(WETH, USDC_BASE, 50), GAUGE_A_BASE);
         // The repo compiles with evm_version=london, and the live LeafVoter uses PUSH0, so the revm
         // hardfork here cannot execute it. Mock both branches instead of calling it live.
         bytes memory q = abi.encodeWithSelector(ILeafVoter.isActivated.selector, GAUGE_A_BASE);
@@ -313,7 +317,7 @@ contract AeroFarmingRouterAdminTest is AeroForkBase {
 
     function _rebalanceViaRouter() internal returns (uint256) {
         V3Utils.Instructions memory ins;
-        return abi.decode(h.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (GAUGE_A_BASE, 1, ins))), (uint256));
+        return abi.decode(h.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (1, ins))), (uint256));
     }
 
     function test_setImplementation_onlyAdmin() public {
@@ -346,8 +350,8 @@ contract AeroFarmingRouterAdminTest is AeroForkBase {
         h.setImplementation(address(l2));
         assertEq(h.implementation(), address(l2));
         V3Utils.Instructions memory ins;
-        vm.expectRevert(IAeroFarmingLogic.InvalidGauge.selector); // the real logic again: gauge 0 is rejected
-        h.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (address(0), 1, ins)));
+        vm.expectRevert(); // the real logic again: a nonexistent position has no pool to derive a gauge from
+        h.execute(abi.encodeCall(IAeroFarmingLogic.rebalance, (type(uint256).max, ins)));
     }
 
     function test_router_unknownSelectorReverts() public {

@@ -59,7 +59,7 @@ contract AeroFarmingRouterOpTest is AutomationBase {
         p.deadline = block.timestamp + 1 hours;
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.CompoundDisabled.selector);
-        _compound(GAUGE_A_OP, id, p);
+        _compound(id, p);
     }
 
     function test_op_autoHarvest_paysXAero() public {
@@ -120,7 +120,7 @@ contract AeroFarmingRouterOpTest is AutomationBase {
         uint256 w0 = _bal(WETH, user);
         uint256 u0 = _bal(USDC_OP, user);
         vm.prank(user);
-        _removeLiquidity(GAUGE_A_OP, id, ins);
+        _removeLiquidity(id, ins);
         assertGe(_bal(XAERO, user) - x0, claimed);
         assertGt(_bal(WETH, user) + _bal(USDC_OP, user), w0 + u0);
         assertTrue(ICLGauge(GAUGE_A_OP).stakedContains(user, id));

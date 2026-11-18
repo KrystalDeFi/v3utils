@@ -13,6 +13,7 @@ import "../StructHash.sol";
 import "./IAero.sol";
 import "./IAeroFarmingLogic.sol";
 import "./AeroStorage.sol";
+import "./AeroGauge.sol";
 
 /// @notice Fixed (non-upgradeable) entry point for Aero CL positions staked in CLGauges; it is the address users
 /// approve on gauges. Flows run in the AeroFarmingLogic set as `implementation`, by DELEGATECALL through two
@@ -120,18 +121,18 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
     }
 
     /// @notice Operator entry point: runs `action` on `account`'s staked `tokenId` under an order `account` signed.
-    /// The order must be for this chain and the gauge's position manager; its tokenId is not bound (recurring
-    /// rebalances mint new ids), the operator is trusted to target the right token of the account.
+    /// The gauge is derived from the position (its pool's gauge). The order must be for this chain and the gauge's
+    /// position manager; its tokenId is not bound (recurring rebalances mint new ids), the operator is trusted to
+    /// target the right token of the account.
     function executeAutomation(
         address account,
-        address gauge,
         uint256 tokenId,
         IAeroFarmingLogic.AutoAction action,
         bytes calldata actionData,
         bytes calldata order,
         bytes calldata signature
     ) external nonReentrant whenNotPaused onlyRole(OPERATOR_ROLE) returns (uint256 tokenIdAfter) {
-        _checkAutomation(account, gauge, tokenId, order, signature);
+        address gauge = _checkAutomation(account, tokenId, order, signature);
         tokenIdAfter = _runAutomated(action, account, gauge, tokenId, actionData);
     }
 
@@ -250,15 +251,14 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
 
     // ---------------------------------------------------------------- internals
 
-    /// @dev Gauge check, `account` owns the stake, then the order checks.
-    function _checkAutomation(
-        address account,
-        address gauge,
-        uint256 tokenId,
-        bytes calldata order,
-        bytes calldata signature
-    ) internal view {
-        address nfpm = _validateGauge(gauge);
+    /// @dev Derives the gauge from `tokenId`, then: `account` owns the stake, then the order checks.
+    function _checkAutomation(address account, uint256 tokenId, bytes calldata order, bytes calldata signature)
+        internal
+        view
+        returns (address gauge)
+    {
+        address nfpm;
+        (gauge, nfpm) = AeroGauge.ofToken(tokenId);
         if (!ICLGauge(gauge).stakedContains(account, tokenId)) revert IAeroFarmingLogic.NotStakeOwner();
         _validateOrder(account, nfpm, order, signature);
     }
@@ -313,14 +313,6 @@ contract AeroFarmingRouter is AccessControl, Pausable, ReentrancyGuard, IERC721R
     /// @dev Keyed on the digest (not the signature bytes, which can be re-encoded) and scoped per actor.
     function _cancelKey(address actor, bytes32 digest) private pure returns (bytes32) {
         return keccak256(abi.encode(actor, digest));
-    }
-
-    /// @dev Same gauge check as the logic's: a factory gauge whose NFT manager is the factory's. Returns the NFPM.
-    function _validateGauge(address gauge) internal view returns (address nfpm) {
-        ICLGaugeFactory f = ICLGaugeFactory(AeroStorage.layout().gaugeFactory);
-        if (!f.isGauge(gauge)) revert IAeroFarmingLogic.InvalidGauge();
-        nfpm = ICLGauge(gauge).nft();
-        if (nfpm != f.nft()) revert IAeroFarmingLogic.InvalidGauge();
     }
 
     function _bubble(bytes memory ret) private pure {

@@ -16,11 +16,7 @@ contract ReentrantSwapRouter {
     {
         V3Utils.Instructions memory ins;
         (userOk, userRet) = address(router)
-            .call(
-                abi.encodeCall(
-                    AeroFarmingRouter.execute, (abi.encodeCall(IAeroFarmingLogic.exit, (address(0), 0, ins)))
-                )
-            );
+            .call(abi.encodeCall(AeroFarmingRouter.execute, (abi.encodeCall(IAeroFarmingLogic.exit, (0, ins)))));
         (autoOk, autoRet) = address(router).call(abi.encodeCall(AeroFarmingRouter.execute, (autoCall)));
         tokenIn.transferFrom(msg.sender, address(this), tokenIn.allowance(msg.sender, address(this)));
         tokenOut.transfer(msg.sender, amountOut);
@@ -122,15 +118,15 @@ contract AeroFarmingRouterTest is AutomationBase {
         vm.expectRevert(IAeroFarmingLogic.NotDelegateCall.selector);
         logic.zapInAndStake(mp, false);
         vm.expectRevert(IAeroFarmingLogic.NotDelegateCall.selector);
-        logic.addLiquidity(GAUGE_A_BASE, ip, false);
+        logic.addLiquidity(ip, false);
         vm.expectRevert(IAeroFarmingLogic.NotDelegateCall.selector);
-        logic.removeLiquidity(GAUGE_A_BASE, id, ins);
+        logic.removeLiquidity(id, ins);
         vm.expectRevert(IAeroFarmingLogic.NotDelegateCall.selector);
-        logic.exit(GAUGE_A_BASE, id, ins);
+        logic.exit(id, ins);
         vm.expectRevert(IAeroFarmingLogic.NotDelegateCall.selector);
-        logic.rebalance(GAUGE_A_BASE, id, ins);
+        logic.rebalance(id, ins);
         vm.expectRevert(IAeroFarmingLogic.NotDelegateCall.selector);
-        logic.compound(GAUGE_A_BASE, id, cp);
+        logic.compound(id, cp);
         vm.expectRevert(IAeroFarmingLogic.NotDelegateCall.selector);
         logic.executeAutomated(IAeroFarmingLogic.AutoAction.AUTO_EXIT, user, GAUGE_A_BASE, id, abi.encode(ins));
         vm.stopPrank();
@@ -220,7 +216,7 @@ contract AeroFarmingRouterTest is AutomationBase {
         V3Utils.Instructions memory ins = _exitIns();
         ins.liquidity = part;
         vm.prank(user);
-        _removeLiquidity(GAUGE_A_BASE, id, ins);
+        _removeLiquidity(id, ins);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
     }
 
@@ -231,8 +227,8 @@ contract AeroFarmingRouterTest is AutomationBase {
         uint256 before_ = address(router).balance;
         V3Utils.Instructions memory ins = _exitIns();
         bytes[2] memory calls = [
-            abi.encodeCall(IAeroFarmingLogic.exit, (GAUGE_A_BASE, id, ins)),
-            abi.encodeCall(IAeroFarmingLogic.removeLiquidity, (GAUGE_A_BASE, id, ins))
+            abi.encodeCall(IAeroFarmingLogic.exit, (id, ins)),
+            abi.encodeCall(IAeroFarmingLogic.removeLiquidity, (id, ins))
         ];
         for (uint256 i; i < calls.length; i++) {
             vm.prank(user);
@@ -303,7 +299,7 @@ contract AeroFarmingRouterTest is AutomationBase {
         V3Utils.Instructions memory ins = _exitIns();
         vm.prank(user);
         vm.expectRevert(AeroFarmingRouter.ImplementationNotSet.selector);
-        r.execute(abi.encodeCall(IAeroFarmingLogic.exit, (GAUGE_A_BASE, id, ins)));
+        r.execute(abi.encodeCall(IAeroFarmingLogic.exit, (id, ins)));
     }
 
     function test_setImplementation_requiresCode() public {

@@ -216,6 +216,26 @@ contract AeroFarmingRouterZapTest is AeroForkBase {
         _zapInExpectRevert(p, false);
     }
 
+    /// User flows on an existing position derive the gauge from it too: if its pool reported a gauge the factory
+    /// did not create, the flow reverts before touching the stake.
+    function test_exit_derivesGauge_rejectsForeign() public {
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        vm.prank(user);
+        uint256 id = _zapIn(p, false);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+        (,,,,,,, uint128 liq,,,,) = INonfungiblePositionManager(NFPM).positions(id);
+        V3Utils.Instructions memory ins;
+        ins.whatToDo = V3Utils.WhatToDo.WITHDRAW_AND_COLLECT_AND_SWAP;
+        ins.protocol = Nfpm.Protocol.AERODROME;
+        ins.liquidity = liq;
+        ins.deadline = block.timestamp + 1 hours;
+        vm.mockCall(POOL_A_BASE, abi.encodeWithSelector(ICLPool.gauge.selector), abi.encode(makeAddr("aeroFakeGauge2")));
+        vm.prank(user);
+        vm.expectRevert(IAeroFarmingLogic.InvalidGauge.selector);
+        _exit(id, ins);
+        assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
+    }
+
     function test_zapIn_sameTokenReverts() public {
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
         p.token1 = p.token0;

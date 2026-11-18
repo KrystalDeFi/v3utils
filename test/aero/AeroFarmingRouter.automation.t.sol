@@ -384,10 +384,12 @@ contract AeroFarmingRouterAutomationTest is AutomationBase {
         assertEq(_liq(), liq);
     }
 
+    /// The operator cannot pick the gauge: it is derived from the position, and a pool reporting a gauge the
+    /// factory did not create (here one that claims every stake) is rejected.
     function test_execute_invalidGaugeReverts() public {
         address fake = address(new FakeGaugeAlwaysStaked());
         OrderParams memory p = _adjustParams();
-        p.gauge = fake;
+        vm.mockCall(POOL_A_BASE, abi.encodeWithSelector(ICLPool.gauge.selector), abi.encode(fake));
         vm.prank(operator);
         vm.expectRevert(IAeroFarmingLogic.InvalidGauge.selector);
         _executeOrder(p);

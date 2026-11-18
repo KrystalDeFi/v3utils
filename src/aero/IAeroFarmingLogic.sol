@@ -89,28 +89,26 @@ interface IAeroFarmingLogic {
     function zapInAndStake(Common.SwapAndMintParams memory p, bool unwrap) external payable returns (uint256 tokenId);
 
     /// @notice Add liquidity to a staked position: unstake, increase through V3Utils, restake. Leftovers go back to
-    /// the caller.
-    function addLiquidity(address gauge, Common.SwapAndIncreaseLiquidityParams memory p, bool unwrap) external payable;
+    /// the caller. Like every flow below, the gauge is derived from the position (its pool's gauge).
+    function addLiquidity(Common.SwapAndIncreaseLiquidityParams memory p, bool unwrap) external payable;
 
     /// @notice Withdraw part of a staked position's liquidity (and collect fees); the NFT is restaked under the same id.
     /// @dev Reverts GaugeNotLive on a dead gauge because the restake needs a live gauge; `exit` is the way out.
-    function removeLiquidity(address gauge, uint256 tokenId, V3Utils.Instructions memory ins) external;
+    function removeLiquidity(uint256 tokenId, V3Utils.Instructions memory ins) external;
 
     /// @notice Withdraw all liquidity of a staked position and return the (empty) NFT, unstaked, to the caller.
-    function exit(address gauge, uint256 tokenId, V3Utils.Instructions memory ins) external;
+    function exit(uint256 tokenId, V3Utils.Instructions memory ins) external;
 
     /// @notice Move a staked position to a new range: V3Utils mints the new position, which is staked for the caller.
     /// The old (emptied) NFT is returned, unstaked, to the caller.
-    function rebalance(address gauge, uint256 tokenId, V3Utils.Instructions memory ins)
-        external
-        returns (uint256 newTokenId);
+    function rebalance(uint256 tokenId, V3Utils.Instructions memory ins) external returns (uint256 newTokenId);
 
     /// @notice Claim the position's AERO emissions, take the performance fee and add the rest back to the position
     /// (Base only). Requires the caller to have approved the router with `approveForClaim` on the gauge.
-    function compound(address gauge, uint256 tokenId, CompoundParams memory p) external;
+    function compound(uint256 tokenId, CompoundParams memory p) external;
 
-    /// @notice Operator path; the router builds this call itself after checking the gauge, the stake owner and the
-    /// signed order, and records `account` for the duration of the call.
+    /// @notice Operator path; the router builds this call itself after deriving `gauge` from `tokenId`, checking the
+    /// stake owner and the signed order, and records `account` for the duration of the call.
     function executeAutomated(
         AutoAction action,
         address account,
