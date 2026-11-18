@@ -70,7 +70,7 @@ abstract contract AutomationBase is AeroForkBase {
         p.deadline = block.timestamp + 1 hours;
         p.recipient = user;
         vm.prank(user);
-        id = _zapIn(gauge, p, false);
+        id = _zapIn(p, false);
         (uint256 minStakeBlocks,) = ICLGaugeFactory(GAUGE_FACTORY).effectivePenaltyConfig(gauge);
         vm.roll(block.number + minStakeBlocks + 1000);
         vm.warp(block.timestamp + 2 * (minStakeBlocks + 1000));

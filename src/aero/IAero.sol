@@ -20,6 +20,14 @@ interface ICLGaugeFactory {
     function effectivePenaltyConfig(address gauge) external view returns (uint256 minStakeBlocks, uint256 penaltyRate);
 }
 
+interface ICLPool {
+    function gauge() external view returns (address);
+}
+
+interface ICLFactory {
+    function getPool(address tokenA, address tokenB, int24 tickSpacing) external view returns (address);
+}
+
 interface ILeafVoter {
     function isActivated(address gauge) external view returns (bool);
     function RECEIPT_TOKEN() external view returns (address);

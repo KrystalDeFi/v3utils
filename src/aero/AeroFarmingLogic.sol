@@ -47,16 +47,13 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
 
     // ---------------------------------------------------------------- user flows (account = msg.sender)
 
-    function zapInAndStake(address gauge, Common.SwapAndMintParams memory p, bool unwrap)
+    function zapInAndStake(Common.SwapAndMintParams memory p, bool unwrap)
         external
         payable
         onlyDelegateCall
         returns (uint256 tokenId)
     {
-        INonfungiblePositionManager nfpm = _validateGauge(gauge);
-        if (address(p.nfpm) != address(nfpm) || p.protocol != Nfpm.Protocol.AERODROME || p.token0 == p.token1) {
-            revert InvalidInstructions();
-        }
+        (address gauge, INonfungiblePositionManager nfpm) = _gaugeOf(p);
         p.recipient = address(this);
 
         (address[3] memory tokens, uint256[3] memory amounts) =
@@ -506,6 +503,23 @@ contract AeroFarmingLogic is IAeroFarmingLogic {
         address n = ICLGauge(gauge).nft();
         if (n != f.nft()) revert InvalidGauge();
         nfpm = INonfungiblePositionManager(n);
+    }
+
+    /// @dev The gauge of the pool `p` mints into: the factory's NFPM, then pool (token0, token1, tickSpacing) of
+    /// that NFPM's pool factory, then the pool's gauge, which must be one of the configured gauge factory's.
+    function _gaugeOf(Common.SwapAndMintParams memory p)
+        internal
+        view
+        returns (address gauge, INonfungiblePositionManager nfpm)
+    {
+        nfpm = INonfungiblePositionManager(ICLGaugeFactory(AeroStorage.layout().gaugeFactory).nft());
+        if (address(p.nfpm) != address(nfpm) || p.protocol != Nfpm.Protocol.AERODROME || p.token0 == p.token1) {
+            revert InvalidInstructions();
+        }
+        address pool = ICLFactory(nfpm.factory()).getPool(address(p.token0), address(p.token1), p.tickSpacing);
+        if (pool == address(0)) revert InvalidGauge();
+        gauge = ICLPool(pool).gauge();
+        _validateGauge(gauge);
     }
 
     function _requireLive(address gauge) internal view {

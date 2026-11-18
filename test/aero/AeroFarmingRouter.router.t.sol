@@ -120,7 +120,7 @@ contract AeroFarmingRouterTest is AutomationBase {
         uint128 liq = _liq();
         vm.startPrank(user);
         vm.expectRevert(IAeroFarmingLogic.NotDelegateCall.selector);
-        logic.zapInAndStake(GAUGE_A_BASE, mp, false);
+        logic.zapInAndStake(mp, false);
         vm.expectRevert(IAeroFarmingLogic.NotDelegateCall.selector);
         logic.addLiquidity(GAUGE_A_BASE, ip, false);
         vm.expectRevert(IAeroFarmingLogic.NotDelegateCall.selector);

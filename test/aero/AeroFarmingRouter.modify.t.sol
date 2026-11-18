@@ -62,7 +62,7 @@ contract AeroFarmingRouterModifyTest is AeroForkBase {
         p.deadline = block.timestamp + 1 hours;
         p.recipient = user;
         vm.prank(user);
-        id = _zapIn(GAUGE_A_BASE, p, false);
+        id = _zapIn(p, false);
 
         (uint256 minStakeBlocks,) = ICLGaugeFactory(GAUGE_FACTORY).effectivePenaltyConfig(GAUGE_A_BASE);
         vm.roll(block.number + minStakeBlocks + 10);

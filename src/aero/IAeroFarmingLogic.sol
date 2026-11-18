@@ -83,11 +83,10 @@ interface IAeroFarmingLogic {
     /// @dev After a rebalance V3Utils did not return exactly the old NFT plus one new position with the requested range.
     error RebalanceMismatch();
 
-    /// @notice Zap tokens (and/or native coin) into a new Aero CL position and stake it in `gauge` for the caller.
-    function zapInAndStake(address gauge, Common.SwapAndMintParams memory p, bool unwrap)
-        external
-        payable
-        returns (uint256 tokenId);
+    /// @notice Zap tokens (and/or native coin) into a new Aero CL position and stake it for the caller in the gauge
+    /// of the pool `p` mints into (token0, token1, tickSpacing). Reverts InvalidGauge if that pool has no gauge
+    /// from the configured gauge factory.
+    function zapInAndStake(Common.SwapAndMintParams memory p, bool unwrap) external payable returns (uint256 tokenId);
 
     /// @notice Add liquidity to a staked position: unstake, increase through V3Utils, restake. Leftovers go back to
     /// the caller.

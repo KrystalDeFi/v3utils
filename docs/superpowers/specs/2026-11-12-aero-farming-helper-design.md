@@ -121,9 +121,13 @@ All flows: `msg.sender` is the account (the stake owner). The gauge is validated
 deadline. Leftover tokens are returned to the user, with optional unwrap to native, mirroring V3Utils `unwrap`.
 
 ### 5.1 Zap in and stake
+`zapInAndStake(params, unwrap)` takes no gauge (2026‑11‑18, user decision): a gauge is tied to one pool, so it is
+derived from the mint params. `nfpm` must be the gauge factory's `nft()`; the pool is
+`nfpm.factory().getPool(token0, token1, tickSpacing)` and the gauge is `pool.gauge()`, which must pass the same
+factory check as every other flow (`isGauge`, `gauge.nft()`). No pool, or a gauge from another factory, reverts
+`InvalidGauge`.
 1. Pull the user's input tokens, or take `msg.value`, then approve V3Utils.
-2. Call `V3Utils.swapAndMint(params)` with `recipient = helper`, `protocol = AERODROME`, `nfpm = gauge.nft()`.
-   Pool parameters must match the gauge's pool.
+2. Call `V3Utils.swapAndMint(params)` with `recipient = helper`, `protocol = AERODROME`.
 3. Approve the gauge for `newId` and call `depositFor(newId, user)`.
 4. Forward the leftover tokens to the user.
 

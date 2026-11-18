@@ -86,28 +86,24 @@ abstract contract AeroForkBase is Test {
     // Call-path wrappers: each makes exactly one external call (router.execute / executeAutomation), so a
     // vm.prank / vm.expectRevert placed before the wrapper binds to that call.
 
-    function _zapIn(address gauge, Common.SwapAndMintParams memory p, bool unwrap) internal returns (uint256) {
-        return _zapIn(0, gauge, p, unwrap);
+    function _zapIn(Common.SwapAndMintParams memory p, bool unwrap) internal returns (uint256) {
+        return _zapIn(0, p, unwrap);
     }
 
-    function _zapIn(uint256 value, address gauge, Common.SwapAndMintParams memory p, bool unwrap)
-        internal
-        returns (uint256 tokenId)
-    {
-        bytes memory ret =
-            router.execute{value: value}(abi.encodeCall(IAeroFarmingLogic.zapInAndStake, (gauge, p, unwrap)));
+    function _zapIn(uint256 value, Common.SwapAndMintParams memory p, bool unwrap) internal returns (uint256 tokenId) {
+        bytes memory ret = router.execute{value: value}(abi.encodeCall(IAeroFarmingLogic.zapInAndStake, (p, unwrap)));
         assertEq(ret.length, 32, "zapInAndStake return data");
         tokenId = abi.decode(ret, (uint256));
     }
 
     /// @dev For a vm.expectRevert'ed zap: an expected revert makes the call return no data, which `_zapIn` (it
     /// requires exactly one word back) would reject.
-    function _zapInExpectRevert(address gauge, Common.SwapAndMintParams memory p, bool unwrap) internal {
-        _zapInExpectRevert(0, gauge, p, unwrap);
+    function _zapInExpectRevert(Common.SwapAndMintParams memory p, bool unwrap) internal {
+        _zapInExpectRevert(0, p, unwrap);
     }
 
-    function _zapInExpectRevert(uint256 value, address gauge, Common.SwapAndMintParams memory p, bool unwrap) internal {
-        router.execute{value: value}(abi.encodeCall(IAeroFarmingLogic.zapInAndStake, (gauge, p, unwrap)));
+    function _zapInExpectRevert(uint256 value, Common.SwapAndMintParams memory p, bool unwrap) internal {
+        router.execute{value: value}(abi.encodeCall(IAeroFarmingLogic.zapInAndStake, (p, unwrap)));
     }
 
     function _addLiquidity(address gauge, Common.SwapAndIncreaseLiquidityParams memory p, bool unwrap) internal {

@@ -69,7 +69,7 @@ contract AeroFarmingRouterZapTest is AeroForkBase {
         uint256 u0 = _bal(USDC_BASE, user);
         vm.recordLogs();
         vm.prank(user);
-        uint256 id = _zapIn(GAUGE_A_BASE, p, false);
+        uint256 id = _zapIn(p, false);
         _check(id, w0, u0, 0, 0, 1 ether);
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bytes32 sig = FarmAction.selector;
@@ -95,7 +95,7 @@ contract AeroFarmingRouterZapTest is AeroForkBase {
         uint256 u0 = _bal(USDC_BASE, user);
         uint256 e0 = user.balance;
         vm.prank(user);
-        uint256 id = _zapIn(1 ether, GAUGE_A_BASE, p, false);
+        uint256 id = _zapIn(1 ether, p, false);
         _check(id, w0, u0, 0, 0, 0);
         assertGe(_bal(WETH, user), w0); // WETH untouched; leftovers of the wrapped ETH come back as WETH
         assertLe(e0 - user.balance, 1 ether);
@@ -108,7 +108,7 @@ contract AeroFarmingRouterZapTest is AeroForkBase {
         uint256 e0 = user.balance;
         uint256 w0 = _bal(WETH, user);
         vm.prank(user);
-        uint256 id = _zapIn(GAUGE_A_BASE, p, true);
+        uint256 id = _zapIn(p, true);
         assertTrue(ICLGauge(GAUGE_A_BASE).stakedContains(user, id));
         assertGt(user.balance, e0, "leftover WETH not paid as native");
         assertEq(_bal(WETH, user), w0 - 5 ether, "leftover must not come back as WETH");
@@ -126,7 +126,7 @@ contract AeroFarmingRouterZapTest is AeroForkBase {
         IERC20(USDC_BASE).approve(address(router), type(uint256).max);
         IERC20(WETH).approve(address(router), type(uint256).max);
         vm.expectRevert(IAeroFarmingLogic.NativeDisabled.selector);
-        _zapInExpectRevert(1 ether, GAUGE_A_BASE, p, false);
+        _zapInExpectRevert(1 ether, p, false);
         vm.stopPrank();
     }
 
@@ -135,7 +135,7 @@ contract AeroFarmingRouterZapTest is AeroForkBase {
         p.protocol = Nfpm.Protocol.UNI_V3;
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
-        _zapInExpectRevert(GAUGE_A_BASE, p, false);
+        _zapInExpectRevert(p, false);
     }
 
     function test_zapIn_deadGaugeReverts() public {
@@ -145,21 +145,21 @@ contract AeroFarmingRouterZapTest is AeroForkBase {
         );
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.GaugeNotLive.selector);
-        _zapInExpectRevert(GAUGE_A_BASE, p, false);
+        _zapInExpectRevert(p, false);
     }
 
     function test_zapIn_preexistingBalanceNotForwarded() public {
         deal(USDC_BASE, address(router), 5e6);
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
         vm.prank(user);
-        _zapIn(GAUGE_A_BASE, p, false);
+        _zapIn(p, false);
         assertEq(_bal(USDC_BASE, address(router)), 5e6);
     }
 
     function test_onERC721Received_rejectsUnsolicited() public {
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
         vm.prank(user);
-        uint256 id = _zapIn(GAUGE_A_BASE, p, false);
+        uint256 id = _zapIn(p, false);
         // unstake directly through gauge to get an NFT in user's hands
         vm.prank(user);
         ICLGaugeWithdraw(GAUGE_A_BASE).withdraw(id);
@@ -186,7 +186,7 @@ contract AeroFarmingRouterZapTest is AeroForkBase {
         Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.NativeDisabled.selector);
-        _zapInExpectRevert(GAUGE_A_BASE, p, true);
+        _zapInExpectRevert(p, true);
     }
 
     function test_zapIn_nfpmMismatchReverts() public {
@@ -194,7 +194,26 @@ contract AeroFarmingRouterZapTest is AeroForkBase {
         p.nfpm = INonfungiblePositionManager(makeAddr("otherNfpm"));
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
-        _zapInExpectRevert(GAUGE_A_BASE, p, false);
+        _zapInExpectRevert(p, false);
+    }
+
+    /// No pool for (token0, token1, tickSpacing): nothing to derive a gauge from.
+    function test_zapIn_noPoolReverts() public {
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        p.tickSpacing = 7;
+        assertEq(ICLFactory(INonfungiblePositionManager(NFPM).factory()).getPool(WETH, USDC_BASE, 7), address(0));
+        vm.prank(user);
+        vm.expectRevert(IAeroFarmingLogic.InvalidGauge.selector);
+        _zapInExpectRevert(p, false);
+    }
+
+    /// The pool's gauge must come from the configured gauge factory (a pool reporting any other gauge is rejected).
+    function test_zapIn_poolGaugeNotFromFactoryReverts() public {
+        Common.SwapAndMintParams memory p = _params(1 ether, 5000e6);
+        vm.mockCall(POOL_A_BASE, abi.encodeWithSelector(ICLPool.gauge.selector), abi.encode(makeAddr("aeroFakeGauge")));
+        vm.prank(user);
+        vm.expectRevert(IAeroFarmingLogic.InvalidGauge.selector);
+        _zapInExpectRevert(p, false);
     }
 
     function test_zapIn_sameTokenReverts() public {
@@ -202,7 +221,7 @@ contract AeroFarmingRouterZapTest is AeroForkBase {
         p.token1 = p.token0;
         vm.prank(user);
         vm.expectRevert(IAeroFarmingLogic.InvalidInstructions.selector);
-        _zapInExpectRevert(GAUGE_A_BASE, p, false);
+        _zapInExpectRevert(p, false);
     }
 }
 
