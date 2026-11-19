@@ -47,6 +47,8 @@ interface IAutomationFlows {
 /// OPERATOR_ROLE runs signed orders; WITHDRAWER_ROLE rescues stray assets.
 /// @custom:security ADMIN_ROLE has custody-level power over every approving user's positions until `lock()`, and
 /// DEFAULT_ADMIN_ROLE can grant itself ADMIN_ROLE, so it carries the same power; hold both behind a timelock.
+/// A signed order binds only the chain and the NFPM, not the action, tokenId or actionData: OPERATOR_ROLE is trusted to
+/// run only what the account's order describes.
 contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Receiver, IRouterErrors {
     using SafeERC20 for IERC20;
 
@@ -83,7 +85,7 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
 
     /// @notice Grants DEFAULT_ADMIN_ROLE + ADMIN_ROLE to `admin`, OPERATOR_ROLE to `operator` and WITHDRAWER_ROLE
     /// to `withdrawer`; the deployer gets no role. Sets the config and the default fee caps.
-    /// @param nativeMode 0 = WRAPPED (`weth` is a WETH9-style wrapper), 1 = ENSHRINED (`weth` is an ERC20 view of
+    /// @param nativeMode_ 0 = WRAPPED (`weth` is a WETH9-style wrapper), 1 = ENSHRINED (`weth` is an ERC20 view of
     /// native; the scale comes from its decimals).
     function initialize(
         address admin,
@@ -92,7 +94,7 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
         address swapRouter_,
         address feeTaker_,
         address weth_,
-        uint8 nativeMode
+        uint8 nativeMode_
     ) external {
         if (msg.sender != _initializer) revert NotInitializer();
         if (_initialized) revert AlreadyInitialized();
@@ -102,7 +104,7 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
         _grantRole(ADMIN_ROLE, admin);
         _grantRole(OPERATOR_ROLE, operator);
         _grantRole(WITHDRAWER_ROLE, withdrawer);
-        _setNativeConfig(weth_, nativeMode);
+        _setNativeConfig(weth_, nativeMode_);
         RouterStorage.Layout storage s = RouterStorage.layout();
         s.swapRouter = swapRouter_;
         s.feeTaker = feeTaker_;
@@ -204,9 +206,9 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
         emit SwapRouterSet(swapRouter_);
     }
 
-    function setNativeConfig(address weth_, uint8 nativeMode) external onlyRole(ADMIN_ROLE) {
+    function setNativeConfig(address weth_, uint8 nativeMode_) external onlyRole(ADMIN_ROLE) {
         if (RouterStorage.layout().locked) revert Locked();
-        _setNativeConfig(weth_, nativeMode);
+        _setNativeConfig(weth_, nativeMode_);
     }
 
     /// @dev Never frozen: the fee taker only receives capped fees and holds no custody.
@@ -287,6 +289,14 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
         return RouterStorage.layout().locked;
     }
 
+    function nativeMode() external view returns (uint8) {
+        return RouterStorage.layout().nativeMode;
+    }
+
+    function nativeScale() external view returns (uint256) {
+        return RouterStorage.layout().nativeScale;
+    }
+
     // ---------------------------------------------------------------- receivers
 
     /// @dev Accepts an NFT only from a registered NFPM and only the one a farm recorded in `expectedNft` before
@@ -313,39 +323,42 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
     // ---------------------------------------------------------------- internals
 
     /// @dev DELEGATECALLs the module for `selector` with `data`; reverts bubble unchanged.
+    /// Clears `expectedNft` afterwards, so a record a module left behind never outlives the call.
     function _delegate(bytes4 selector, bytes memory data) private returns (bytes memory ret) {
-        address target = RouterStorage.layout().module[selector];
+        RouterStorage.Layout storage s = RouterStorage.layout();
+        address target = s.module[selector];
         if (target == address(0)) revert UnknownSelector();
         bool ok;
         (ok, ret) = target.delegatecall(data);
         if (!ok) _bubble(ret);
+        s.expectedNft = bytes32(0);
     }
 
-    /// @dev `account` holds `tokenId` if the farm reports it staked by `account`, or owns the NFT.
+    /// @dev `account` holds `tokenId` if it owns the NFT or, failing that, the farm reports it staked by `account`.
+    /// The wallet check comes first, so a farm that reverts never blocks a wallet holder.
     function _isHolder(address farm_, address account, address nfpm, uint256 tokenId) private returns (bool) {
-        if (farm_ != address(0)) {
-            (bool ok, bytes memory ret) = farm_.delegatecall(abi.encodeCall(IFarm.isStakedBy, (nfpm, tokenId, account)));
-            if (!ok) _bubble(ret);
-            if (abi.decode(ret, (bool))) return true;
-        }
-        return IERC721(nfpm).ownerOf(tokenId) == account;
+        if (IERC721(nfpm).ownerOf(tokenId) == account) return true;
+        if (farm_ == address(0)) return false;
+        (bool ok, bytes memory ret) = farm_.delegatecall(abi.encodeCall(IFarm.isStakedBy, (nfpm, tokenId, account)));
+        if (!ok) _bubble(ret);
+        return abi.decode(ret, (bool));
     }
 
-    function _setNativeConfig(address weth_, uint8 nativeMode) private {
+    function _setNativeConfig(address weth_, uint8 nativeMode_) private {
         if (weth_ == address(0)) revert ZeroAddress();
         uint256 scale = 1;
-        if (nativeMode == RouterStorage.NATIVE_ENSHRINED) {
+        if (nativeMode_ == RouterStorage.NATIVE_ENSHRINED) {
             uint8 decimals = IERC20Metadata(weth_).decimals();
             if (decimals > 18) revert InvalidNativeConfig();
             scale = 10 ** (18 - decimals);
-        } else if (nativeMode != RouterStorage.NATIVE_WRAPPED) {
+        } else if (nativeMode_ != RouterStorage.NATIVE_WRAPPED) {
             revert InvalidNativeConfig();
         }
         RouterStorage.Layout storage s = RouterStorage.layout();
         s.weth = weth_;
-        s.nativeMode = nativeMode;
+        s.nativeMode = nativeMode_;
         s.nativeScale = scale;
-        emit NativeConfigSet(weth_, nativeMode, scale);
+        emit NativeConfigSet(weth_, nativeMode_, scale);
     }
 
     /// @dev Non-zero targets need code; any target is refused after lock.

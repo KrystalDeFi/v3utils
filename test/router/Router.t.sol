@@ -3,13 +3,24 @@ pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {V3UtilsRouter, IAutomationFlows} from "../../src/router/V3UtilsRouter.sol";
 import {RouterStorage} from "../../src/router/RouterStorage.sol";
 import {IRouterErrors} from "../../src/router/IRouterErrors.sol";
 import {FeeType, AutoAction} from "../../src/router/RouterTypes.sol";
 import {StructHash} from "../../src/StructHash.sol";
-import {MockModule, MockFarm, MockNfpm, MockDecimalsToken} from "./mocks/MockModule.sol";
+import {
+    MockModule,
+    MockFarm,
+    MockRevertingFarm,
+    MockNfpm,
+    MockDecimalsToken,
+    MockReentrantModule,
+    MockERC20,
+    MockERC721
+} from "./mocks/MockModule.sol";
 
 contract RouterTest is Test {
     uint64 constant GAS_CAP = 5534023222112865280;
@@ -86,7 +97,7 @@ contract RouterTest is Test {
 
     // ------------------------------------------------------------------ storage and types
 
-    function test_storageSlot_matchesErc7201() public {
+    function test_storageSlot_matchesErc7201() public view {
         bytes32 expected =
             keccak256(abi.encode(uint256(keccak256("krystal.v3utils.router.storage")) - 1)) & ~bytes32(uint256(0xff));
         assertEq(RouterStorage.SLOT, expected);
@@ -97,7 +108,7 @@ contract RouterTest is Test {
         assertEq(uint256(_slot(3)), 1); // nativeScale (WRAPPED)
     }
 
-    function test_feeTypeOrdinals() public {
+    function test_feeTypeOrdinals() public pure {
         assertEq(uint8(FeeType.GAS_FEE), 0);
         assertEq(uint8(FeeType.PERFORMANCE_FEE), 1);
         assertEq(uint8(FeeType.PROTOCOL_FEE), 2);
@@ -141,6 +152,8 @@ contract RouterTest is Test {
         assertEq(r.swapRouter(), swapRouter);
         assertEq(r.feeTaker(), feeTaker);
         assertEq(r.weth(), weth);
+        assertEq(r.nativeMode(), 0);
+        assertEq(r.nativeScale(), 1);
         assertFalse(r.locked());
         assertTrue(r.hasRole(r.DEFAULT_ADMIN_ROLE(), admin));
         assertTrue(r.hasRole(r.ADMIN_ROLE(), admin));
@@ -155,7 +168,8 @@ contract RouterTest is Test {
         address token6 = address(new MockDecimalsToken(6));
         vm.prank(deployer, deployer);
         e.initialize(admin, operator, withdrawer, swapRouter, feeTaker, token6, 1);
-        assertEq(uint256(vm.load(address(e), bytes32(uint256(RouterStorage.SLOT) + 3))), 1e12);
+        assertEq(e.nativeMode(), 1);
+        assertEq(e.nativeScale(), 1e12);
     }
 
     // ------------------------------------------------------------------ execute
@@ -287,43 +301,60 @@ contract RouterTest is Test {
 
     // ------------------------------------------------------------------ receivers
 
-    function test_onERC721Received_onlyExpected() public {
-        address n = address(nfpm);
-        address from = makeAddr("routerNftFrom");
-        bytes4 ok = IERC721Receiver.onERC721Received.selector;
+    /// @dev `execute` calldata: `n` delivers `tokenId` from `from` into the router while a module holds `record`.
+    function _receiveCall(MockNfpm n, address from, uint256 tokenId, bytes32 record)
+        internal
+        pure
+        returns (bytes memory)
+    {
+        return abi.encodeCall(MockModule.receiveNft, (n, from, tokenId, record));
+    }
 
-        // unregistered NFPM
-        vm.prank(n);
+    function test_onERC721Received_onlyExpected() public {
+        address from = makeAddr("routerNftFrom");
+        bytes32 record = keccak256(abi.encode(address(nfpm), from, uint256(7)));
+        _setModule(MockModule.receiveNft.selector);
+
+        // unregistered NFPM, even with a matching record
         vm.expectRevert(IRouterErrors.UnexpectedNft.selector);
-        router.onERC721Received(from, from, 7, "");
+        router.execute(_receiveCall(nfpm, from, 7, record));
 
         // registered, no record
         vm.prank(admin);
-        router.setAdapter(n, address(module));
-        vm.prank(n);
+        router.setAdapter(address(nfpm), address(module));
         vm.expectRevert(IRouterErrors.UnexpectedNft.selector);
-        router.onERC721Received(from, from, 7, "");
-
-        _setModule(MockModule.expectNft.selector);
-        router.execute(abi.encodeCall(MockModule.expectNft, (keccak256(abi.encode(n, from, uint256(7))))));
+        nfpm.deliver(address(router), from, 7);
+        vm.expectRevert(IRouterErrors.UnexpectedNft.selector);
+        router.execute(_receiveCall(nfpm, from, 7, bytes32(0)));
 
         // mismatched token, sender or NFPM
-        vm.prank(n);
         vm.expectRevert(IRouterErrors.UnexpectedNft.selector);
-        router.onERC721Received(from, from, 8, "");
-        vm.prank(n);
+        router.execute(_receiveCall(nfpm, from, 8, record));
         vm.expectRevert(IRouterErrors.UnexpectedNft.selector);
-        router.onERC721Received(from, alice, 7, "");
+        router.execute(_receiveCall(nfpm, alice, 7, record));
         MockNfpm other = new MockNfpm();
         vm.prank(admin);
         router.setAdapter(address(other), address(module));
-        vm.prank(address(other));
         vm.expectRevert(IRouterErrors.UnexpectedNft.selector);
-        router.onERC721Received(from, from, 7, "");
+        router.execute(_receiveCall(other, from, 7, record));
 
         // match
-        vm.prank(n);
-        assertEq(router.onERC721Received(from, from, 7, ""), ok);
+        bytes memory ret = router.execute(_receiveCall(nfpm, from, 7, record));
+        assertEq(abi.decode(ret, (bytes4)), IERC721Receiver.onERC721Received.selector);
+    }
+
+    /// A record a module leaves behind is cleared by the router when the module returns.
+    function test_expectedNft_clearedAfterModuleCall() public {
+        address from = makeAddr("routerNftFrom");
+        bytes32 record = keccak256(abi.encode(address(nfpm), from, uint256(7)));
+        vm.prank(admin);
+        router.setAdapter(address(nfpm), address(module));
+        _setModule(MockModule.expectNft.selector);
+        router.execute(abi.encodeCall(MockModule.expectNft, (record)));
+        assertEq(_slot(10), bytes32(0));
+        vm.expectRevert(IRouterErrors.UnexpectedNft.selector);
+        nfpm.deliver(address(router), from, 7);
+        // the executeAutomation path is covered in test_executeAutomation_dispatchesEachAction
     }
 
     function test_receive_onlyWeth() public {
@@ -345,7 +376,8 @@ contract RouterTest is Test {
         vm.prank(admin);
         router.setNativeConfig(token6, 1);
         assertEq(router.weth(), token6);
-        assertEq(uint256(_slot(3)), 1e12);
+        assertEq(router.nativeMode(), 1);
+        assertEq(router.nativeScale(), 1e12);
         vm.deal(token6, 1 ether);
         vm.prank(token6);
         (sent, ret) = address(router).call{value: 1}("");
@@ -379,15 +411,38 @@ contract RouterTest is Test {
     }
 
     function test_withdraw_onlyWithdrawer() public {
-        vm.deal(address(router), 1 ether);
         address to = makeAddr("routerRescueTo");
+        MockERC20 token = new MockERC20();
+        MockERC721 nft = new MockERC721();
+        token.mint(address(router), 100);
+        nft.mint(address(router), 3);
+        vm.deal(address(router), 1 ether);
+
         bytes memory err = _missingRole(alice, router.WITHDRAWER_ROLE());
-        vm.prank(alice);
+        vm.startPrank(alice);
+        vm.expectRevert(err);
+        router.withdrawERC20(IERC20(address(token)), to);
+        vm.expectRevert(err);
+        router.withdrawERC721(IERC721(address(nft)), 3, to);
         vm.expectRevert(err);
         router.withdrawNative(to);
-        vm.prank(withdrawer);
+        vm.stopPrank();
+        // the admin is not a withdrawer either
+        err = _missingRole(admin, router.WITHDRAWER_ROLE());
+        vm.prank(admin);
+        vm.expectRevert(err);
+        router.withdrawERC20(IERC20(address(token)), to);
+
+        vm.startPrank(withdrawer);
+        router.withdrawERC20(IERC20(address(token)), to);
+        router.withdrawERC721(IERC721(address(nft)), 3, to);
         router.withdrawNative(to);
+        vm.stopPrank();
+        assertEq(token.balanceOf(to), 100);
+        assertEq(token.balanceOf(address(router)), 0);
+        assertEq(nft.ownerOf(3), to);
         assertEq(to.balance, 1 ether);
+        assertEq(address(router).balance, 0);
     }
 
     // ------------------------------------------------------------------ orders
@@ -461,16 +516,22 @@ contract RouterTest is Test {
         vm.expectRevert(err);
         router.executeAutomation(alice, address(nfpm), TOKEN_ID, a, aData, aOrder, aSig);
 
-        // 2. adapter registered
+        // 2. adapter registered; checked before the holder (ownerOf of token 999 reverts) and the order
         vm.expectRevert(IRouterErrors.UnsupportedNfpm.selector);
         _auto(alice, a, aOrder, aSig);
+        bytes memory bobSig = _sign(bobKey, aOrder);
+        vm.prank(operator);
+        vm.expectRevert(IRouterErrors.UnsupportedNfpm.selector);
+        router.executeAutomation(alice, address(nfpm), 999, a, aData, aOrder, bobSig);
         vm.prank(admin);
         router.setAdapter(address(nfpm), address(module));
 
-        // 3. holder: bob neither owns nor (no farm) stakes it, even with a valid order of his own
-        bytes memory bobSig = _sign(bobKey, aOrder);
+        // 3. holder: bob neither owns nor (no farm) stakes it, even with a valid order of his own; and the holder
+        // check comes before the signature check
         vm.expectRevert(IRouterErrors.NotPositionHolder.selector);
         _auto(bob, a, aOrder, bobSig);
+        vm.expectRevert(IRouterErrors.NotPositionHolder.selector);
+        _auto(bob, a, aOrder, aSig);
 
         // 4. order: chain, NFPM, signature
         StructHash.Order memory o = abi.decode(aOrder, (StructHash.Order));
@@ -479,12 +540,16 @@ contract RouterTest is Test {
         bytes memory badSig = _sign(aliceKey, bad);
         vm.expectRevert(IRouterErrors.WrongChainId.selector);
         _auto(alice, a, bad, badSig);
+        vm.expectRevert(IRouterErrors.WrongChainId.selector); // chain is checked before the signature
+        _auto(alice, a, bad, bobSig);
         o.chainId = int64(int256(block.chainid));
         o.nfpmAddress = makeAddr("routerOtherNfpm");
         bad = abi.encode(o);
         badSig = _sign(aliceKey, bad);
         vm.expectRevert(IRouterErrors.WrongPositionManager.selector);
         _auto(alice, a, bad, badSig);
+        vm.expectRevert(IRouterErrors.WrongPositionManager.selector); // NFPM is checked before the signature
+        _auto(alice, a, bad, bobSig);
         vm.expectRevert(IRouterErrors.InvalidSignature.selector);
         _auto(alice, a, aOrder, bobSig);
 
@@ -524,6 +589,8 @@ contract RouterTest is Test {
             // slot 8 packs `locked` (false here) with automationAccount; slot 9 is automationTarget
             assertEq(_slot(8), bytes32(0));
             assertEq(_slot(9), bytes32(0));
+            // the stale NFT record the module left is cleared by the router
+            assertEq(_slot(10), bytes32(0));
         }
     }
 
@@ -544,5 +611,62 @@ contract RouterTest is Test {
         address carol = makeAddr("routerCarol");
         vm.expectRevert(IRouterErrors.NotPositionHolder.selector);
         _auto(carol, AutoAction.AUTO_EXIT, aOrder, aSig);
+    }
+
+    /// The wallet check comes first, so a farm whose holder check reverts never blocks the wallet holder.
+    function test_executeAutomation_revertingFarm_walletHolderPasses() public {
+        _setUpAutomation();
+        vm.startPrank(admin);
+        router.setAdapter(address(nfpm), address(module));
+        router.setModule(IAutomationFlows.decreaseAndSwap.selector, address(module));
+        router.setFarm(address(nfpm), address(new MockRevertingFarm()));
+        vm.stopPrank();
+        bytes memory ret = _auto(alice, AutoAction.AUTO_EXIT, aOrder, aSig);
+        (address account,,) = abi.decode(ret, (address, bytes32, bytes));
+        assertEq(account, alice);
+        // a non-owner falls through to the farm, whose revert bubbles
+        bytes memory bobSig = _sign(bobKey, aOrder);
+        vm.expectRevert(MockRevertingFarm.FarmDown.selector);
+        _auto(bob, AutoAction.AUTO_EXIT, aOrder, bobSig);
+    }
+
+    function test_reentrancy_blocked() public {
+        _setUpAutomation();
+        MockReentrantModule re = new MockReentrantModule();
+        bytes32 operatorRole = router.OPERATOR_ROLE();
+        vm.startPrank(admin);
+        router.setModule(MockReentrantModule.reenter.selector, address(re));
+        router.setModule(IAutomationFlows.adjustRange.selector, address(re));
+        router.setModule(MockModule.ping.selector, address(module));
+        router.setAdapter(address(nfpm), address(module));
+        // the router holds OPERATOR_ROLE so an inner executeAutomation passes onlyRole and meets the guard
+        router.grantRole(operatorRole, address(router));
+        vm.stopPrank();
+
+        bytes memory pingCall = abi.encodeCall(V3UtilsRouter.execute, (abi.encodeCall(MockModule.ping, ())));
+        bytes memory autoCall = abi.encodeCall(
+            V3UtilsRouter.executeAutomation, (alice, address(nfpm), TOKEN_ID, AutoAction.AUTO_EXIT, aData, aOrder, aSig)
+        );
+
+        // positive control: the module's call-back path works for a non-guarded function
+        router.execute(abi.encodeCall(MockReentrantModule.reenter, (abi.encodeCall(V3UtilsRouter.feeTaker, ()))));
+
+        // execute -> execute, execute -> executeAutomation
+        vm.expectRevert("ReentrancyGuard: reentrant call");
+        router.execute(abi.encodeCall(MockReentrantModule.reenter, (pingCall)));
+        vm.expectRevert("ReentrancyGuard: reentrant call");
+        router.execute(abi.encodeCall(MockReentrantModule.reenter, (autoCall)));
+
+        // executeAutomation -> execute, executeAutomation -> executeAutomation
+        vm.prank(operator);
+        vm.expectRevert("ReentrancyGuard: reentrant call");
+        router.executeAutomation(
+            alice, address(nfpm), TOKEN_ID, AutoAction.AUTO_ADJUST, abi.encode(pingCall), aOrder, aSig
+        );
+        vm.prank(operator);
+        vm.expectRevert("ReentrancyGuard: reentrant call");
+        router.executeAutomation(
+            alice, address(nfpm), TOKEN_ID, AutoAction.AUTO_ADJUST, abi.encode(autoCall), aOrder, aSig
+        );
     }
 }
