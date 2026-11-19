@@ -40,7 +40,7 @@ V3Utils' position logic becomes modules of the router. It is no longer an extern
      - withdraw, with collect and an optional swap to a target token;
      - change range;
      - compound;
-     - harvest (farm rewards when staked, trading fees when not), with a `PERFORMANCE_FEE` (§6.7).
+     - harvest (farm rewards when staked, trading fees when not), with a `PERFORMANCE_FEE` (§6.8).
    - **Bot actions:** AUTO_ADJUST, AUTO_EXIT, AUTO_COMPOUND, AUTO_HARVEST, under user-signed EIP-712 orders.
 2. **Farming as a plug-in.** One farm per position manager, optional. The first farm is Aero's CL gauge, ported
    from PR #64. Every flow works on staked and unstaked positions.
@@ -156,7 +156,7 @@ The router carries over from PR #64's `AeroFarmingRouter`, generalized.
   - per-`FeeType` max fee (`setMaxFeeX64`);
   - the native config (`weth`, WRAPPED or ENSHRINED, and the scale, derived from token decimals as in `Common`).
 - **Other router functions:** EIP-712 orders (`hashOrder`, `cancelOrder`, `isOrderCancelled`), the NFT receive guard
-  (§6.6), `receive()` (only from `weth`), and pause.
+  (§6.7), `receive()` (only from `weth`), and pause.
 
 The EIP-712 domain is name `V3UtilsRouter`, version `1`, with the router as `verifyingContract`. The order struct is
 `StructHash.Order`, hashed internally with no deployed StructHash library.
@@ -245,19 +245,57 @@ below; the builder finalizes it.
 - **Behaviour carried over unchanged from PR #64:** live-gauge check, rebalance, `MissingSwapData`, and the
   penalty-window note.
 
-### 6.6 Flows
+### 6.6 Params, swaps and the flow pipeline (v4utils style; user decision 2026‑11‑19)
 
-All flows except mint use the take, act, put back shape from §6.4. Leftovers are swept by balance delta, as
-in PR #64. Native is wrapped and unwrapped as in V3Utils.
+V3Utils' swap model is limited:
+- One optional `swapSourceToken`, plus `amountIn0`/`swapData0` into token0 and `amountIn1`/`swapData1` into token1.
+- One `Instructions` struct for every action, where which fields matter depends on `whatToDo`.
 
-| Flow | Unstaked position | Staked position |
+This router uses v4utils' model (`v4utils/src/univ4/interfaces/IV4Utils.sol`) instead, with two fixes.
+
+**One params struct per action.** Each module function says exactly what it uses: `SwapAndMintParams` (with
+`stake`), `SwapAndIncreaseParams`, `DecreaseAndSwapParams` (partial or full withdraw), `AdjustRangeParams`,
+`CompoundParams` and `HarvestParams`. Each carries its own fee fields (§6.8) and a `deadline`. Liquidity slippage is
+`minLiquidity`, as in v4utils, instead of two minimum token amounts.
+
+**Swaps are an ordered list of steps**, `SwapParams[] {tokenIn, amountIn, tokenOut, amountOutMin, swapData}`:
+- They run in order through the `swapRouter` aggregator, each with its own slippage check.
+- Any number of input tokens, multi-hop, and any exit token are possible.
+- Native↔WETH is a step too, needing no `swapData`, and it handles ENSHRINED as in v4utils' `NativeCurrency`.
+- **Fix 1 (vs v4utils):** `amountIn == 0` means "everything *this call* holds of `tokenIn`". That is the balance
+  change since the call started, tracked as in PR #64, never the router's whole balance. v4utils' "whole balance"
+  rule could consume tokens that belonged to no one in the call; see the advisories referenced in its code,
+  GHSA-m36p-ffh3-mvmc and GHSA-v6cm-hp8p-f37m.
+
+**Inputs are a list**, `InputTokenParams[] {token, amount}`, pulled from the user (`msg.value` for native).
+
+**Sweep is automatic. Fix 2 (vs v4utils):** there is no caller-supplied `sweepTokens[]`. At the end of every flow,
+the router returns to the user the balance change of every token the call touched: inputs, every swap leg's
+`tokenIn` and `tokenOut`, the pool's two tokens, and farm rewards. With a caller-supplied list, an omitted token
+stayed in the router, where the next caller's full sweep could collect it. Native is unwrapped on return only if the
+user asks (`unwrap`).
+
+**Every flow runs the same pipeline:**
+
+```
+take position (wallet or farm, §6.4) → collect / claim → take fees → swaps → act (mint / increase / decrease)
+→ put position back (§6.4) → sweep
+```
+
+Fees are taken on what is collected and on inputs before the swaps, as in v4utils. For example, `swapAndMint` runs:
+pull inputs, then `PROTOCOL`/`GAS` fees on inputs, then swaps, then mint, then stake or send to the wallet, then
+sweep.
+
+### 6.7 Flows
+
+| Flow (module function) | Unstaked position | Staked position |
 |---|---|---|
-| swap and mint (`stake` flag) | V3Utils `swapAndMint` | mint, then `farm.stake` |
-| swap and increase | V3Utils semantics | in place through the farm if `canIncreaseStaked`, otherwise between unstake and restake |
-| withdraw (partial or full) | V3Utils `WITHDRAW_AND_COLLECT_AND_SWAP` | the same; restake if liquidity remains |
-| change range | V3Utils `CHANGE_RANGE` | the same; restake the new NFT |
-| compound | **trading fees** (V3Utils `COMPOUND_FEES`) | **farm rewards** (claim, fee, swap and add; PR #64 compound); plus trading fees if `earnsTradingFees` |
-| harvest (user and bot) | **trading fees** (collect with zero liquidity, `PERFORMANCE_FEE`, optional swap to a target token) | **farm rewards** (claim, `PERFORMANCE_FEE`, optional swap); position stays staked |
+| `swapAndMint` (`stake` flag) | mint to the wallet | mint, then `farm.stake` |
+| `swapAndIncrease` | take, increase, put back | in place through the farm if `canIncreaseStaked`, otherwise unstake, increase, restake |
+| `decreaseAndSwap` (partial or full) | decrease, collect, swap to `swapDestToken` | the same; restake if liquidity remains (full: wallet) |
+| `adjustRange` | decrease all, swaps, mint new range (optionally compounding fees) | the same; restake the new NFT |
+| `compound` | **trading fees**: collect, fee, swaps, increase | **farm rewards**: claim, fee, swaps, increase (PR #64 compound); plus trading fees if `earnsTradingFees` |
+| `harvest` (user and bot) | **trading fees**: collect, `PERFORMANCE_FEE`, optional swaps to a target token | **farm rewards**: claim, `PERFORMANCE_FEE`, optional swaps; the position stays staked |
 
 - **Harvest is a user entry point too** (2026‑11‑19, user decision: rewards are fee-collectible for Krystal).
   This replaces PR #64's "no fee on harvest", where users claimed on the gauge directly.
@@ -276,11 +314,14 @@ in PR #64. Native is wrapped and unwrapped as in V3Utils.
   mint by the router, a transfer the router itself started, or a farm unstake (decided by the farm through
   `expectsNft`). PR #64's `activeGauge` guard generalizes to an "expected NFT" record in `RouterStorage`.
 
-### 6.7 Fees
+### 6.8 Fees
 
 - **Same semantics as V3Utils and V3Automation:**
   - Fee fields come in the params.
-  - `_deductFees` math matches theirs, and so does the `DeductFees` event.
+  - The `_deductFees` math matches theirs.
+  - **The event is v4utils' `TakeFees`** (user decision 2026‑11‑19): `TakeFees(nfpm, tokenId, user, {feeTokens[],
+    feeX64, feeType})`, not V3Utils' 3‑slot `DeductFees`. Fees now apply to any number of tokens, and the backend
+    already indexes `TakeFees` from v4utils. The backend needs the router's address added to its indexing.
   - Fees go to `feeTaker`.
   - Caps are per `FeeType` in `RouterStorage`, with the same defaults as `Common`: gas 30%, liquidity 30%,
     performance 32%.
@@ -293,7 +334,7 @@ in PR #64. Native is wrapped and unwrapped as in V3Utils.
   in V3Utils' `swapAndIncreaseLiquidity` is no longer forced on anything. Each fee field gets its own `FeeType`, as
   in V3Utils' `execute` path.
 
-### 6.8 Storage (`RouterStorage`, ERC-7201, append-only)
+### 6.9 Storage (`RouterStorage`, ERC-7201, append-only)
 
 **Config:** `swapRouter`, `feeTaker`, `maxFeeX64[FeeType]`, `weth`, `nativeMode`, `nativeScale`.
 
@@ -303,7 +344,7 @@ in PR #64. Native is wrapped and unwrapped as in V3Utils.
 
 Router-own storage (roles, pause, reentrancy, cancelled orders) is never written by modules.
 
-### 6.9 Invariants for future modules, adapters and farms
+### 6.10 Invariants for future modules, adapters and farms
 
 - The account always comes from `msg.sender` (user flows) or from the router-recorded `automationAccount`, never
   from calldata alone.
@@ -345,5 +386,5 @@ Router-own storage (roles, pause, reentrancy, cancelled orders) is never written
 
 - **How Core is split into modules.** Split by flow; the size budget decides.
 - **The exact adapter and farm interfaces**, within §6.3 and §6.5.
-- **Struct shapes for user params.** They may mirror V3Utils' so the app and backend change as little as possible.
+- **Exact field lists of the per-action params structs**, within §6.6. Follow v4utils' structs where they apply.
 - **Native details**, ported from `Common` and `CommonLib`.
