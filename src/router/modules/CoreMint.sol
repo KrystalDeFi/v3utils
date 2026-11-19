@@ -24,7 +24,7 @@ import {CoreBase} from "../base/CoreBase.sol";
 ///   4. mint or increase with everything the call holds of the pool's tokens (`minLiquidity` checked);
 ///   5. put the position back (wallet, or the farm when staked);
 ///   6. sweep what the call holds to the account;
-///   7. emit the flow event.
+///   7. emit the events: `TakeFees` (deferred to here on a mint, so it carries the minted tokenId), then the flow's.
 contract CoreMint is ICoreMint, CoreBase {
     /// @dev What a mint or increase did: the position, its added liquidity and what the NFPM took.
     struct Added {
@@ -35,9 +35,8 @@ contract CoreMint is ICoreMint, CoreBase {
     }
 
     /// @inheritdoc ICoreMint
-    /// @dev The fees are taken before the mint, so their `TakeFees` events carry `tokenId` 0: a v3-style NFPM keeps
-    /// its next id private, so (unlike v4utils' `nextTokenId()`) the id is not known yet. The `SwapAndMint` event
-    /// in the same transaction carries the minted id.
+    /// @dev The fees are transferred at step 2, before the mint; their `TakeFees` events are emitted after it, with
+    /// the minted tokenId (as V3Utils does), since a v3-style NFPM keeps its next id private.
     /// With `stake`, the NFPM's farm checks the pool before anything moves (`FarmUnsupported()` if there is no farm)
     /// and stakes the minted NFT for the caller.
     function swapAndMint(SwapAndMintParams calldata params)
@@ -53,13 +52,16 @@ contract CoreMint is ICoreMint, CoreBase {
 
         Ledger memory l = _open(_candidates(params.inputTokens, params.swaps, params.key.token0, params.key.token1));
         _takeInputs(params.inputTokens);
-        _takeInputFees(l, nfpm, 0, account, params.inputTokens, params.protocolFeeX64, params.gasFeeX64);
+        TakeFeesEventData[2] memory fees =
+            _chargeInputFees(l, params.inputTokens, params.protocolFeeX64, params.gasFeeX64);
         _swaps(l, params.swaps);
         Added memory a = _mint(l, adapter, params);
         if (a.liquidity < params.mint.minLiquidity) revert LiquiditySlippage();
         _putBack(nfpm, a.tokenId, account, params.stake);
         _close(l, account);
 
+        _emitFees(nfpm, a.tokenId, account, fees[0]);
+        _emitFees(nfpm, a.tokenId, account, fees[1]);
         emit SwapAndMint(nfpm, a.tokenId, a.liquidity, a.amount0, a.amount1);
         return (a.tokenId, a.liquidity);
     }
@@ -80,7 +82,12 @@ contract CoreMint is ICoreMint, CoreBase {
         Ledger memory l = _open(_candidates(params.inputTokens, params.swaps, key.token0, key.token1));
         bool staked = _take(nfpm, params.tokenId, account);
         _takeInputs(params.inputTokens);
-        _takeInputFees(l, nfpm, params.tokenId, account, params.inputTokens, params.protocolFeeX64, params.gasFeeX64);
+        {
+            TakeFeesEventData[2] memory fees =
+                _chargeInputFees(l, params.inputTokens, params.protocolFeeX64, params.gasFeeX64);
+            _emitFees(nfpm, params.tokenId, account, fees[0]);
+            _emitFees(nfpm, params.tokenId, account, fees[1]);
+        }
         _swaps(l, params.swaps);
         Added memory a = _increase(l, params, key);
         if (a.liquidity < params.increase.minLiquidity) revert LiquiditySlippage();
@@ -113,17 +120,15 @@ contract CoreMint is ICoreMint, CoreBase {
         c[c.length - 1] = token1;
     }
 
-    /// @dev PROTOCOL_FEE, then GAS_FEE, each on the full input amounts. `_takeInputs` has already required the router
-    /// be credited exactly these amounts, so they are what the call holds.
-    function _takeInputFees(
+    /// @dev PROTOCOL_FEE, then GAS_FEE, each on the full input amounts; returns the two `TakeFees` payloads for the
+    /// flow to emit once it knows the tokenId. `_takeInputs` has already required the router be credited exactly
+    /// these amounts, so they are what the call holds.
+    function _chargeInputFees(
         Ledger memory l,
-        address nfpm,
-        uint256 tokenId,
-        address account,
         InputTokenParams[] calldata inputs,
         uint64 protocolFeeX64,
         uint64 gasFeeX64
-    ) private {
+    ) private returns (TakeFeesEventData[2] memory fees) {
         uint256 n = inputs.length;
         address[] memory tokens = new address[](n);
         uint256[] memory amounts = new uint256[](n);
@@ -131,8 +136,8 @@ contract CoreMint is ICoreMint, CoreBase {
             tokens[i] = inputs[i].token;
             amounts[i] = inputs[i].amount;
         }
-        _takeFees(l, nfpm, tokenId, account, tokens, amounts, protocolFeeX64, FeeType.PROTOCOL_FEE);
-        _takeFees(l, nfpm, tokenId, account, tokens, amounts, gasFeeX64, FeeType.GAS_FEE);
+        fees[0] = _chargeFees(l, tokens, amounts, protocolFeeX64, FeeType.PROTOCOL_FEE);
+        fees[1] = _chargeFees(l, tokens, amounts, gasFeeX64, FeeType.GAS_FEE);
     }
 
     /// @dev Mints to the router from everything the call holds of the pool's tokens.

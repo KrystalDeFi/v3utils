@@ -168,9 +168,7 @@ abstract contract CoreBase is IRouterErrors {
     }
 
     /// @dev Takes `feeX64 / 2**64` of each `amounts[i]` of `tokens[i]` to the fee taker and emits v4utils'
-    /// `TakeFees`. `feeX64` above the cap for `t` reverts `TooMuchFee()`; `feeX64 == 0` does nothing. Each fee must
-    /// be covered by what the call holds of its token (`AmountError()`; `NotTracked()` for a token not in the
-    /// ledger), so a fee can never spend the router's own balance, whatever `amounts` says.
+    /// `TakeFees` (see `_chargeFees`; `feeX64 == 0` does nothing).
     function _takeFees(
         Ledger memory l,
         address nfpm,
@@ -181,17 +179,35 @@ abstract contract CoreBase is IRouterErrors {
         uint64 feeX64,
         FeeType t
     ) internal returns (uint256[] memory taken) {
-        uint256 n = tokens.length;
-        if (amounts.length != n) revert AmountError();
-        taken = new uint256[](n);
-        if (feeX64 == 0) return taken;
+        TakeFeesEventData memory data = _chargeFees(l, tokens, amounts, feeX64, t);
+        taken = new uint256[](tokens.length);
+        for (uint256 i; i < data.feeTokens.length; i++) {
+            taken[i] = data.feeTokens[i].amount;
+        }
+        _emitFees(nfpm, tokenId, account, data);
+    }
+
+    /// @dev `_takeFees` without the event, for a flow that only learns the event's tokenId later (a mint): transfers
+    /// the fees and returns the payload for `_emitFees`. `feeX64` above the cap for `t` reverts `TooMuchFee()`;
+    /// `feeX64 == 0` transfers nothing and returns an empty payload. Each fee must be covered by what the call holds
+    /// of its token (`AmountError()`; `NotTracked()` for a token not in the ledger), so a fee can never spend the
+    /// router's own balance, whatever `amounts` says.
+    function _chargeFees(Ledger memory l, address[] memory tokens, uint256[] memory amounts, uint64 feeX64, FeeType t)
+        internal
+        returns (TakeFeesEventData memory data)
+    {
+        if (amounts.length != tokens.length) revert AmountError();
+        data.feeType = t;
+        if (feeX64 == 0) return data;
         RouterStorage.Layout storage s = RouterStorage.layout();
         if (feeX64 > s.maxFeeX64[uint8(t)]) revert TooMuchFee();
-        InputTokenParams[] memory feeTokens = _payFees(l, tokens, amounts, feeX64, s.feeTaker);
-        for (uint256 i; i < n; i++) {
-            taken[i] = feeTokens[i].amount;
-        }
-        emit TakeFees(nfpm, tokenId, account, TakeFeesEventData(feeTokens, feeX64, t));
+        data.feeTokens = _payFees(l, tokens, amounts, feeX64, s.feeTaker);
+        data.feeX64 = feeX64;
+    }
+
+    /// @dev Emits `TakeFees` for a `_chargeFees` payload; nothing for an empty one (`feeX64 == 0`).
+    function _emitFees(address nfpm, uint256 tokenId, address account, TakeFeesEventData memory data) internal {
+        if (data.feeX64 != 0) emit TakeFees(nfpm, tokenId, account, data);
     }
 
     function _payFees(

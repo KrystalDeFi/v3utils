@@ -319,7 +319,7 @@ contract CoreMintTest is RouterTestBase {
         assertEq(IERC721(NFPM).ownerOf(tokenId), alice, "NFT to the user");
         assertEq(_liquidityOf(tokenId), liquidity, "position liquidity");
         _assertRouterClean(_tokens3(WETH, USDC, address(0)));
-        _assertInputFees(logs, 0);
+        _assertInputFees(logs, tokenId);
         _assertLeftovers(logs, SwapAndMint.selector);
     }
 
@@ -426,6 +426,35 @@ contract CoreMintTest is RouterTestBase {
         assertEq(alice.balance, _net(inNative) - swapWeth - used0, "leftover WETH back as native");
         assertEq(_bal(WETH, alice), 0, "no WETH to a native payer");
         assertEq(_bal(USDC, alice), _swapOutOf(logs, WETH) - used1, "USDC leftover as USDC");
+    }
+
+    /// @dev No value sent: WETH and USDC in, part of the WETH swapped to USDC, and the swap list ends with a
+    /// `WETH -> native` conversion with `amountIn == 0`. The position is USDC-only (below the price), so the call still
+    /// holds WETH at the end of the swaps; the user receives it as native. The router's own WETH and native, seeded
+    /// before the call, are untouched.
+    function test_swapAndMint_noValue_trailingUnwrapStep() public {
+        deal(WETH, address(router), 3 ether);
+        vm.deal(address(router), 0.7 ether);
+        _dealAndApprove(WETH, alice, IN_WETH);
+        _dealAndApprove(USDC, alice, IN_USDC);
+        uint256 swapWeth = 0.4 ether;
+
+        SwapParams[] memory swaps = new SwapParams[](2);
+        swaps[0] = _step(WETH, USDC, swapWeth, swapWeth);
+        swaps[1] = _convert(WETH, address(0));
+        SwapAndMintParams memory p = _mintParams(
+            BELOW_LOWER, BELOW_UPPER, _inputs2(WETH, IN_WETH, USDC, IN_USDC), swaps, PROTOCOL_FEE_X64, GAS_FEE_X64
+        );
+
+        (uint256 tokenId, uint128 liquidity) = _mint(alice, p, 0);
+
+        assertGt(liquidity, 0, "liquidity");
+        assertEq(IERC721(NFPM).ownerOf(tokenId), alice, "NFT to the user");
+        assertEq(alice.balance, _net(IN_WETH) - swapWeth, "unswapped WETH unwrapped to the user as native");
+        assertEq(_bal(WETH, alice), 0, "no WETH to the user");
+        assertEq(_bal(WETH, address(router)), 3 ether, "router WETH unchanged");
+        assertEq(address(router).balance, 0.7 ether, "router native unchanged");
+        assertEq(_bal(USDC, address(router)), 0, "router USDC");
     }
 
     function test_swapAndMint_minLiquidity_reverts() public {
