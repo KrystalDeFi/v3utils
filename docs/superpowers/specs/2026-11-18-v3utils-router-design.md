@@ -39,7 +39,8 @@ V3Utils' position logic becomes modules of the router. It is no longer an extern
      - swap and increase;
      - withdraw, with collect and an optional swap to a target token;
      - change range;
-     - compound fees.
+     - compound;
+     - harvest (farm rewards when staked, trading fees when not), with a `PERFORMANCE_FEE` (§6.7).
    - **Bot actions:** AUTO_ADJUST, AUTO_EXIT, AUTO_COMPOUND, AUTO_HARVEST, under user-signed EIP-712 orders.
 2. **Farming as a plug-in.** One farm per position manager, optional. The first farm is Aero's CL gauge, ported
    from PR #64. Every flow works on staked and unstaked positions.
@@ -256,14 +257,17 @@ in PR #64. Native is wrapped and unwrapped as in V3Utils.
 | withdraw (partial or full) | V3Utils `WITHDRAW_AND_COLLECT_AND_SWAP` | the same; restake if liquidity remains |
 | change range | V3Utils `CHANGE_RANGE` | the same; restake the new NFT |
 | compound | **trading fees** (V3Utils `COMPOUND_FEES`) | **farm rewards** (claim, fee, swap and add; PR #64 compound); plus trading fees if `earnsTradingFees` |
-| harvest (bot) | **trading fees** (collect, optional swap to a target token) | **farm rewards** (claim, fee, optional swap); position stays staked |
+| harvest (user and bot) | **trading fees** (collect with zero liquidity, `PERFORMANCE_FEE`, optional swap to a target token) | **farm rewards** (claim, `PERFORMANCE_FEE`, optional swap); position stays staked |
 
-- **There is no user harvest entry point.**
-  - A user harvesting a staked position's rewards calls the farm directly, with no fee. For Aero that is
-    `gauge.claimEmissions`, decided in PR #64.
-  - For an unstaked position, a user collects trading fees with a zero-liquidity withdraw, with fee fields as in
-    V3Utils.
-  - Harvest as a flow exists for AUTO_HARVEST only.
+- **Harvest is a user entry point too** (2026‑11‑19, user decision: rewards are fee-collectible for Krystal).
+  This replaces PR #64's "no fee on harvest", where users claimed on the gauge directly.
+  - `harvest(tokenId, params)` claims a staked position's farm rewards, or collects an unstaked position's trading
+    fees. It takes `performanceFeeX64` (`PERFORMANCE_FEE`), optionally swaps to a target token, and pays the user.
+  - A staked position stays staked. Harvest on a staked position needs the farm to allow claim (Aero needs
+    `approveForClaim`; MasterChef reverts `FarmUnsupported`).
+  - AUTO_HARVEST is the same flow, run by the bot.
+  - A user can still claim on the farm directly, outside Krystal's contracts. That path has no fee; the app routes
+    harvests through the router.
 - **Bot actions** use the same flows: AUTO_ADJUST is change range, AUTO_EXIT is a full withdraw, and AUTO_COMPOUND
   and AUTO_HARVEST map to the table above. One signed order covers a position in either state.
 - **Flows on a staked position whose farm cannot unstake** revert `FarmUnsupported`, except add liquidity when the
@@ -280,8 +284,11 @@ in PR #64. Native is wrapped and unwrapped as in V3Utils.
   - Fees go to `feeTaker`.
   - Caps are per `FeeType` in `RouterStorage`, with the same defaults as `Common`: gas 30%, liquidity 30%,
     performance 32%.
-- **Farm rewards** (compound and harvest) take one `performanceFeeX64`, labelled `PERFORMANCE_FEE`, with gas folded
-  in. This was decided in PR #64.
+- **Rewards are always fee-collectible, as `PERFORMANCE_FEE`** (user decision; V3Utils labels its fee on collected
+  trading fees `PERFORMANCE_FEE` the same way). That covers:
+  - farm rewards on compound and harvest, one `performanceFeeX64` with gas folded in (PR #64);
+  - trading fees collected by harvest or compound on an unstaked position, and the fee portion of a withdraw;
+  - user calls and bot calls alike.
 - **Labels are correct by construction.** The router takes the fees itself, so the hardcoded `LIQUIDITY_FEE` label
   in V3Utils' `swapAndIncreaseLiquidity` is no longer forced on anything. Each fee field gets its own `FeeType`, as
   in V3Utils' `execute` path.
