@@ -64,6 +64,9 @@ interface IRouterErrors {
     // ---- flows
     /// @dev A mint or increase that added less liquidity than the caller's `minLiquidity`.
     error LiquiditySlippage();
+    /// @dev A decrease whose principal, as it actually reached the router, is below the caller's `amount0Min` /
+    /// `amount1Min` (the NFPM checks only the gross amounts; a token that skims on transfer out delivers less).
+    error SlippageError();
 
     /// @dev v4utils' event payload, so the backend's `TakeFees` decoding applies unchanged.
     struct TakeFeesEventData {

@@ -225,7 +225,9 @@ contract CoreModifyTest is UniV3FlowBase {
     }
 
     /// @dev Full withdraw into USDC, with USDC and WETH already in the router: `amountOut` is what the user received
-    /// (v4utils GHSA-m36p), the `amountIn == 0` swap sells only the call's WETH, and the router keeps its own balances.
+    /// (v4utils GHSA-m36p), not the router's USDC balance, and the router keeps its own balances. (The swap's calldata
+    /// fixes its amount, so this does not show what `amountIn == 0` resolves to: CoreBase's
+    /// `test_preexistingBalances_untouched` and `test_adjustRange_notCompounding_returnsFeesBeforeSwaps` do.)
     function test_decrease_full_toDestToken_amountOutIsDelta() public {
         (uint256 tokenId, uint128 liquidity) = _aliceMints();
         deal(USDC, address(router), 7_000e6);
@@ -425,10 +427,10 @@ contract CoreModifyTest is UniV3FlowBase {
         );
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(bytes(""));
         router.execute{value: 1}(decreaseCall);
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(bytes(""));
         router.execute{value: 1}(adjustCall);
 
         vm.prank(alice);

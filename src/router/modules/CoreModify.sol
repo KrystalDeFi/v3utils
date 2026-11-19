@@ -155,8 +155,10 @@ contract CoreModify is ICoreModify, CoreBase {
         net[1] -= perf[1] + gas[1];
     }
 
-    /// @dev Removes `liquidity` (the NFPM checks the minimums and the deadline), collects the principal, and takes
-    /// PROTOCOL_FEE, then GAS_FEE, on it.
+    /// @dev Removes `liquidity`, collects the principal, and takes PROTOCOL_FEE, then GAS_FEE, on it. The NFPM checks
+    /// the deadline and the minimums against the gross amounts; the minimums are checked again against what the
+    /// collect actually delivered (`SlippageError()`), so a pool token that skims on transfer out fails visibly
+    /// instead of short-filling (V3Utils #62).
     function _withdraw(
         Ledger memory l,
         Target memory t,
@@ -172,6 +174,7 @@ contract CoreModify is ICoreModify, CoreBase {
             abi.encodeCall(IAdapter.decrease, (t.nfpm, t.tokenId, liquidity, amount0Min, amount1Min, deadline))
         );
         uint256[] memory principal = _collect(l, t);
+        if (principal[0] < amount0Min || principal[1] < amount1Min) revert SlippageError();
         _fees(l, t, principal, protocolFeeX64, FeeType.PROTOCOL_FEE);
         _fees(l, t, principal, gasFeeX64, FeeType.GAS_FEE);
     }
