@@ -67,6 +67,8 @@ interface IRouterErrors {
     /// @dev A decrease whose principal, as it actually reached the router, is below the caller's `amount0Min` /
     /// `amount1Min` (the NFPM checks only the gross amounts; a token that skims on transfer out delivers less).
     error SlippageError();
+    /// @dev A harvest whose `destToken` is neither zero nor a pool token, with fees to convert and no `swaps`.
+    error MissingSwapData();
 
     /// @dev v4utils' event payload, so the backend's `TakeFees` decoding applies unchanged.
     struct TakeFeesEventData {

@@ -413,6 +413,8 @@ contract CoreModifyTest is UniV3FlowBase {
     function test_selectors_matchAutomationFlows() public pure {
         assertEq(ICoreModify.decreaseAndSwap.selector, IAutomationFlows.decreaseAndSwap.selector, "decreaseAndSwap");
         assertEq(ICoreModify.adjustRange.selector, IAutomationFlows.adjustRange.selector, "adjustRange");
+        assertEq(ICoreModify.compound.selector, IAutomationFlows.compound.selector, "compound");
+        assertEq(ICoreModify.harvest.selector, IAutomationFlows.harvest.selector, "harvest");
     }
 
     /// @dev Neither flow takes native: value with an otherwise valid call reverts, and the same call without succeeds.

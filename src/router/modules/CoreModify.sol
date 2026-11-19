@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
-import {FeeType, MintParams, Position, SwapParams, DecreaseAndSwapParams, AdjustRangeParams} from "../RouterTypes.sol";
+import {
+    FeeType,
+    MintParams,
+    Position,
+    SwapParams,
+    DecreaseAndSwapParams,
+    AdjustRangeParams,
+    CompoundParams,
+    HarvestParams
+} from "../RouterTypes.sol";
 import {ICoreModify} from "../interfaces/ICoreModify.sol";
 import {IAdapter} from "../interfaces/IAdapter.sol";
 import {CoreBase} from "../base/CoreBase.sol";
@@ -109,6 +118,56 @@ contract CoreModify is ICoreModify, CoreBase {
 
         emit AdjustRange(t.nfpm, t.tokenId, m.tokenId, m.liquidity, m.amount0, m.amount1);
         return (m.tokenId, m.liquidity);
+    }
+
+    /// @inheritdoc ICoreModify
+    /// @dev Unstaked trading fees. The increase takes what the call holds of the pool's tokens (the net fees after the
+    /// swaps), so the router's own balances are never added.
+    function compound(CompoundParams calldata params) external onlyDelegateCall returns (uint128 liquidity) {
+        (Target memory t,) = _target(params.nfpm, params.tokenId);
+        Ledger memory l = _open(_candidates(params.swaps, t.token0, t.token1, t.token0));
+        bool staked = _take(t.nfpm, t.tokenId, t.account);
+
+        _collectFees(l, t, params.performanceFeeX64, 0);
+        _swaps(l, params.swaps);
+        uint256 used0;
+        uint256 used1;
+        (liquidity, used0, used1) = abi.decode(
+            _delegate(
+                t.adapter,
+                abi.encodeCall(
+                    IAdapter.increase,
+                    (t.nfpm, t.tokenId, _held(l, t.token0), _held(l, t.token1), params.increase.deadline)
+                )
+            ),
+            (uint128, uint256, uint256)
+        );
+        if (liquidity < params.increase.minLiquidity) revert LiquiditySlippage();
+
+        _putBack(t.nfpm, t.tokenId, t.account, staked);
+        _close(l, t.account);
+
+        emit CompoundFees(t.nfpm, t.tokenId, liquidity, used0, used1);
+    }
+
+    /// @inheritdoc ICoreModify
+    function harvest(HarvestParams calldata params) external onlyDelegateCall returns (uint256 amountOut) {
+        (Target memory t,) = _target(params.nfpm, params.tokenId);
+        Ledger memory l = _open(_candidates(params.swaps, t.token0, t.token1, params.destToken));
+        bool staked = _take(t.nfpm, t.tokenId, t.account);
+
+        uint256[] memory net = _collectFees(l, t, params.performanceFeeX64, 0);
+        if (
+            params.destToken != address(0) && params.destToken != t.token0 && params.destToken != t.token1
+                && (net[0] != 0 || net[1] != 0) && params.swaps.length == 0
+        ) revert MissingSwapData();
+        _swaps(l, params.swaps);
+        if (params.destToken != address(0)) amountOut = _held(l, params.destToken);
+
+        _putBack(t.nfpm, t.tokenId, t.account, staked);
+        _close(l, t.account);
+
+        emit Harvest(t.nfpm, t.tokenId, params.destToken, amountOut);
     }
 
     // ---------------------------------------------------------------- steps
