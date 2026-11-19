@@ -208,10 +208,35 @@ abstract contract CoreBase is IRouterErrors {
         if (amounts.length != tokens.length) revert AmountError();
         data.feeType = t;
         if (feeX64 == 0) return data;
-        RouterStorage.Layout storage s = RouterStorage.layout();
-        if (feeX64 > s.maxFeeX64[uint8(t)]) revert TooMuchFee();
-        data.feeTokens = _payFees(l, tokens, amounts, feeX64, s.feeTaker);
+        _checkFeeCap(feeX64, t);
+        data.feeTokens = _payFees(l, tokens, amounts, feeX64, RouterStorage.layout().feeTaker);
         data.feeX64 = feeX64;
+    }
+
+    /// @dev `TooMuchFee()` when `feeX64` is above the cap for `t`.
+    function _checkFeeCap(uint64 feeX64, FeeType t) internal view {
+        if (feeX64 > RouterStorage.layout().maxFeeX64[uint8(t)]) revert TooMuchFee();
+    }
+
+    /// @dev Takes PERFORMANCE_FEE (`feeX64`) on `amount` of a farm's `reward` the call received, tagged with the
+    /// position, and returns the fee. The cap is checked even when `amount` is 0, so an over-cap fee reverts
+    /// `TooMuchFee()` whether or not rewards accrued; nothing is transferred or emitted for a zero amount.
+    function _chargeReward(
+        Ledger memory l,
+        address nfpm,
+        uint256 tokenId,
+        address account,
+        address reward,
+        uint256 amount,
+        uint64 feeX64
+    ) internal returns (uint256 fee) {
+        _checkFeeCap(feeX64, FeeType.PERFORMANCE_FEE);
+        if (amount == 0) return 0;
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = reward;
+        amounts[0] = amount;
+        fee = _takeFees(l, nfpm, tokenId, account, tokens, amounts, feeX64, FeeType.PERFORMANCE_FEE)[0];
     }
 
     /// @dev Emits `TakeFees` for a `_chargeFees` payload; nothing for an empty one (`feeX64 == 0`).
@@ -366,9 +391,11 @@ abstract contract CoreBase is IRouterErrors {
 
     /// @dev `_bring`, and when it unstakes, takes PERFORMANCE_FEE (`feeX64`) on the `reward` the unstake paid the call
     /// (its ledger delta across `_bring`; Aero's `withdrawFrom` pays the stake's emissions to the router when the
-    /// account granted `approveForClaim`). `TakeFees` is tagged with `tokenId`; nothing is charged or emitted when the
-    /// unstake paid nothing. Without `approveForClaim` the gauge pays the emissions straight to the account, so there is
-    /// nothing here to charge.
+    /// account granted `approveForClaim`), via `_chargeReward`. The fee cap is checked on every call, wallet positions
+    /// included, so an over-cap `feeX64` always reverts `TooMuchFee()`. Without `approveForClaim` the gauge pays the
+    /// emissions straight to the account, so there is nothing here to charge. When `reward` is also a pool token, the
+    /// net emissions stay in the flow as that pool token (swapped, added or withdrawn with the rest) rather than being
+    /// paid out on their own.
     function _bringCharged(
         Ledger memory l,
         address nfpm,
@@ -378,14 +405,11 @@ abstract contract CoreBase is IRouterErrors {
         address reward,
         uint64 feeX64
     ) internal {
+        _checkFeeCap(feeX64, FeeType.PERFORMANCE_FEE);
         if (farm == address(0)) return _bring(nfpm, tokenId, account, farm);
         uint256 before = _held(l, reward);
         _bring(nfpm, tokenId, account, farm);
-        address[] memory tokens = new address[](1);
-        uint256[] memory amounts = new uint256[](1);
-        tokens[0] = reward;
-        amounts[0] = _held(l, reward) - before;
-        if (amounts[0] != 0) _takeFees(l, nfpm, tokenId, account, tokens, amounts, feeX64, FeeType.PERFORMANCE_FEE);
+        _chargeReward(l, nfpm, tokenId, account, reward, _held(l, reward) - before, feeX64);
     }
 
     /// @dev `_locate` then `_bring`; returns whether the position was staked.

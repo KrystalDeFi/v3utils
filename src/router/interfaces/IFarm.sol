@@ -23,7 +23,9 @@ interface IFarm {
     /// cannot be swapped into the pool, e.g. xAERO off Base).
     function canCompound() external payable returns (bool);
 
-    /// @notice The token `claim` pays, and an unstake may pay (swept to the account by the flow's ledger).
+    /// @notice The token `claim` pays, and an unstake may pay. Either way the flow charges PERFORMANCE_FEE on what the
+    /// router received of it, then sweeps the rest to the account (or, when it is also a pool token, keeps it in the
+    /// flow as that pool token: swapped, added or withdrawn with the rest).
     function rewardToken() external payable returns (address);
 
     /// @notice Reverts unless `key`'s pool on `nfpm` has a live farm.
@@ -38,7 +40,9 @@ interface IFarm {
     /// @notice Claims `account`'s rewards on `tokenId` to the router.
     function claim(address nfpm, uint256 tokenId, address account) external payable returns (uint256 amount);
 
-    /// @notice Adds liquidity to a position while it stays staked.
+    /// @notice Adds liquidity to a position while it stays staked. The flow charges no fee on rewards the farm pays the
+    /// router during this call: they are swept to the account uncharged (the flow's `performanceFeeX64` applies only to
+    /// an unstake's rewards).
     function increaseStaked(address nfpm, uint256 tokenId, uint256 amount0, uint256 amount1, uint256 deadline)
         external
         payable

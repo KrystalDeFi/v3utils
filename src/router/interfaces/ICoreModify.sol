@@ -51,17 +51,16 @@ interface ICoreModify {
     /// @notice Collects the position's trading fees, takes PERFORMANCE_FEE, runs `swaps`, and adds everything the call
     /// holds of the pool's tokens to the same position (`increase.minLiquidity` checked); leftovers go to the account. A
     /// position with no fees to add is left as it is (liquidity 0 returned). A staked position compounds its farm
-    /// rewards instead (claim, PERFORMANCE_FEE on the reward, swaps, unstake, add, restake; plus its trading fees only if
-    /// the farm lets staked positions earn them); `CompoundDisabled()` when the farm cannot compound.
+    /// rewards instead: claim, unstake, PERFORMANCE_FEE on the reward both paid, collect trading fees only if the farm
+    /// lets staked positions earn them, swaps, add, restake. `CompoundDisabled()` when the farm cannot compound.
     function compound(CompoundParams calldata params) external returns (uint128 liquidity);
 
     /// @notice Collects the position's trading fees, takes PERFORMANCE_FEE, runs `swaps` and pays the account. No
     /// liquidity is removed. A staked position claims its farm rewards instead (PERFORMANCE_FEE on the reward) and stays
     /// staked; the farm needs the account's claim approval. Where the farm cannot compound, the reward is paid as is: a
     /// `destToken` other than zero or the reward, or any `swaps`, reverts `CompoundDisabled()`. `MissingSwapData()` when
-    /// `swaps` is empty and something
-    /// earned is not `destToken`: net trading fees with `destToken` neither zero nor a pool token, or a net reward with
-    /// `destToken` neither zero nor the reward token.
+    /// `swaps` is empty and something earned is not `destToken`: net trading fees with `destToken` neither zero nor a
+    /// pool token, or a net reward with `destToken` neither zero nor the reward token.
     /// @return amountOut What the account receives of `destToken`: the call's own `destToken` balance delta.
     function harvest(HarvestParams calldata params) external returns (uint256 amountOut);
 }

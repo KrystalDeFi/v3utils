@@ -428,6 +428,8 @@ contract StakedTest is AeroFarmBase {
         uint256 tokenId = _stakedA();
         vm.prank(staker);
         ITestGauge(GAUGE_A).approveForClaim(address(router), false);
+        uint256 emissions = _earned(GAUGE_A, staker, tokenId);
+        assertGt(emissions, 0, "no emissions accrued");
         uint256 a0 = _bal(AERO, staker);
         DecreaseAndSwapParams memory p;
         p.nfpm = NFPM;
@@ -439,7 +441,50 @@ contract StakedTest is AeroFarmBase {
         vm.prank(staker);
         router.execute(abi.encodeCall(ICoreModify.decreaseAndSwap, (p)));
         assertEq(_bal(AERO, routerFeeTaker), 0, "no fee without the router receiving them");
-        assertGe(_bal(AERO, staker), a0, "user keeps its emissions");
+        assertEq(_bal(AERO, staker) - a0, emissions, "the gauge pays the user all its emissions directly");
+        _assertStaked(GAUGE_A, staker, tokenId);
+        _assertRouterClean(_flowTokens());
+    }
+
+    uint64 internal constant OVER_PERF_CAP = 5902958103587057001; // the PERFORMANCE_FEE cap + 1
+
+    /// @dev An over-cap performanceFeeX64 reverts TooMuchFee even when the unstake pays no emissions (same block as
+    /// the stake, inside the penalty window), so the result does not depend on accrual. swapAndIncrease is the flow
+    /// whose performanceFeeX64 applies to nothing but unstake emissions.
+    function test_increase_staked_perfFeeOverCap_noEmissions_reverts() public {
+        uint256 tokenId = _mint(staker, _mintParams(_key(WETH, USDC_BASE, TS_A), POOL_A, 1 ether, 2_500e6, true));
+        assertEq(_earned(GAUGE_A, staker, tokenId), 0, "no emissions yet");
+        SwapAndIncreaseParams memory p = _increaseParams(tokenId, 0.5 ether, 1_000e6);
+        p.performanceFeeX64 = OVER_PERF_CAP;
+        vm.prank(staker);
+        vm.expectRevert(IRouterErrors.TooMuchFee.selector);
+        router.execute(abi.encodeCall(ICoreMint.swapAndIncrease, (p)));
+    }
+
+    /// @dev ... and for a wallet position too (no unstake at all).
+    function test_increase_wallet_perfFeeOverCap_reverts() public {
+        uint256 tokenId = _mint(staker, _mintParams(_key(WETH, USDC_BASE, TS_A), POOL_A, 1 ether, 2_500e6, false));
+        SwapAndIncreaseParams memory p = _increaseParams(tokenId, 0.5 ether, 1_000e6);
+        p.performanceFeeX64 = OVER_PERF_CAP;
+        vm.prank(staker);
+        vm.expectRevert(IRouterErrors.TooMuchFee.selector);
+        router.execute(abi.encodeCall(ICoreMint.swapAndIncrease, (p)));
+    }
+
+    /// @dev At the cap exactly, a staked increase with no emissions succeeds and emits no TakeFees on the reward.
+    function test_increase_staked_perfFeeAtCap_noEmissions_ok() public {
+        uint256 tokenId = _mint(staker, _mintParams(_key(WETH, USDC_BASE, TS_A), POOL_A, 1 ether, 2_500e6, true));
+        SwapAndIncreaseParams memory p = _increaseParams(tokenId, 0.5 ether, 1_000e6);
+        p.performanceFeeX64 = OVER_PERF_CAP - 1;
+        vm.recordLogs();
+        vm.prank(staker);
+        router.execute(abi.encodeCall(ICoreMint.swapAndIncrease, (p)));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].emitter != address(router) || logs[i].topics[0] != TakeFees.selector) continue;
+            IRouterErrors.TakeFeesEventData memory d = abi.decode(logs[i].data, (IRouterErrors.TakeFeesEventData));
+            assertTrue(d.feeType != FeeType.PERFORMANCE_FEE, "no reward fee event for zero emissions");
+        }
         _assertStaked(GAUGE_A, staker, tokenId);
         _assertRouterClean(_flowTokens());
     }

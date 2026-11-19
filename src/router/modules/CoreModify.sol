@@ -272,12 +272,8 @@ contract CoreModify is ICoreModify, CoreBase {
     {
         _delegate(farm, abi.encodeCall(IFarm.claim, (t.nfpm, t.tokenId, t.account)));
         if (unstake) _bring(t.nfpm, t.tokenId, t.account, farm);
-        address[] memory tokens = new address[](1);
-        uint256[] memory amounts = new uint256[](1);
-        tokens[0] = reward;
-        amounts[0] = _held(l, reward);
-        net = amounts[0]
-            - _takeFees(l, t.nfpm, t.tokenId, t.account, tokens, amounts, feeX64, FeeType.PERFORMANCE_FEE)[0];
+        uint256 paid = _held(l, reward);
+        net = paid - _chargeReward(l, t.nfpm, t.tokenId, t.account, reward, paid, feeX64);
     }
 
     /// @dev Collects what the position owes (its earned fees, before any decrease) and takes PERFORMANCE_FEE, then
