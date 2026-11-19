@@ -598,8 +598,9 @@ contract CoreBaseTest is Test {
         );
         assertEq(held[0], 0.7 ether);
         assertEq(held[1], 0.3 ether);
-        assertEq(alice.balance, 9.7 ether);
-        assertEq(weth.balanceOf(alice), 0.3 ether);
+        // a native payer's held weth comes back as native
+        assertEq(alice.balance, 10 ether);
+        assertEq(weth.balanceOf(alice), 0);
         assertEq(address(router).balance, 2 ether, "router native unchanged");
         assertEq(weth.balanceOf(address(router)), 1 ether, "router weth unchanged");
 
@@ -695,6 +696,41 @@ contract CoreBaseTest is Test {
         // without value, native is not added
         (tokens,) = _flow(router, alice, 0, _addrs(address(tokenA)), _inputs(), _swaps());
         assertEq(tokens.length, 1);
+    }
+
+    /// WRAPPED, native payer: `_close` unwraps exactly the call's held weth and pays it, with the call's native, as
+    /// native. The router's own weth and native stay put.
+    function test_close_nativePayer_wethReturnedAsNative() public {
+        weth.deposit{value: 1 ether}();
+        assertTrue(weth.transfer(address(router), 1 ether));
+        vm.deal(address(router), 2 ether);
+        SwapParams memory wrap = _step(address(0), 0.4 ether, address(weth), 0, 0);
+
+        (, uint256[] memory held) =
+            _flow(router, alice, 1 ether, _addrs(address(0), address(weth)), _inputs(address(0), 1 ether), _swaps(wrap));
+        assertEq(held[0], 0.6 ether, "held native before close");
+        assertEq(held[1], 0.4 ether, "held weth before close");
+        assertEq(alice.balance, 10 ether, "all of the call's value back as native");
+        assertEq(weth.balanceOf(alice), 0, "no weth to a native payer");
+        assertEq(weth.balanceOf(address(router)), 1 ether, "router weth unchanged");
+        assertEq(address(router).balance, 2 ether, "router native unchanged");
+    }
+
+    /// WRAPPED, no value: the call's weth comes back as weth; the router's own weth and native stay put.
+    function test_close_noValue_wethStaysWeth() public {
+        weth.deposit{value: 1 ether}();
+        assertTrue(weth.transfer(address(router), 1 ether));
+        vm.deal(address(router), 2 ether);
+        vm.prank(alice);
+        weth.deposit{value: 0.5 ether}();
+        vm.prank(alice);
+        weth.approve(address(router), 0.5 ether);
+
+        _flow(router, alice, 0, _addrs(address(0), address(weth)), _inputs(address(weth), 0.5 ether), _swaps());
+        assertEq(weth.balanceOf(alice), 0.5 ether, "weth back as weth");
+        assertEq(alice.balance, 9.5 ether, "no native to a non-native payer");
+        assertEq(weth.balanceOf(address(router)), 1 ether, "router weth unchanged");
+        assertEq(address(router).balance, 2 ether, "router native unchanged");
     }
 
     // ------------------------------------------------------------------ custody

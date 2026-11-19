@@ -381,8 +381,9 @@ contract CoreMintTest is RouterTestBase {
         assertEq(_bal(WETH, alice), 0, "all WETH swapped on");
     }
 
-    /// @dev Native in: native->WETH conversion first, a WETH->USDC swap, and a final WETH->native `amountIn == 0`
-    /// step. The position is USDC-only; the user gets the unswapped remainder back as native.
+    /// @dev Native in to a WETH/USDC position: native->WETH conversion, then a WETH->USDC swap, then the mint. The WETH
+    /// the position does not take comes back to the native payer as native; the router's own WETH and native, seeded
+    /// before the call, are untouched.
     function test_swapAndMint_nativeIn_unwrapLeftover() public {
         uint256 tokenId = _nativeMint(false);
         assertEq(IERC721(NFPM).ownerOf(tokenId), alice, "NFT to the user");
@@ -400,23 +401,31 @@ contract CoreMintTest is RouterTestBase {
         uint256 inNative = 2 ether;
         uint256 swapWeth = 1 ether;
         vm.deal(alice, inNative);
+        deal(WETH, address(router), 3 ether);
+        vm.deal(address(router), 0.7 ether);
 
-        SwapParams[] memory swaps = new SwapParams[](3);
+        SwapParams[] memory swaps = new SwapParams[](2);
         swaps[0] = _convert(address(0), WETH);
         swaps[1] = _step(WETH, USDC, swapWeth, swapWeth);
-        swaps[2] = _convert(WETH, address(0));
         SwapAndMintParams memory p =
-            _mintParams(BELOW_LOWER, BELOW_UPPER, _inputs1(address(0), inNative), swaps, PROTOCOL_FEE_X64, GAS_FEE_X64);
+            _mintParams(IN_LOWER, IN_UPPER, _inputs1(address(0), inNative), swaps, PROTOCOL_FEE_X64, GAS_FEE_X64);
         p.stake = stake;
 
+        vm.recordLogs();
         uint128 liquidity;
         (tokenId, liquidity) = _mint(alice, p, inNative);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
 
         assertGt(liquidity, 0, "liquidity");
-        _assertRouterClean(_tokens3(address(0), WETH, USDC));
+        assertEq(_bal(WETH, address(router)), 3 ether, "router WETH unchanged");
+        assertEq(address(router).balance, 0.7 ether, "router native unchanged");
+        assertEq(_bal(USDC, address(router)), 0, "router USDC");
         assertEq(routerFeeTaker.balance, inNative - _net(inNative), "fees in native");
-        assertEq(alice.balance, _net(inNative) - swapWeth, "leftover back as native");
-        assertEq(_bal(WETH, alice), 0, "no WETH to the user");
+        (uint256 used0, uint256 used1) = _used(logs, SwapAndMint.selector);
+        assertGt(_net(inNative) - swapWeth - used0, 0, "some WETH left over");
+        assertEq(alice.balance, _net(inNative) - swapWeth - used0, "leftover WETH back as native");
+        assertEq(_bal(WETH, alice), 0, "no WETH to a native payer");
+        assertEq(_bal(USDC, alice), _swapOutOf(logs, WETH) - used1, "USDC leftover as USDC");
     }
 
     function test_swapAndMint_minLiquidity_reverts() public {
@@ -554,7 +563,7 @@ contract CoreMintTest is RouterTestBase {
     }
 
     /// @dev Native in to an existing position: the position read, take, increase and put back all run inside a flow
-    /// that carries `msg.value`. The WETH the position does not take comes back as WETH (swaps run before the add).
+    /// that carries `msg.value`. The WETH the position does not take comes back to the native payer as native.
     function test_swapAndIncrease_nativeIn() public {
         (uint256 tokenId, uint128 liquidity) = _aliceMints();
         vm.deal(alice, IN_WETH);
@@ -576,10 +585,9 @@ contract CoreMintTest is RouterTestBase {
         assertEq(IERC721(NFPM).ownerOf(tokenId), alice, "NFT back to alice");
         _assertRouterClean(_tokens3(address(0), WETH, USDC));
         assertEq(routerFeeTaker.balance, _inputFee(IN_WETH), "native fees");
-        assertEq(alice.balance, 0, "all native converted");
         (uint256 used0,) = _used(logs, SwapAndIncrease.selector);
-        uint256 converted = _net(IN_WETH);
-        assertEq(_bal(WETH, alice) - wethBefore, converted + _swapOutOf(logs, USDC) - used0, "WETH leftover");
+        assertEq(alice.balance, _net(IN_WETH) + _swapOutOf(logs, USDC) - used0, "WETH leftover back as native");
+        assertEq(_bal(WETH, alice), wethBefore, "no WETH to a native payer");
     }
 
     function test_swapAndIncrease_minLiquidity_reverts() public {

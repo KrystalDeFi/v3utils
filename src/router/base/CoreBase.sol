@@ -103,10 +103,30 @@ abstract contract CoreBase is IRouterErrors {
 
     /// @dev Sends `to` what the call holds of every ledger token, and nothing else. Each amount is read just before
     /// its transfer, so on an ENSHRINED chain, where native and `weth` are one balance, it is paid once, not twice.
+    ///
+    /// A native payer (`msg.value != 0`) on a WRAPPED chain gets the call's `weth` back as native: exactly
+    /// `_held(weth)` is unwrapped first, which moves it into the call's held native (whose start excludes the
+    /// router's own native), so it is paid once, as native, and no pre-existing `weth` or native is touched. Calls
+    /// without value get `weth` as `weth`; they can end `swaps[]` with a `weth -> native` step instead.
     function _close(Ledger memory l, address to) internal {
+        if (msg.value != 0) _unwrapHeldWeth(l);
         for (uint256 i; i < l.tokens.length; i++) {
             uint256 amount = _heldAt(l, i);
             if (amount != 0) _send(l.tokens[i], to, amount);
+        }
+    }
+
+    /// @dev On a WRAPPED chain, unwraps what the call holds of `weth` (nothing if `weth` is untracked). Native is
+    /// tracked whenever `msg.value != 0`, so the unwrapped amount is part of the call's held native.
+    function _unwrapHeldWeth(Ledger memory l) private {
+        RouterStorage.Layout storage s = RouterStorage.layout();
+        if (s.nativeMode != RouterStorage.NATIVE_WRAPPED) return;
+        address weth = s.weth;
+        for (uint256 i; i < l.tokens.length; i++) {
+            if (l.tokens[i] != weth) continue;
+            uint256 amount = _heldAt(l, i);
+            if (amount != 0) NativeCurrency.toNativeUnits(weth, false, amount);
+            return;
         }
     }
 
