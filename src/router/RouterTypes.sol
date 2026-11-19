@@ -86,6 +86,8 @@ struct SwapAndIncreaseParams {
     InputTokenParams[] inputTokens;
     SwapParams[] swaps;
     uint64 protocolFeeX64;
+    /// @dev PERFORMANCE_FEE on the farm rewards an unstake of a staked position pays the router (v4utils field order).
+    uint64 performanceFeeX64;
     uint64 gasFeeX64;
 }
 

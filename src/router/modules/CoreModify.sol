@@ -24,7 +24,8 @@ import {CoreBase} from "../base/CoreBase.sol";
 /// A staked position (§6.4, §6.7) is unstaked for the flow and restaked after it, except: a withdraw that empties it
 /// ends in the wallet; `adjustRange` restakes the new NFT and sends the old, empty one to the wallet; `harvest` claims
 /// the farm's rewards and leaves the position staked; `compound` claims the rewards, unstakes, adds and restakes. The
-/// farm's reward token is always in the ledger, so emissions an unstake pays the router reach the account.
+/// farm's reward token is always in the ledger: emissions an unstake pays the router are rewards, charged the flow's
+/// PERFORMANCE_FEE (`performanceFeeX64`), and the rest reaches the account.
 /// @dev Every flow reads top to bottom in the pipeline order of spec §6.6:
 ///   1. read the position and locate it (`NotPositionHolder()` before anything moves), open the ledger, take the
 ///      position (wallet or farm, §6.4); a staked compound/harvest claims the farm's rewards first and takes
@@ -68,9 +69,7 @@ contract CoreModify is ICoreModify, CoreBase {
         returns (uint256 amountOut)
     {
         (Target memory t, Position memory pos) = _target(params.nfpm, params.tokenId);
-        address farm = _locate(t.nfpm, t.tokenId, t.account);
-        Ledger memory l = _open(_candidates(params.swaps, t, params.destToken, _rewardOf(farm, t.token0)));
-        _bring(t.nfpm, t.tokenId, t.account, farm);
+        (address farm, Ledger memory l) = _openAndTake(params.swaps, t, params.destToken, params.performanceFeeX64);
 
         uint128 liquidity = params.decrease.liquidity;
         _collectFees(l, t, params.performanceFeeX64, liquidity == 0 ? params.gasFeeX64 : 0);
@@ -107,9 +106,7 @@ contract CoreModify is ICoreModify, CoreBase {
         returns (uint256 newTokenId, uint128 liquidity)
     {
         (Target memory t, Position memory pos) = _target(params.nfpm, params.tokenId);
-        address farm = _locate(t.nfpm, t.tokenId, t.account);
-        Ledger memory l = _open(_candidates(params.swaps, t, t.token0, _rewardOf(farm, t.token0)));
-        _bring(t.nfpm, t.tokenId, t.account, farm);
+        (address farm, Ledger memory l) = _openAndTake(params.swaps, t, t.token0, params.performanceFeeX64);
 
         uint256[] memory fees = _collectFees(l, t, params.performanceFeeX64, 0);
         if (!params.compoundFees) {
@@ -159,14 +156,21 @@ contract CoreModify is ICoreModify, CoreBase {
 
     /// @inheritdoc ICoreModify
     /// @dev A staked position claims its farm rewards (PERFORMANCE_FEE on them) and stays staked; its NFT moves only
-    /// when the farm lets it earn trading fees too (unstake, collect, restake).
+    /// when the farm lets it earn trading fees too (unstake, collect, restake). Where the farm cannot compound
+    /// (`canCompound == false`, e.g. xAERO off Base) the reward is paid as is: a `destToken` other than zero or the
+    /// reward, or any `swaps`, reverts `CompoundDisabled()` before anything moves.
     function harvest(HarvestParams calldata params) external onlyDelegateCall returns (uint256 amountOut) {
         (Target memory t,) = _target(params.nfpm, params.tokenId);
         address farm = _locate(t.nfpm, t.tokenId, t.account);
         address reward = _rewardOf(farm, t.token0);
-        Ledger memory l = _open(_candidates(params.swaps, t, params.destToken, reward));
-
         address dest = params.destToken;
+        // where the farm cannot compound, its reward is paid as is: no conversion (PR #64)
+        if (
+            farm != address(0) && ((dest != address(0) && dest != reward) || params.swaps.length != 0)
+                && !_farmFlag(farm, abi.encodeCall(IFarm.canCompound, ()))
+        ) revert CompoundDisabled();
+        Ledger memory l = _open(_candidates(params.swaps, t, dest, reward));
+
         (uint256 rewardNet, uint256[] memory feesNet, bool earnsFees) =
             _earnings(l, t, farm, reward, params.performanceFeeX64, false);
         // non-zero when something earned is not already `destToken` (only tested against 0, never summed)
@@ -195,6 +199,19 @@ contract CoreModify is ICoreModify, CoreBase {
         pos = abi.decode(_delegate(t.adapter, abi.encodeCall(IAdapter.position, (nfpm, tokenId))), (Position));
         t.token0 = pos.key.token0;
         t.token1 = pos.key.token1;
+    }
+
+    /// @dev Steps 1 of decrease and adjust: locates the position (`NotPositionHolder()` / `FarmUnsupported()` before
+    /// anything moves), opens the ledger over the flow's tokens and the farm's reward token, and takes the position; a
+    /// staked one's unstake emissions are charged `performanceFeeX64` (see `_bringCharged`).
+    function _openAndTake(SwapParams[] calldata swaps, Target memory t, address extra, uint64 performanceFeeX64)
+        private
+        returns (address farm, Ledger memory l)
+    {
+        farm = _locate(t.nfpm, t.tokenId, t.account);
+        address reward = _rewardOf(farm, t.token0);
+        l = _open(_candidates(swaps, t, extra, reward));
+        _bringCharged(l, t.nfpm, t.tokenId, t.account, farm, reward, performanceFeeX64);
     }
 
     /// @dev Every token the flow can touch: both legs of every swap, the pool's tokens, `extra` (the destToken) and

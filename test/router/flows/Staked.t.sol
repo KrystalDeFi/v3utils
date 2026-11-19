@@ -345,6 +345,105 @@ contract StakedTest is AeroFarmBase {
         router.execute(abi.encodeCall(ICoreModify.harvest, (p)));
     }
 
+    // ------------------------------------------------------------------ unstake emissions are fee-collectible
+
+    /// @dev Runs `flow` (0 decrease, 1 adjustRange, 2 swapAndIncrease) on a staked position with `feeX64` as its
+    /// performanceFeeX64. With approveForClaim, the unstake pays the router the emissions; PERFORMANCE_FEE is taken on
+    /// exactly that reward-token delta (one TakeFees on [AERO] tagged with the position) and the rest reaches the user.
+    function _unstakeEmissionsCase(uint8 flow, uint64 feeX64) internal {
+        uint256 tokenId = _stakedA();
+        uint256 emissions = _earned(GAUGE_A, staker, tokenId);
+        assertGt(emissions, 0, "no emissions accrued");
+        uint256 a0 = _bal(AERO, staker);
+        bytes memory call;
+        if (flow == 0) {
+            DecreaseAndSwapParams memory p;
+            p.nfpm = NFPM;
+            p.tokenId = tokenId;
+            p.decrease =
+                DecreaseParams({liquidity: _liq(tokenId) / 3, amount0Min: 0, amount1Min: 0, deadline: block.timestamp});
+            p.destToken = WETH;
+            p.performanceFeeX64 = feeX64;
+            call = abi.encodeCall(ICoreModify.decreaseAndSwap, (p));
+        } else if (flow == 1) {
+            AdjustRangeParams memory p = _adjustParams(tokenId, POOL_A, TS_A);
+            p.performanceFeeX64 = feeX64;
+            call = abi.encodeCall(ICoreModify.adjustRange, (p));
+        } else {
+            SwapAndIncreaseParams memory p = _increaseParams(tokenId, 0.5 ether, 1_000e6);
+            p.performanceFeeX64 = feeX64;
+            call = abi.encodeCall(ICoreMint.swapAndIncrease, (p));
+        }
+
+        vm.recordLogs();
+        vm.prank(staker);
+        router.execute(call);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        uint256 fee = _fee(emissions, feeX64);
+        assertEq(_bal(AERO, routerFeeTaker), fee, "fee taker gets exactly the fee on the emissions");
+        assertEq(_bal(AERO, staker) - a0, emissions - fee, "user gets the rest");
+        _assertRouterClean(_flowTokens());
+
+        uint256 n;
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].emitter != address(router) || logs[i].topics[0] != TakeFees.selector) continue;
+            IRouterErrors.TakeFeesEventData memory d = abi.decode(logs[i].data, (IRouterErrors.TakeFeesEventData));
+            if (d.feeTokens.length != 1 || d.feeTokens[0].token != AERO) continue;
+            n++;
+            assertEq(logs[i].topics[2], bytes32(tokenId), "tagged with the position");
+            assertEq(uint8(d.feeType), uint8(FeeType.PERFORMANCE_FEE));
+            assertEq(d.feeX64, feeX64);
+            assertEq(d.feeTokens[0].amount, fee);
+        }
+        assertEq(n, feeX64 == 0 ? 0 : 1, "TakeFees on the emissions");
+    }
+
+    function test_decrease_staked_unstakeEmissions_performanceFee() public {
+        _unstakeEmissionsCase(0, PERF_FEE_X64);
+    }
+
+    function test_decrease_staked_unstakeEmissions_zeroFee() public {
+        _unstakeEmissionsCase(0, 0);
+    }
+
+    function test_adjustRange_staked_unstakeEmissions_performanceFee() public {
+        _unstakeEmissionsCase(1, PERF_FEE_X64);
+    }
+
+    function test_adjustRange_staked_unstakeEmissions_zeroFee() public {
+        _unstakeEmissionsCase(1, 0);
+    }
+
+    function test_increase_staked_unstakeEmissions_performanceFee() public {
+        _unstakeEmissionsCase(2, PERF_FEE_X64);
+    }
+
+    function test_increase_staked_unstakeEmissions_zeroFee() public {
+        _unstakeEmissionsCase(2, 0);
+    }
+
+    /// @dev Without approveForClaim the gauge pays the emissions to the user itself on withdrawFrom: no fee is possible.
+    function test_decrease_staked_noClaimApproval_emissionsToUserUnfeed() public {
+        uint256 tokenId = _stakedA();
+        vm.prank(staker);
+        ITestGauge(GAUGE_A).approveForClaim(address(router), false);
+        uint256 a0 = _bal(AERO, staker);
+        DecreaseAndSwapParams memory p;
+        p.nfpm = NFPM;
+        p.tokenId = tokenId;
+        p.decrease =
+            DecreaseParams({liquidity: _liq(tokenId) / 3, amount0Min: 0, amount1Min: 0, deadline: block.timestamp});
+        p.destToken = WETH;
+        p.performanceFeeX64 = PERF_FEE_X64;
+        vm.prank(staker);
+        router.execute(abi.encodeCall(ICoreModify.decreaseAndSwap, (p)));
+        assertEq(_bal(AERO, routerFeeTaker), 0, "no fee without the router receiving them");
+        assertGe(_bal(AERO, staker), a0, "user keeps its emissions");
+        _assertStaked(GAUGE_A, staker, tokenId);
+        _assertRouterClean(_flowTokens());
+    }
+
     // ------------------------------------------------------------------ holder checks and the receive guard
 
     /// @dev Review Focus 2: someone else's staked position reverts NotPositionHolder in every flow, before anything
@@ -407,6 +506,36 @@ contract StakedOpTest is AeroFarmBase {
         // pool tokens: token0 = USDC (0x0b2C.. < 0x4200..), token1 = WETH
         tokenId = _mint(staker, _mintParams(_key(USDC_OP, WETH, TS_OP), POOL_OP, 10_000e6, 5 ether, true));
         _pastPenalty(GAUGE_OP);
+    }
+
+    /// @dev Ruling: off Base the reward is paid as is. A staked harvest asking to convert it (destToken set and not the
+    /// reward, or any swaps) reverts CompoundDisabled before anything moves.
+    function test_op_harvest_conversion_compoundDisabled() public {
+        HarvestParams memory toWeth = _harvestParams(tokenId, WETH, _noSwaps());
+        vm.prank(staker);
+        vm.expectRevert(IRouterErrors.CompoundDisabled.selector);
+        router.execute(abi.encodeCall(ICoreModify.harvest, (toWeth)));
+
+        SwapParams[] memory swaps = new SwapParams[](1);
+        swaps[0] = SwapParams({tokenIn: XAERO, amountIn: 0, tokenOut: WETH, amountOutMin: 0, swapData: hex"01"});
+        HarvestParams memory withSwaps = _harvestParams(tokenId, XAERO, swaps);
+        vm.prank(staker);
+        vm.expectRevert(IRouterErrors.CompoundDisabled.selector);
+        router.execute(abi.encodeCall(ICoreModify.harvest, (withSwaps)));
+        _assertStaked(GAUGE_OP, staker, tokenId);
+    }
+
+    /// @dev destToken 0 and no swaps: the xAERO is paid as is (amountOut is the native delta, 0).
+    function test_op_harvest_zeroDest_paysXAero() public {
+        uint256 claimed = _earned(GAUGE_OP, staker, tokenId);
+        assertGt(claimed, 0, "no xAERO emissions accrued");
+        uint256 fee = _fee(claimed, PERF_FEE_X64);
+        uint256 x0 = _bal(XAERO, staker);
+        _harvest(staker, _harvestParams(tokenId, address(0), _noSwaps()));
+        assertEq(_bal(XAERO, staker) - x0, claimed - fee, "net xAERO to the user");
+        assertEq(_bal(XAERO, routerFeeTaker), fee, "performance fee in xAERO");
+        _assertStaked(GAUGE_OP, staker, tokenId);
+        _assertRouterClean(_tokens3(USDC_OP, WETH, XAERO));
     }
 
     function test_op_compoundDisabled_harvestPaysXAero() public {

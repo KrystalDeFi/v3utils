@@ -73,8 +73,10 @@ contract CoreMint is ICoreMint, CoreBase {
     /// @dev `NotPositionHolder()` unless the account holds the position (in its wallet or staked), before anything
     /// moves. A staked position whose farm adds in place (`canIncreaseStaked`) stays where it is and the increase goes
     /// through `farm.increaseStaked`; any other position is taken (a farm that cannot unstake reverts
-    /// `FarmUnsupported()`) and put back where it came from. For a staked position the farm's reward token is tracked,
-    /// so emissions an unstake pays the router reach the account.
+    /// `FarmUnsupported()`) and put back where it came from. For a staked position the farm's reward token is tracked:
+    /// emissions an unstake pays the router are charged `performanceFeeX64` (PERFORMANCE_FEE, before the inputs are
+    /// taken, so only the unstake's delta is charged) and the rest reaches the account. `performanceFeeX64` applies to
+    /// nothing else.
     function swapAndIncrease(SwapAndIncreaseParams calldata params)
         external
         payable
@@ -90,9 +92,9 @@ contract CoreMint is ICoreMint, CoreBase {
             revert FarmUnsupported();
         }
 
-        Ledger memory l =
-            _open(_candidates(params.inputTokens, params.swaps, key.token0, key.token1, _rewardOf(farm, key.token0)));
-        if (!inPlace) _bring(nfpm, params.tokenId, account, farm);
+        address reward = _rewardOf(farm, key.token0);
+        Ledger memory l = _open(_candidates(params.inputTokens, params.swaps, key.token0, key.token1, reward));
+        if (!inPlace) _bringCharged(l, nfpm, params.tokenId, account, farm, reward, params.performanceFeeX64);
         _takeInputs(params.inputTokens);
         {
             TakeFeesEventData[2] memory fees =

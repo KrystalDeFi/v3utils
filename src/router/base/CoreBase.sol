@@ -364,6 +364,30 @@ abstract contract CoreBase is IRouterErrors {
         else _delegate(farm, abi.encodeCall(IFarm.unstake, (nfpm, tokenId, account)));
     }
 
+    /// @dev `_bring`, and when it unstakes, takes PERFORMANCE_FEE (`feeX64`) on the `reward` the unstake paid the call
+    /// (its ledger delta across `_bring`; Aero's `withdrawFrom` pays the stake's emissions to the router when the
+    /// account granted `approveForClaim`). `TakeFees` is tagged with `tokenId`; nothing is charged or emitted when the
+    /// unstake paid nothing. Without `approveForClaim` the gauge pays the emissions straight to the account, so there is
+    /// nothing here to charge.
+    function _bringCharged(
+        Ledger memory l,
+        address nfpm,
+        uint256 tokenId,
+        address account,
+        address farm,
+        address reward,
+        uint64 feeX64
+    ) internal {
+        if (farm == address(0)) return _bring(nfpm, tokenId, account, farm);
+        uint256 before = _held(l, reward);
+        _bring(nfpm, tokenId, account, farm);
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = reward;
+        amounts[0] = _held(l, reward) - before;
+        if (amounts[0] != 0) _takeFees(l, nfpm, tokenId, account, tokens, amounts, feeX64, FeeType.PERFORMANCE_FEE);
+    }
+
     /// @dev `_locate` then `_bring`; returns whether the position was staked.
     function _take(address nfpm, uint256 tokenId, address account) internal returns (bool staked) {
         address farm = _locate(nfpm, tokenId, account);

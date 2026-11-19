@@ -28,7 +28,9 @@ interface ICoreModify {
     /// @notice Takes the account's position, collects its earned fees (PERFORMANCE_FEE on them, plus GAS_FEE when
     /// `decrease.liquidity == 0`), removes `decrease.liquidity` (clamped to the position's) and collects it
     /// (PROTOCOL_FEE and GAS_FEE on that principal), runs `swaps`, and pays everything the call holds to the account.
-    /// The NFT goes back where it came from; a withdraw that leaves it with no liquidity sends it to the wallet.
+    /// The NFT goes back where it came from; a withdraw that leaves it with no liquidity sends it to the wallet. For a
+    /// staked position, farm rewards its unstake pays the router are charged PERFORMANCE_FEE too (with no claim approval
+    /// the farm pays them to the account directly, uncharged).
     /// @return amountOut What the account receives of `destToken`: the call's own `destToken` balance delta.
     function decreaseAndSwap(DecreaseAndSwapParams calldata params) external returns (uint256 amountOut);
 
@@ -55,7 +57,9 @@ interface ICoreModify {
 
     /// @notice Collects the position's trading fees, takes PERFORMANCE_FEE, runs `swaps` and pays the account. No
     /// liquidity is removed. A staked position claims its farm rewards instead (PERFORMANCE_FEE on the reward) and stays
-    /// staked; the farm needs the account's claim approval. `MissingSwapData()` when `swaps` is empty and something
+    /// staked; the farm needs the account's claim approval. Where the farm cannot compound, the reward is paid as is: a
+    /// `destToken` other than zero or the reward, or any `swaps`, reverts `CompoundDisabled()`. `MissingSwapData()` when
+    /// `swaps` is empty and something
     /// earned is not `destToken`: net trading fees with `destToken` neither zero nor a pool token, or a net reward with
     /// `destToken` neither zero nor the reward token.
     /// @return amountOut What the account receives of `destToken`: the call's own `destToken` balance delta.
