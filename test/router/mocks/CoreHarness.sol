@@ -52,16 +52,23 @@ contract CoreHarness is CoreBase {
         return _open(candidates).tokens;
     }
 
+    address public constant FEE_NFPM = address(0xFEE5);
+    uint256 public constant FEE_TOKEN_ID = 7;
+
+    /// @dev Opens over `candidates`, takes `inputs` from the caller, takes the fees (labelled FEE_NFPM / FEE_TOKEN_ID /
+    /// the caller), then closes to the caller.
     function takeFees(
-        address nfpm,
-        uint256 tokenId,
-        address account,
-        address[] calldata tokens,
-        uint256[] calldata amounts,
+        address[] memory candidates,
+        InputTokenParams[] memory inputs,
+        address[] memory tokens,
+        uint256[] memory amounts,
         uint64 feeX64,
         FeeType t
-    ) external onlyDelegateCall returns (uint256[] memory) {
-        return _takeFees(nfpm, tokenId, account, tokens, amounts, feeX64, t);
+    ) external payable onlyDelegateCall returns (uint256[] memory taken) {
+        Ledger memory l = _open(candidates);
+        _takeInputs(inputs);
+        taken = _takeFees(l, FEE_NFPM, FEE_TOKEN_ID, msg.sender, tokens, amounts, feeX64, t);
+        _close(l, msg.sender);
     }
 
     /// @dev Takes the caller's position, reports where it sits, then puts it back.

@@ -41,17 +41,31 @@ abstract contract CoreBase is IRouterErrors {
 
     // ---------------------------------------------------------------- ledger
 
-    /// @dev Tracks the distinct `candidates`, skipping addresses without code other than native, and snapshots each
-    /// balance net of what `msg.value` already added: native starts at `balance - msg.value`; on an ENSHRINED chain
-    /// `weth` is a view of that same balance, so it starts net of `msg.value` in its own units (rounded so the call
-    /// is never credited more than it brought).
+    /// @dev Opens the call's ledger. Call it exactly once per flow, first: before `_takeInputs` (the ERC20 snapshot
+    /// must precede the pull) and before anything else moves a balance.
+    ///
+    /// Tracks the distinct `candidates`, skipping addresses without code other than native. Native is always tracked
+    /// when `msg.value != 0` (added if missing), so value the call brought is always swept back. A registered NFPM
+    /// reverts `InvalidToken()`: it answers the ERC20 `approve` selector, so a swap must never be able to approve one.
+    ///
+    /// Each start is the balance net of what `msg.value` already added: native starts at `balance - msg.value`. On an
+    /// ENSHRINED chain `weth` is a view of that same native balance, so it starts at the pre-existing native rounded
+    /// UP to `weth` units: `ceil((balance - msg.value) / nativeScale)`. Then `held(weth) * nativeScale` never exceeds
+    /// the call's own native, so not even sub-unit dust of the router's balance can be released through `weth`.
     function _open(address[] memory candidates) internal view returns (Ledger memory l) {
+        RouterStorage.Layout storage s = RouterStorage.layout();
         uint256 n = candidates.length;
-        address[] memory unique = new address[](n);
+        address[] memory unique = new address[](n + 1);
         uint256 count;
-        for (uint256 i; i < n; i++) {
-            address t = candidates[i];
-            if (t != address(0) && t.code.length == 0) continue;
+        // index n stands for native when the call brought value
+        for (uint256 i; i <= n; i++) {
+            address t;
+            if (i < n) t = candidates[i];
+            else if (msg.value == 0) break;
+            if (t != address(0)) {
+                if (t.code.length == 0) continue;
+                if (s.adapter[t] != address(0)) revert InvalidToken();
+            }
             bool seen;
             for (uint256 j; j < count; j++) {
                 if (unique[j] == t) {
@@ -62,18 +76,22 @@ abstract contract CoreBase is IRouterErrors {
             if (!seen) unique[count++] = t;
         }
 
-        RouterStorage.Layout storage s = RouterStorage.layout();
         address weth = s.weth;
         bool enshrined = s.nativeMode == RouterStorage.NATIVE_ENSHRINED;
+        uint256 preexistingNative = address(this).balance - msg.value;
         l.tokens = new address[](count);
         l.start = new uint256[](count);
         for (uint256 i; i < count; i++) {
             address t = unique[i];
-            uint256 brought;
-            if (t == address(0)) brought = msg.value;
-            else if (enshrined && t == weth) brought = msg.value / s.nativeScale;
             l.tokens[i] = t;
-            l.start[i] = _sub0(_balanceOf(t), brought);
+            if (t == address(0)) {
+                l.start[i] = preexistingNative;
+            } else if (enshrined && t == weth) {
+                uint256 scale = s.nativeScale;
+                l.start[i] = (preexistingNative + scale - 1) / scale;
+            } else {
+                l.start[i] = _balanceOf(t);
+            }
         }
     }
 
@@ -130,8 +148,11 @@ abstract contract CoreBase is IRouterErrors {
     }
 
     /// @dev Takes `feeX64 / 2**64` of each `amounts[i]` of `tokens[i]` to the fee taker and emits v4utils'
-    /// `TakeFees`. `feeX64` above the cap for `t` reverts `TooMuchFee()`; `feeX64 == 0` does nothing.
+    /// `TakeFees`. `feeX64` above the cap for `t` reverts `TooMuchFee()`; `feeX64 == 0` does nothing. Each fee must
+    /// be covered by what the call holds of its token (`AmountError()`; `NotTracked()` for a token not in the
+    /// ledger), so a fee can never spend the router's own balance, whatever `amounts` says.
     function _takeFees(
+        Ledger memory l,
         address nfpm,
         uint256 tokenId,
         address account,
@@ -146,15 +167,27 @@ abstract contract CoreBase is IRouterErrors {
         if (feeX64 == 0) return taken;
         RouterStorage.Layout storage s = RouterStorage.layout();
         if (feeX64 > s.maxFeeX64[uint8(t)]) revert TooMuchFee();
-        address feeTaker = s.feeTaker;
-        InputTokenParams[] memory feeTokens = new InputTokenParams[](n);
+        InputTokenParams[] memory feeTokens = _payFees(l, tokens, amounts, feeX64, s.feeTaker);
         for (uint256 i; i < n; i++) {
-            uint256 fee = FullMath.mulDiv(amounts[i], feeX64, Q64);
-            feeTokens[i] = InputTokenParams(tokens[i], fee);
-            taken[i] = fee;
-            if (fee != 0) _send(tokens[i], feeTaker, fee);
+            taken[i] = feeTokens[i].amount;
         }
         emit TakeFees(nfpm, tokenId, account, TakeFeesEventData(feeTokens, feeX64, t));
+    }
+
+    function _payFees(
+        Ledger memory l,
+        address[] memory tokens,
+        uint256[] memory amounts,
+        uint64 feeX64,
+        address feeTaker
+    ) private returns (InputTokenParams[] memory feeTokens) {
+        feeTokens = new InputTokenParams[](tokens.length);
+        for (uint256 i; i < tokens.length; i++) {
+            uint256 fee = FullMath.mulDiv(amounts[i], feeX64, Q64);
+            if (fee > _held(l, tokens[i])) revert AmountError();
+            feeTokens[i] = InputTokenParams(tokens[i], fee);
+            if (fee != 0) _send(tokens[i], feeTaker, fee);
+        }
     }
 
     // ---------------------------------------------------------------- swaps

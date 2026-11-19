@@ -335,39 +335,47 @@ contract CoreBaseTest is Test {
 
     // ------------------------------------------------------------------ fees
 
-    function test_takeFees_capsAndEvent() public {
-        address nfpm = makeAddr("coreFeeNfpm");
-        tokenA.mint(address(router), 100);
-        tokenB.mint(address(router), 40);
-        vm.deal(address(router), 4 ether);
+    /// @dev Calldata for alice bringing 100 A, 40 B and 4 ether, with fees taken on those amounts (funds her first).
+    function _feeData(uint64 feeX64, FeeType t) internal returns (bytes memory) {
+        _approve(tokenA, alice, 100);
+        _approve(tokenB, alice, 40);
         address[] memory tokens = _addrs(address(tokenA), address(tokenB), address(0));
+        InputTokenParams[] memory inputs = new InputTokenParams[](3);
+        inputs[0] = InputTokenParams(address(tokenA), 100);
+        inputs[1] = InputTokenParams(address(tokenB), 40);
+        inputs[2] = InputTokenParams(address(0), 4 ether);
         uint256[] memory amounts = new uint256[](3);
         amounts[0] = 100;
         amounts[1] = 40;
         amounts[2] = 4 ether;
+        return abi.encodeCall(CoreHarness.takeFees, (tokens, inputs, tokens, amounts, feeX64, t));
+    }
 
-        vm.expectRevert(IRouterErrors.TooMuchFee.selector);
-        router.execute(
-            abi.encodeCall(
-                CoreHarness.takeFees, (nfpm, 7, alice, tokens, amounts, PROTOCOL_CAP + 1, FeeType.PROTOCOL_FEE)
-            )
-        );
-        vm.expectRevert(IRouterErrors.TooMuchFee.selector);
-        router.execute(
-            abi.encodeCall(CoreHarness.takeFees, (nfpm, 7, alice, tokens, amounts, GAS_CAP + 1, FeeType.GAS_FEE))
-        );
+    function test_takeFees_capsAndEvent() public {
+        address nfpm = harness.FEE_NFPM();
+        vm.deal(alice, 100 ether);
 
+        bytes memory data = _feeData(PROTOCOL_CAP + 1, FeeType.PROTOCOL_FEE);
+        vm.prank(alice);
+        vm.expectRevert(IRouterErrors.TooMuchFee.selector);
+        router.execute{value: 4 ether}(data);
+        data = _feeData(GAS_CAP + 1, FeeType.GAS_FEE);
+        vm.prank(alice);
+        vm.expectRevert(IRouterErrors.TooMuchFee.selector);
+        router.execute{value: 4 ether}(data);
+
+        data = _feeData(QUARTER_X64, FeeType.PROTOCOL_FEE);
         vm.recordLogs();
-        bytes memory ret = router.execute(
-            abi.encodeCall(CoreHarness.takeFees, (nfpm, 7, alice, tokens, amounts, QUARTER_X64, FeeType.PROTOCOL_FEE))
-        );
-        uint256[] memory taken = abi.decode(ret, (uint256[]));
+        vm.prank(alice);
+        uint256[] memory taken = abi.decode(router.execute{value: 4 ether}(data), (uint256[]));
         assertEq(taken[0], 25);
         assertEq(taken[1], 10);
         assertEq(taken[2], 1 ether);
         assertEq(tokenA.balanceOf(feeTaker), 25);
         assertEq(tokenB.balanceOf(feeTaker), 10);
         assertEq(feeTaker.balance, 1 ether);
+        assertEq(tokenA.balanceOf(alice), 75 + 200, "rest closed to alice (plus the two reverted approvals' mints)");
+        assertEq(alice.balance, 100 ether - 1 ether);
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
         uint256 found;
@@ -376,7 +384,7 @@ contract CoreBaseTest is Test {
             found++;
             assertEq(logs[i].emitter, address(router));
             assertEq(logs[i].topics[1], bytes32(uint256(uint160(nfpm))));
-            assertEq(uint256(logs[i].topics[2]), 7);
+            assertEq(uint256(logs[i].topics[2]), harness.FEE_TOKEN_ID());
             assertEq(logs[i].topics[3], bytes32(uint256(uint160(alice))));
             IRouterErrors.TakeFeesEventData memory d = abi.decode(logs[i].data, (IRouterErrors.TakeFeesEventData));
             assertEq(d.feeTokens.length, 3);
@@ -392,15 +400,61 @@ contract CoreBaseTest is Test {
         assertEq(found, 1, "one TakeFees");
 
         // fee 0: nothing moves, nothing is emitted
+        address[] memory tokens = _addrs(address(tokenA));
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100;
         vm.recordLogs();
-        ret = router.execute(
-            abi.encodeCall(CoreHarness.takeFees, (nfpm, 7, alice, tokens, amounts, 0, FeeType.PROTOCOL_FEE))
+        bytes memory ret = router.execute(
+            abi.encodeCall(CoreHarness.takeFees, (tokens, _inputs(), tokens, amounts, 0, FeeType.PROTOCOL_FEE))
         );
         taken = abi.decode(ret, (uint256[]));
-        assertEq(taken.length, 3);
-        assertEq(taken[0] + taken[1] + taken[2], 0);
+        assertEq(taken.length, 1);
+        assertEq(taken[0], 0);
         assertEq(vm.getRecordedLogs().length, 0, "fee 0 emits nothing");
         assertEq(tokenA.balanceOf(feeTaker), 25);
+    }
+
+    /// Fees are scoped to the ledger: a fee larger than what the call holds can not dip into the router's balance.
+    function test_takeFees_cannotSpendPreexisting() public {
+        tokenA.mint(address(router), 1000);
+        _approve(tokenA, alice, 10);
+        address[] memory tokens = _addrs(address(tokenA));
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100; // claims 100, the call holds 10: a 25% fee (25) needs more than the call has
+
+        vm.prank(alice);
+        vm.expectRevert(IRouterErrors.AmountError.selector);
+        router.execute(
+            abi.encodeCall(
+                CoreHarness.takeFees,
+                (tokens, _inputs(address(tokenA), 10), tokens, amounts, QUARTER_X64, FeeType.PROTOCOL_FEE)
+            )
+        );
+        assertEq(tokenA.balanceOf(address(router)), 1000, "router A unchanged");
+        assertEq(tokenA.balanceOf(feeTaker), 0);
+
+        // a fee token outside the ledger
+        vm.prank(alice);
+        vm.expectRevert(IRouterErrors.NotTracked.selector);
+        router.execute(
+            abi.encodeCall(
+                CoreHarness.takeFees,
+                (tokens, _inputs(address(tokenA), 10), _addrs(address(tokenB)), amounts, QUARTER_X64, FeeType.GAS_FEE)
+            )
+        );
+
+        // the same fee within what the call holds goes through
+        amounts[0] = 10;
+        vm.prank(alice);
+        router.execute(
+            abi.encodeCall(
+                CoreHarness.takeFees,
+                (tokens, _inputs(address(tokenA), 10), tokens, amounts, QUARTER_X64, FeeType.PROTOCOL_FEE)
+            )
+        );
+        assertEq(tokenA.balanceOf(feeTaker), 2);
+        assertEq(tokenA.balanceOf(alice), 8);
+        assertEq(tokenA.balanceOf(address(router)), 1000, "router A unchanged");
     }
 
     // ------------------------------------------------------------------ swaps
@@ -573,6 +627,74 @@ contract CoreBaseTest is Test {
         assertEq(held[1], 1e6);
         assertEq(alice.balance, aliceBefore, "the call's ether returned once");
         assertEq(address(arc).balance, 5 ether, "pre-existing native unchanged, no double pay");
+    }
+
+    /// ENSHRINED: `weth`'s start is the pre-existing native rounded UP to `weth` units, so `held(weth) * scale` never
+    /// exceeds the call's own native. Router dust P = scale - 1 wei, msg.value = 2 * scale, and the call spends 1 wei:
+    /// with `weth` closed first, a floor-rounded start would pay 2 * scale through `weth` (1 wei of it the router's
+    /// dust). The ceil start pays scale through `weth` and the remaining scale - 1 as native.
+    function test_enshrined_dustNeverReleased_wethFirstClose() public {
+        MockEnshrinedNative usdc = new MockEnshrinedNative(6);
+        uint256 scale = 1e12;
+        V3UtilsRouter arc = _deployRouter(address(usdc), 1);
+        vm.deal(address(arc), scale - 1);
+        address[] memory candidates = _addrs(address(usdc), address(0), address(tokenB));
+
+        // nothing spent: the call's 2 * scale comes back, the dust stays
+        uint256 aliceBefore = alice.balance;
+        (, uint256[] memory held) = _flow(arc, alice, 2 * scale, candidates, _inputs(address(0), 2 * scale), _swaps());
+        assertEq(held[0], 1, "held(weth): one whole unit not shared with the dust; the rest pays as native");
+        assertEq(alice.balance, aliceBefore, "call's native returned");
+        assertEq(address(arc).balance, scale - 1, "dust unchanged");
+
+        // 1 wei spent: only 2 * scale - 1 may come back
+        (, held) = _flow(
+            arc,
+            alice,
+            2 * scale,
+            candidates,
+            _inputs(address(0), 2 * scale),
+            _swaps(_step(address(0), 1, address(tokenB), 0, 0))
+        );
+        assertEq(held[0], 1, "held(weth) * scale <= the call's own native");
+        assertEq(alice.balance, aliceBefore - 1, "the call's remaining native returned, no more");
+        assertEq(address(arc).balance, scale - 1, "dust never released");
+    }
+
+    /// A registered NFPM answers ERC20 `approve`, so it can never be a ledger token (and so never a swap leg).
+    function test_open_rejectsRegisteredNfpm() public {
+        MockERC721 nfpm = new MockERC721();
+        nfpm.mint(alice, 9);
+        router.execute(abi.encodeCall(CoreHarness.trackedOf, (_addrs(address(nfpm)))));
+        vm.prank(admin);
+        router.setAdapter(address(nfpm), address(harness));
+
+        vm.expectRevert(IRouterErrors.InvalidToken.selector);
+        router.execute(abi.encodeCall(CoreHarness.trackedOf, (_addrs(address(tokenA), address(nfpm)))));
+
+        // a swap step naming it as tokenIn (with amountIn = its tokenId) is rejected before any approve
+        SwapParams memory s = _step(address(nfpm), 9, address(tokenB), 0, 0);
+        vm.prank(alice);
+        vm.expectRevert(IRouterErrors.InvalidToken.selector);
+        router.execute(abi.encodeCall(CoreHarness.flow, (_addrs(address(nfpm), address(tokenB)), _inputs(), _swaps(s))));
+        assertEq(nfpm.getApproved(9), address(0));
+    }
+
+    /// Native is tracked whenever the call brings value, even when the flow forgot to list it.
+    function test_open_addsNativeWhenValueSent() public {
+        vm.deal(address(router), 3 ether);
+        (address[] memory tokens, uint256[] memory held) =
+            _flow(router, alice, 1 ether, _addrs(address(tokenA)), _inputs(address(0), 1 ether), _swaps());
+        assertEq(tokens.length, 2);
+        assertEq(tokens[0], address(tokenA));
+        assertEq(tokens[1], address(0));
+        assertEq(held[1], 1 ether);
+        assertEq(alice.balance, 10 ether, "value refunded");
+        assertEq(address(router).balance, 3 ether);
+
+        // without value, native is not added
+        (tokens,) = _flow(router, alice, 0, _addrs(address(tokenA)), _inputs(), _swaps());
+        assertEq(tokens.length, 1);
     }
 
     // ------------------------------------------------------------------ custody

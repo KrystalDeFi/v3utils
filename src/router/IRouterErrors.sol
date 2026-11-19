@@ -41,6 +41,8 @@ interface IRouterErrors {
     error NotDelegateCall();
     /// @dev A token the call's ledger does not track.
     error NotTracked();
+    /// @dev A ledger candidate that is a registered NFPM (it answers the ERC20 `approve` selector).
+    error InvalidToken();
     /// @dev An input pull credited the router a different amount than declared (fee-on-transfer, surcharge).
     error TransferError();
     /// @dev `msg.value` does not equal the native inputs, or a swap asks for more than the call holds.

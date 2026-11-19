@@ -64,16 +64,34 @@ contract MockWETH is MockToken {
     }
 }
 
+interface IDealCheat {
+    function deal(address who, uint256 newBalance) external;
+}
+
 /// @dev ENSHRINED native view (Arc-style): an ERC20 whose balance IS the holder's native balance, rescaled to
-/// `decimals`. It cannot move native, so it only supports reads; conversions through it are pure unit arithmetic.
+/// `decimals` and truncated. `transfer` moves `amount * scale` native, as Arc's precompile does; a plain contract
+/// cannot move another account's native, so it does that through forge's `deal` cheatcode (tests only).
 contract MockEnshrinedNative {
+    IDealCheat private constant VM = IDealCheat(address(uint160(uint256(keccak256("hevm cheat code")))));
     uint8 public immutable decimals;
 
     constructor(uint8 decimals_) {
         decimals = decimals_;
     }
 
-    function balanceOf(address a) external view returns (uint256) {
-        return a.balance / (10 ** (18 - decimals));
+    function _scale() private view returns (uint256) {
+        return 10 ** (18 - decimals);
+    }
+
+    function balanceOf(address a) public view returns (uint256) {
+        return a.balance / _scale();
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        uint256 value = amount * _scale();
+        require(msg.sender.balance >= value, "balance");
+        VM.deal(msg.sender, msg.sender.balance - value);
+        VM.deal(to, to.balance + value);
+        return true;
     }
 }
