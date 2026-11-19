@@ -8,7 +8,9 @@ enum FeeType {
     PROTOCOL_FEE
 }
 
-/// @notice What the operator runs under a signed order. Each maps to one flow (see `V3UtilsRouter`).
+/// @notice What the operator runs under a signed order, for off-chain encoding: `executeAutomation` takes the action
+/// as a `uint8` and runs the flow selector the router's `autoSelector` registry maps it to (the deploy maps
+/// AUTO_ADJUST 0 `adjustRange`, AUTO_EXIT 1 `decreaseAndSwap`, AUTO_COMPOUND 2 `compound`, AUTO_HARVEST 3 `harvest`).
 enum AutoAction {
     AUTO_ADJUST,
     AUTO_EXIT,

@@ -6,7 +6,8 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-import {V3UtilsRouter, IAutomationFlows} from "../../src/router/V3UtilsRouter.sol";
+import {V3UtilsRouter} from "../../src/router/V3UtilsRouter.sol";
+import {ICoreModify} from "../../src/router/interfaces/ICoreModify.sol";
 import {RouterStorage} from "../../src/router/RouterStorage.sol";
 import {IRouterErrors} from "../../src/router/IRouterErrors.sol";
 import {FeeType, AutoAction} from "../../src/router/RouterTypes.sol";
@@ -19,7 +20,8 @@ import {
     MockDecimalsToken,
     MockReentrantModule,
     MockERC20,
-    MockERC721
+    MockERC721,
+    MockNativePayer
 } from "./mocks/MockModule.sol";
 
 contract RouterTest is Test {
@@ -28,6 +30,7 @@ contract RouterTest is Test {
     uint64 constant PERFORMANCE_CAP = 5902958103587057000;
 
     event CancelOrder(address user, bytes32 hash, bytes signature);
+    event AutoSelectorSet(uint8 indexed action, bytes4 selector);
 
     V3UtilsRouter router;
     MockModule module;
@@ -51,6 +54,7 @@ contract RouterTest is Test {
         router = _deploy();
         vm.prank(deployer, deployer);
         router.initialize(admin, operator, withdrawer, swapRouter, feeTaker, weth, 0);
+        _mapAutoSelectors();
         module = new MockModule();
         nfpm = new MockNfpm();
     }
@@ -88,6 +92,16 @@ contract RouterTest is Test {
     function _sign(uint256 key, bytes memory order) internal view returns (bytes memory) {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, router.hashOrder(order));
         return abi.encodePacked(r, s, v);
+    }
+
+    /// @dev The deploy script's action -> flow mapping.
+    function _mapAutoSelectors() internal {
+        vm.startPrank(admin);
+        router.setAutoSelector(uint8(AutoAction.AUTO_ADJUST), ICoreModify.adjustRange.selector);
+        router.setAutoSelector(uint8(AutoAction.AUTO_EXIT), ICoreModify.decreaseAndSwap.selector);
+        router.setAutoSelector(uint8(AutoAction.AUTO_COMPOUND), ICoreModify.compound.selector);
+        router.setAutoSelector(uint8(AutoAction.AUTO_HARVEST), ICoreModify.harvest.selector);
+        vm.stopPrank();
     }
 
     function _setModule(bytes4 sel) internal {
@@ -385,6 +399,42 @@ contract RouterTest is Test {
         assertEq(ret, abi.encodeWithSelector(IRouterErrors.UnexpectedNative.selector));
     }
 
+    /// While a flow runs (`execute` or `executeAutomation` holds the reentrancy guard), native is accepted from anyone,
+    /// in both native modes: an aggregator step that outputs native, a swap router's refund, a farm or NFPM paying
+    /// native. The flow's ledger scopes it to the call. Outside a flow the same sender is still refused.
+    function test_receive_duringFlow_fromAnyone() public {
+        MockNativePayer payer = new MockNativePayer();
+        vm.deal(address(payer), 10 ether);
+        _setModule(MockModule.receiveNative.selector);
+
+        // outside a flow: refused
+        vm.expectRevert(IRouterErrors.UnexpectedNative.selector);
+        payer.pay(address(router), 1);
+
+        // WRAPPED, mid-flow: accepted from a non-weth sender
+        router.execute(abi.encodeCall(MockModule.receiveNative, (payer, 1 ether)));
+        assertEq(address(router).balance, 1 ether);
+
+        // and through executeAutomation (the module answers under a mapped action's selector)
+        _setUpAutomation();
+        vm.startPrank(admin);
+        router.setAdapter(address(nfpm), address(module));
+        router.setAutoSelector(7, MockModule.receiveNative.selector);
+        vm.stopPrank();
+        vm.prank(operator);
+        router.executeAutomation(alice, address(nfpm), TOKEN_ID, 7, abi.encode(payer, uint256(2 ether)), aOrder, aSig);
+        assertEq(address(router).balance, 3 ether);
+
+        // ENSHRINED, mid-flow: accepted too; outside a flow: refused
+        address token6 = address(new MockDecimalsToken(6));
+        vm.prank(admin);
+        router.setNativeConfig(token6, 1);
+        router.execute(abi.encodeCall(MockModule.receiveNative, (payer, 1 ether)));
+        assertEq(address(router).balance, 4 ether);
+        vm.expectRevert(IRouterErrors.UnexpectedNative.selector);
+        payer.pay(address(router), 1);
+    }
+
     // ------------------------------------------------------------------ pause and rescue
 
     function test_pause_blocksExecuteAndAutomation() public {
@@ -402,7 +452,7 @@ contract RouterTest is Test {
         bytes memory order = _order(address(nfpm), 1);
         vm.prank(operator);
         vm.expectRevert("Pausable: paused");
-        router.executeAutomation(alice, address(nfpm), 1, AutoAction.AUTO_EXIT, "", order, "");
+        router.executeAutomation(alice, address(nfpm), 1, uint8(AutoAction.AUTO_EXIT), "", order, "");
 
         vm.prank(admin);
         router.unpause();
@@ -502,6 +552,14 @@ contract RouterTest is Test {
         internal
         returns (bytes memory)
     {
+        return _autoRaw(account, uint8(action), order, sig);
+    }
+
+    /// @dev `_auto` with a raw action number, for actions the enum does not name.
+    function _autoRaw(address account, uint8 action, bytes memory order, bytes memory sig)
+        internal
+        returns (bytes memory)
+    {
         vm.prank(operator);
         return router.executeAutomation(account, address(nfpm), TOKEN_ID, action, aData, order, sig);
     }
@@ -509,12 +567,13 @@ contract RouterTest is Test {
     function test_executeAutomation_checksInOrder() public {
         _setUpAutomation();
         AutoAction a = AutoAction.AUTO_ADJUST;
+        uint8 a8 = uint8(a);
 
         // 1. operator only
         bytes memory err = _missingRole(alice, router.OPERATOR_ROLE());
         vm.prank(alice);
         vm.expectRevert(err);
-        router.executeAutomation(alice, address(nfpm), TOKEN_ID, a, aData, aOrder, aSig);
+        router.executeAutomation(alice, address(nfpm), TOKEN_ID, a8, aData, aOrder, aSig);
 
         // 2. adapter registered; checked before the holder (ownerOf of token 999 reverts) and the order
         vm.expectRevert(IRouterErrors.UnsupportedNfpm.selector);
@@ -522,7 +581,7 @@ contract RouterTest is Test {
         bytes memory bobSig = _sign(bobKey, aOrder);
         vm.prank(operator);
         vm.expectRevert(IRouterErrors.UnsupportedNfpm.selector);
-        router.executeAutomation(alice, address(nfpm), 999, a, aData, aOrder, bobSig);
+        router.executeAutomation(alice, address(nfpm), 999, a8, aData, aOrder, bobSig);
         vm.prank(admin);
         router.setAdapter(address(nfpm), address(module));
 
@@ -558,7 +617,7 @@ contract RouterTest is Test {
         _auto(alice, a, aOrder, aSig);
 
         // ... and not cancelled
-        _setModule(IAutomationFlows.adjustRange.selector);
+        _setModule(ICoreModify.adjustRange.selector);
         _auto(alice, a, aOrder, aSig);
         bytes32 digest = router.hashOrder(aOrder);
         vm.prank(alice);
@@ -574,14 +633,14 @@ contract RouterTest is Test {
         vm.prank(admin);
         router.setAdapter(address(nfpm), address(module));
         bytes4[4] memory sels = [
-            IAutomationFlows.adjustRange.selector,
-            IAutomationFlows.decreaseAndSwap.selector,
-            IAutomationFlows.compound.selector,
-            IAutomationFlows.harvest.selector
+            ICoreModify.adjustRange.selector,
+            ICoreModify.decreaseAndSwap.selector,
+            ICoreModify.compound.selector,
+            ICoreModify.harvest.selector
         ];
         for (uint256 i; i < 4; ++i) {
             _setModule(sels[i]);
-            bytes memory ret = _auto(alice, AutoAction(i), aOrder, aSig);
+            bytes memory ret = _autoRaw(alice, uint8(i), aOrder, aSig);
             (address account, bytes32 target, bytes memory data) = abi.decode(ret, (address, bytes32, bytes));
             assertEq(account, alice);
             assertEq(target, keccak256(abi.encode(address(nfpm), TOKEN_ID)));
@@ -599,7 +658,7 @@ contract RouterTest is Test {
         _setUpAutomation();
         vm.startPrank(admin);
         router.setAdapter(address(nfpm), address(module));
-        router.setModule(IAutomationFlows.decreaseAndSwap.selector, address(module));
+        router.setModule(ICoreModify.decreaseAndSwap.selector, address(module));
         router.setFarm(address(nfpm), address(new MockFarm(bob)));
         vm.stopPrank();
         bytes memory ret = _auto(bob, AutoAction.AUTO_EXIT, aOrder, _sign(bobKey, aOrder));
@@ -618,7 +677,7 @@ contract RouterTest is Test {
         _setUpAutomation();
         vm.startPrank(admin);
         router.setAdapter(address(nfpm), address(module));
-        router.setModule(IAutomationFlows.decreaseAndSwap.selector, address(module));
+        router.setModule(ICoreModify.decreaseAndSwap.selector, address(module));
         router.setFarm(address(nfpm), address(new MockRevertingFarm()));
         vm.stopPrank();
         bytes memory ret = _auto(alice, AutoAction.AUTO_EXIT, aOrder, aSig);
@@ -630,13 +689,108 @@ contract RouterTest is Test {
         _auto(bob, AutoAction.AUTO_EXIT, aOrder, bobSig);
     }
 
+    /// The action -> flow selector registry: admin only, 0 unsets, frozen by lock, stored after `expectedNft`.
+    function test_autoSelector_adminOnly_unset_frozenByLock() public {
+        // the deploy mapping (set in setUp)
+        assertEq(router.autoSelector(0), ICoreModify.adjustRange.selector);
+        assertEq(router.autoSelector(1), ICoreModify.decreaseAndSwap.selector);
+        assertEq(router.autoSelector(2), ICoreModify.compound.selector);
+        assertEq(router.autoSelector(3), ICoreModify.harvest.selector);
+        assertEq(router.autoSelector(4), bytes4(0));
+
+        bytes4 sel = MockModule.ping.selector;
+        bytes32 adminRole = router.ADMIN_ROLE();
+        vm.prank(alice);
+        vm.expectRevert(_missingRole(alice, adminRole));
+        router.setAutoSelector(7, sel);
+        vm.prank(operator);
+        vm.expectRevert(_missingRole(operator, adminRole));
+        router.setAutoSelector(7, sel);
+
+        vm.expectEmit(address(router));
+        emit AutoSelectorSet(7, sel);
+        vm.prank(admin);
+        router.setAutoSelector(7, sel);
+        assertEq(router.autoSelector(7), sel);
+        // RouterStorage.Layout appends `autoSelector` at slot 11 (after `expectedNft`); bytesN sit low-order aligned
+        bytes32 key = keccak256(abi.encode(uint256(7), uint256(RouterStorage.SLOT) + 11));
+        assertEq(uint256(vm.load(address(router), key)), uint256(uint32(sel)));
+
+        vm.expectEmit(address(router));
+        emit AutoSelectorSet(7, bytes4(0));
+        vm.prank(admin);
+        router.setAutoSelector(7, bytes4(0));
+        assertEq(router.autoSelector(7), bytes4(0));
+
+        vm.startPrank(admin);
+        router.lock();
+        vm.expectRevert(IRouterErrors.Locked.selector);
+        router.setAutoSelector(7, sel);
+        vm.expectRevert(IRouterErrors.Locked.selector);
+        router.setAutoSelector(0, bytes4(0));
+        vm.stopPrank();
+        assertEq(router.autoSelector(0), ICoreModify.adjustRange.selector);
+    }
+
+    /// An action with no selector, or whose selector has no module, reverts `UnknownSelector()` after every check.
+    function test_executeAutomation_unmappedAction_reverts() public {
+        _setUpAutomation();
+        vm.prank(admin);
+        router.setAdapter(address(nfpm), address(module));
+        _setModule(ICoreModify.adjustRange.selector);
+
+        // actions the deploy does not map, including ones past the enum
+        vm.expectRevert(IRouterErrors.UnknownSelector.selector);
+        _autoRaw(alice, 4, aOrder, aSig);
+        vm.expectRevert(IRouterErrors.UnknownSelector.selector);
+        _autoRaw(alice, 255, aOrder, aSig);
+
+        // a mapped action whose selector has no module
+        vm.expectRevert(IRouterErrors.UnknownSelector.selector);
+        _auto(alice, AutoAction.AUTO_EXIT, aOrder, aSig);
+
+        // unsetting a mapped action turns it off even though its module is registered
+        _auto(alice, AutoAction.AUTO_ADJUST, aOrder, aSig);
+        vm.prank(admin);
+        router.setAutoSelector(uint8(AutoAction.AUTO_ADJUST), bytes4(0));
+        vm.expectRevert(IRouterErrors.UnknownSelector.selector);
+        _auto(alice, AutoAction.AUTO_ADJUST, aOrder, aSig);
+    }
+
+    /// A new action (or a new params struct for an old one) needs only a module and a mapping, no new router.
+    function test_executeAutomation_newlyMappedAction_dispatches() public {
+        _setUpAutomation();
+        bytes4 sel = bytes4(keccak256("rebalanceV2((address,uint256,bytes))"));
+        vm.startPrank(admin);
+        router.setAdapter(address(nfpm), address(module));
+        router.setModule(sel, address(module));
+        router.setAutoSelector(7, sel);
+        vm.stopPrank();
+
+        bytes memory ret = _autoRaw(alice, 7, aOrder, aSig);
+        (address account, bytes32 target, bytes memory data) = abi.decode(ret, (address, bytes32, bytes));
+        assertEq(account, alice);
+        assertEq(target, keccak256(abi.encode(address(nfpm), TOKEN_ID)));
+        assertEq(data, abi.encodePacked(sel, aData));
+        assertEq(_slot(8), bytes32(0));
+        assertEq(_slot(9), bytes32(0));
+        assertEq(_slot(10), bytes32(0));
+
+        // an existing action can be repointed the same way
+        vm.prank(admin);
+        router.setAutoSelector(uint8(AutoAction.AUTO_ADJUST), sel);
+        ret = _auto(alice, AutoAction.AUTO_ADJUST, aOrder, aSig);
+        (,, data) = abi.decode(ret, (address, bytes32, bytes));
+        assertEq(data, abi.encodePacked(sel, aData));
+    }
+
     function test_reentrancy_blocked() public {
         _setUpAutomation();
         MockReentrantModule re = new MockReentrantModule();
         bytes32 operatorRole = router.OPERATOR_ROLE();
         vm.startPrank(admin);
         router.setModule(MockReentrantModule.reenter.selector, address(re));
-        router.setModule(IAutomationFlows.adjustRange.selector, address(re));
+        router.setModule(ICoreModify.adjustRange.selector, address(re));
         router.setModule(MockModule.ping.selector, address(module));
         router.setAdapter(address(nfpm), address(module));
         // the router holds OPERATOR_ROLE so an inner executeAutomation passes onlyRole and meets the guard
@@ -645,7 +799,8 @@ contract RouterTest is Test {
 
         bytes memory pingCall = abi.encodeCall(V3UtilsRouter.execute, (abi.encodeCall(MockModule.ping, ())));
         bytes memory autoCall = abi.encodeCall(
-            V3UtilsRouter.executeAutomation, (alice, address(nfpm), TOKEN_ID, AutoAction.AUTO_EXIT, aData, aOrder, aSig)
+            V3UtilsRouter.executeAutomation,
+            (alice, address(nfpm), TOKEN_ID, uint8(AutoAction.AUTO_EXIT), aData, aOrder, aSig)
         );
 
         // positive control: the module's call-back path works for a non-guarded function
@@ -661,12 +816,12 @@ contract RouterTest is Test {
         vm.prank(operator);
         vm.expectRevert("ReentrancyGuard: reentrant call");
         router.executeAutomation(
-            alice, address(nfpm), TOKEN_ID, AutoAction.AUTO_ADJUST, abi.encode(pingCall), aOrder, aSig
+            alice, address(nfpm), TOKEN_ID, uint8(AutoAction.AUTO_ADJUST), abi.encode(pingCall), aOrder, aSig
         );
         vm.prank(operator);
         vm.expectRevert("ReentrancyGuard: reentrant call");
         router.executeAutomation(
-            alice, address(nfpm), TOKEN_ID, AutoAction.AUTO_ADJUST, abi.encode(autoCall), aOrder, aSig
+            alice, address(nfpm), TOKEN_ID, uint8(AutoAction.AUTO_ADJUST), abi.encode(autoCall), aOrder, aSig
         );
     }
 }

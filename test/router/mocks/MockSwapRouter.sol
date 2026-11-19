@@ -31,6 +31,19 @@ contract MockSwapRouter {
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
     }
 
+    /// @dev Pulls the caller's full allowance of `tokenIn` and pays `amountOut` of native back, as an aggregator
+    /// route ending in native does (from a native balance the test dealt it).
+    function swapToNative(address tokenIn, uint256 amountOut) external {
+        uint256 amountIn = IERC20(tokenIn).allowance(msg.sender, address(this));
+        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+        (bool ok, bytes memory ret) = msg.sender.call{value: amountOut}("");
+        if (!ok) {
+            assembly {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
+    }
+
     function fail() external pure {
         revert Rejected();
     }

@@ -11,29 +11,10 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {SignatureValidator} from "@krystal/util-contracts/contracts/SignatureValidator.sol";
 import {StructHash} from "../StructHash.sol";
-import {
-    FeeType,
-    AutoAction,
-    AdjustRangeParams,
-    DecreaseAndSwapParams,
-    CompoundParams,
-    HarvestParams
-} from "./RouterTypes.sol";
+import {FeeType} from "./RouterTypes.sol";
 import {RouterStorage} from "./RouterStorage.sol";
 import {IRouterErrors} from "./IRouterErrors.sol";
 import {IFarm} from "./interfaces/IFarm.sol";
-
-/// @notice The flows `executeAutomation` runs, one per `AutoAction`. Only their selectors are used here; the modules
-/// registered under them implement them.
-interface IAutomationFlows {
-    function adjustRange(AdjustRangeParams calldata params) external returns (uint256 newTokenId, uint128 liquidity);
-
-    function decreaseAndSwap(DecreaseAndSwapParams calldata params) external returns (uint256 amountOut);
-
-    function compound(CompoundParams calldata params) external returns (uint128 liquidity);
-
-    function harvest(HarvestParams calldata params) external returns (uint256 amountOut);
-}
 
 /// @notice Fixed (non-upgradeable) entry point for every v3-style position, staked or not; it is the address users
 /// approve on NFPMs and farms. Flows run in modules chosen by selector, by DELEGATECALL, through two entry points:
@@ -69,6 +50,7 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
     event ModuleSet(bytes4 indexed selector, address module);
     event AdapterSet(address indexed nfpm, address adapter);
     event FarmSet(address indexed nfpm, address farm);
+    event AutoSelectorSet(uint8 indexed action, bytes4 selector);
     event SwapRouterSet(address swapRouter);
     event FeeTakerSet(address feeTaker);
     event NativeConfigSet(address weth, uint8 nativeMode, uint256 nativeScale);
@@ -84,7 +66,8 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
     }
 
     /// @notice Grants DEFAULT_ADMIN_ROLE + ADMIN_ROLE to `admin`, OPERATOR_ROLE to `operator` and WITHDRAWER_ROLE
-    /// to `withdrawer`; the deployer gets no role. Sets the config and the default fee caps.
+    /// to `withdrawer`; the caller gets no role of its own (the deploy script passes itself as `admin`, registers, then
+    /// hands both admin roles to the real admin and renounces them). Sets the config and the default fee caps.
     /// @param nativeMode_ 0 = WRAPPED (`weth` is a WETH9-style wrapper), 1 = ENSHRINED (`weth` is an ERC20 view of
     /// native; the scale comes from its decimals).
     function initialize(
@@ -126,14 +109,17 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
     }
 
     /// @notice Operator entry point: runs `action` on `account`'s position `tokenId` of `nfpm` under an order `account`
-    /// signed. The flow for `action` gets `actionData` as its params and reads `account` from the record set here.
+    /// signed. The flow mapped to `action` (`autoSelector`) gets `actionData` as its params and reads `account` from the
+    /// record set here. `action` is a `uint8` (off-chain: `AutoAction`), so new actions or param structs need only a
+    /// module and a mapping, never a new router.
     /// @dev The order binds the chain and `nfpm`, not the tokenId (recurring rebalances mint new ids); flows check
-    /// that their params target the recorded `(nfpm, tokenId)`.
+    /// that their params target the recorded `(nfpm, tokenId)`. An unmapped action, or a mapped selector with no
+    /// module, reverts `UnknownSelector()`.
     function executeAutomation(
         address account,
         address nfpm,
         uint256 tokenId,
-        AutoAction action,
+        uint8 action,
         bytes calldata actionData,
         bytes calldata order,
         bytes calldata signature
@@ -143,11 +129,8 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
         if (!_isHolder(s.farm[nfpm], account, nfpm, tokenId)) revert NotPositionHolder();
         _validateOrder(account, nfpm, order, signature);
 
-        bytes4 sel;
-        if (action == AutoAction.AUTO_ADJUST) sel = IAutomationFlows.adjustRange.selector;
-        else if (action == AutoAction.AUTO_EXIT) sel = IAutomationFlows.decreaseAndSwap.selector;
-        else if (action == AutoAction.AUTO_COMPOUND) sel = IAutomationFlows.compound.selector;
-        else sel = IAutomationFlows.harvest.selector;
+        bytes4 sel = s.autoSelector[action];
+        if (sel == bytes4(0)) revert UnknownSelector();
 
         s.automationAccount = account;
         s.automationTarget = keccak256(abi.encode(nfpm, tokenId));
@@ -197,6 +180,14 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
         emit FarmSet(nfpm, farm_);
     }
 
+    /// @notice Maps automation `action` (off-chain: `uint8(AutoAction)`) to the flow selector `executeAutomation`
+    /// runs; `bytes4(0)` unmaps it. The selector's module comes from `module`, as for `execute`.
+    function setAutoSelector(uint8 action, bytes4 selector) external onlyRole(ADMIN_ROLE) {
+        if (RouterStorage.layout().locked) revert Locked();
+        RouterStorage.layout().autoSelector[action] = selector;
+        emit AutoSelectorSet(action, selector);
+    }
+
     // ---------------------------------------------------------------- config
 
     /// @dev Frozen by lock: swaps run `swapRouter.call(swapData)` as the router, which holds users' approvals.
@@ -226,7 +217,8 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
         emit MaxFeeSet(feeType, maxFeeX64_);
     }
 
-    /// @notice One-way: freezes the registries, `swapRouter` and the native config; fee caps can then only go down.
+    /// @notice One-way: freezes the registries (module, adapter, farm, autoSelector), `swapRouter` and the native config;
+    /// fee caps can then only go down.
     function lock() external onlyRole(ADMIN_ROLE) {
         RouterStorage.layout().locked = true;
         emit LockedForever();
@@ -267,6 +259,10 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
 
     function farm(address nfpm) external view returns (address) {
         return RouterStorage.layout().farm[nfpm];
+    }
+
+    function autoSelector(uint8 action) external view returns (bytes4) {
+        return RouterStorage.layout().autoSelector[action];
     }
 
     function swapRouter() external view returns (address) {
@@ -314,8 +310,13 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
         return IERC721Receiver.onERC721Received.selector;
     }
 
-    /// @dev Only accepts native coin from `weth` unwrapping, so only while WRAPPED.
+    /// @dev While a flow runs (`execute` / `executeAutomation` hold the reentrancy guard), accepts native from anyone:
+    /// an aggregator step that outputs native, a swap router's native refund, a farm or NFPM paying native. The flow's
+    /// ledger credits the call only its own balance delta, and `_close` sweeps it to the account when native is tracked
+    /// (a swap's `tokenOut` always is); native an untracking flow receives stays in the router as stray (rescue).
+    /// Outside a flow, only `weth` unwrapping, so only while WRAPPED.
     receive() external payable {
+        if (_reentrancyGuardEntered()) return;
         RouterStorage.Layout storage s = RouterStorage.layout();
         if (msg.sender != s.weth || s.nativeMode != RouterStorage.NATIVE_WRAPPED) revert UnexpectedNative();
     }

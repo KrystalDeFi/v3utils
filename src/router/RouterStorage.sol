@@ -37,6 +37,9 @@ library RouterStorage {
         bytes32 automationTarget;
         /// @dev keccak256(abi.encode(nfpm, from, tokenId)) of the one NFT the router may receive by safeTransferFrom.
         bytes32 expectedNft;
+        // ---- registries (appended)
+        /// @dev `executeAutomation`'s action -> flow selector, keyed by `uint8(AutoAction)`; zero means unmapped.
+        mapping(uint8 => bytes4) autoSelector;
     }
 
     function layout() internal pure returns (Layout storage l) {

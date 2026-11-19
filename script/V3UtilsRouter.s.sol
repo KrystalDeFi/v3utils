@@ -13,11 +13,15 @@ import {AerodromeAdapter} from "../src/router/adapters/AerodromeAdapter.sol";
 import {RamsesV3Adapter} from "../src/router/adapters/RamsesV3Adapter.sol";
 import {AlgebraIntegralAdapter} from "../src/router/adapters/AlgebraIntegralAdapter.sol";
 import {AeroGaugeFarm} from "../src/router/farms/AeroGaugeFarm.sol";
+import {AutoAction} from "../src/router/RouterTypes.sol";
 
 /// @notice Deploys V3UtilsRouter, its two modules, the adapters the chain needs and (with AERO_GAUGE_FACTORY) the Aero
-/// gauge farm; initializes the router and registers every module selector, adapter and farm in one broadcast. Plain
-/// CREATE (the init args differ per chain); the deployer EOA is tx.origin, so it may call `initialize`, and it gets no
-/// role. It never calls `lock()`: lock by hand once the deployment is checked.
+/// gauge farm; initializes the router and registers every module selector, automation action, adapter and farm in one
+/// broadcast. Plain CREATE (the init args differ per chain); the deployer EOA is tx.origin, so it may call `initialize`.
+/// The deployer is the temporary admin (registration needs ADMIN_ROLE): it initializes with itself as admin, registers,
+/// then grants DEFAULT_ADMIN_ROLE + ADMIN_ROLE to ADMIN and renounces both, all in the same broadcast, so it holds no
+/// role once the script ends (when ADMIN is the deployer itself, it keeps them). It never calls `lock()`: lock by hand
+/// once the deployment is checked.
 /// Env (see sample.env): PRIVATE_KEY, ADMIN, OPERATOR, WITHDRAWER, SWAP_ROUTER, FEE_TAKER, NATIVE_WETH, NATIVE_MODE
 /// (0 WRAPPED, 1 ENSHRINED), ADAPTERS (`nfpm:kind,nfpm:kind`; kind is uni, algebrav1, aerodrome, ramses or integral)
 /// and optionally AERO_GAUGE_FACTORY, AERO_REWARD_TOKEN, AERO_COMPOUND_ENABLED (set the first two together; the farm
@@ -124,6 +128,11 @@ contract V3UtilsRouterScript is Script {
         d.router.setModule(ICoreModify.adjustRange.selector, address(d.coreModify));
         d.router.setModule(ICoreModify.compound.selector, address(d.coreModify));
         d.router.setModule(ICoreModify.harvest.selector, address(d.coreModify));
+        // executeAutomation's action -> flow mapping (AutoAction ordinals)
+        d.router.setAutoSelector(uint8(AutoAction.AUTO_ADJUST), ICoreModify.adjustRange.selector);
+        d.router.setAutoSelector(uint8(AutoAction.AUTO_EXIT), ICoreModify.decreaseAndSwap.selector);
+        d.router.setAutoSelector(uint8(AutoAction.AUTO_COMPOUND), ICoreModify.compound.selector);
+        d.router.setAutoSelector(uint8(AutoAction.AUTO_HARVEST), ICoreModify.harvest.selector);
     }
 
     function _deployAdapter(uint256 k) internal returns (address) {

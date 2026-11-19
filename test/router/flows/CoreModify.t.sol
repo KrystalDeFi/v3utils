@@ -7,11 +7,11 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "v3-periphery/interfaces/INonfungiblePositionManager.sol";
 import {V3Utils} from "../../../src/V3Utils.sol";
 import {Nfpm} from "../../../src/Nfpm.sol";
-import {IAutomationFlows} from "../../../src/router/V3UtilsRouter.sol";
 import {CoreModify} from "../../../src/router/modules/CoreModify.sol";
 import {ICoreModify} from "../../../src/router/interfaces/ICoreModify.sol";
 import {IRouterErrors} from "../../../src/router/IRouterErrors.sol";
 import {
+    AutoAction,
     FeeType,
     MintParams,
     DecreaseParams,
@@ -409,12 +409,13 @@ contract CoreModifyTest is UniV3FlowBase {
 
     // ------------------------------------------------------------------ entry contract
 
-    /// @dev `executeAutomation` calls these flows by the selectors of `IAutomationFlows`.
-    function test_selectors_matchAutomationFlows() public pure {
-        assertEq(ICoreModify.decreaseAndSwap.selector, IAutomationFlows.decreaseAndSwap.selector, "decreaseAndSwap");
-        assertEq(ICoreModify.adjustRange.selector, IAutomationFlows.adjustRange.selector, "adjustRange");
-        assertEq(ICoreModify.compound.selector, IAutomationFlows.compound.selector, "compound");
-        assertEq(ICoreModify.harvest.selector, IAutomationFlows.harvest.selector, "harvest");
+    /// @dev `executeAutomation` runs these flows through the router's `autoSelector` registry, which the deploy maps
+    /// from `AutoAction` (see `Deploy.t.sol`); off-chain encoders rely on these ordinals.
+    function test_autoActionOrdinals() public pure {
+        assertEq(uint8(AutoAction.AUTO_ADJUST), 0, "AUTO_ADJUST");
+        assertEq(uint8(AutoAction.AUTO_EXIT), 1, "AUTO_EXIT");
+        assertEq(uint8(AutoAction.AUTO_COMPOUND), 2, "AUTO_COMPOUND");
+        assertEq(uint8(AutoAction.AUTO_HARVEST), 3, "AUTO_HARVEST");
     }
 
     /// @dev Neither flow takes native: value with an otherwise valid call reverts, and the same call without succeeds.

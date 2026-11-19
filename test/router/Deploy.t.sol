@@ -5,7 +5,7 @@ import {V3UtilsRouterScript} from "../../script/V3UtilsRouter.s.sol";
 import {V3UtilsRouter} from "../../src/router/V3UtilsRouter.sol";
 import {ICoreMint} from "../../src/router/interfaces/ICoreMint.sol";
 import {ICoreModify} from "../../src/router/interfaces/ICoreModify.sol";
-import {FeeType} from "../../src/router/RouterTypes.sol";
+import {FeeType, AutoAction} from "../../src/router/RouterTypes.sol";
 import {RouterTestBase} from "./RouterTestBase.sol";
 
 /// @notice Runs the deploy script on a Base fork (cancun: the Aero farm reads the gauge factory).
@@ -56,6 +56,13 @@ contract DeployTest is RouterTestBase {
         assertEq(r.module(sels[0]), r.module(sels[1]));
         assertEq(r.module(sels[2]), r.module(sels[5]));
         assertTrue(r.module(sels[0]) != r.module(sels[2]));
+
+        // executeAutomation's action -> flow mapping
+        assertEq(r.autoSelector(uint8(AutoAction.AUTO_ADJUST)), ICoreModify.adjustRange.selector, "AUTO_ADJUST");
+        assertEq(r.autoSelector(uint8(AutoAction.AUTO_EXIT)), ICoreModify.decreaseAndSwap.selector, "AUTO_EXIT");
+        assertEq(r.autoSelector(uint8(AutoAction.AUTO_COMPOUND)), ICoreModify.compound.selector, "AUTO_COMPOUND");
+        assertEq(r.autoSelector(uint8(AutoAction.AUTO_HARVEST)), ICoreModify.harvest.selector, "AUTO_HARVEST");
+        assertEq(r.autoSelector(4), bytes4(0), "nothing else mapped");
 
         assertGt(r.adapter(UNI_NFPM).code.length, 0, "uni adapter");
         assertGt(r.adapter(AERO_NFPM).code.length, 0, "aero adapter");

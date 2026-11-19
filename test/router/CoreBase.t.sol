@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {V3UtilsRouter, IAutomationFlows} from "../../src/router/V3UtilsRouter.sol";
+import {V3UtilsRouter} from "../../src/router/V3UtilsRouter.sol";
 import {IRouterErrors} from "../../src/router/IRouterErrors.sol";
 import {
     FeeType,
@@ -89,6 +89,7 @@ contract CoreBaseTest is Test {
         for (uint256 i; i < sels.length; i++) {
             r.setModule(sels[i], address(harness));
         }
+        r.setAutoSelector(uint8(AutoAction.AUTO_ADJUST), CoreHarness.adjustRange.selector);
         vm.stopPrank();
     }
 
@@ -630,6 +631,38 @@ contract CoreBaseTest is Test {
         assertEq(address(arc).balance, 5 ether, "pre-existing native unchanged, no double pay");
     }
 
+    /// An aggregator step whose output is native pays the router mid-flow (the router accepts native from anyone while
+    /// a flow runs); the ledger credits only that to the caller. Outside a flow the same sender is still refused, and
+    /// the router's own native is untouched either way.
+    function test_swaps_nativeOutputFromSwapRouter() public {
+        vm.deal(address(swapper), 5 ether);
+        vm.deal(address(router), 2 ether);
+        _approve(tokenA, alice, 100);
+        uint256 aliceBefore = alice.balance;
+        SwapParams memory s = SwapParams(
+            address(tokenA),
+            0,
+            address(0),
+            1 ether,
+            abi.encodeCall(MockSwapRouter.swapToNative, (address(tokenA), 1 ether))
+        );
+        vm.expectEmit(true, true, false, true, address(router));
+        emit Swap(address(tokenA), address(0), 100, 1 ether);
+        (, uint256[] memory held) =
+            _flow(router, alice, 0, _addrs(address(tokenA), address(0)), _inputs(address(tokenA), 100), _swaps(s));
+        assertEq(held[0], 0, "tokenA all swapped");
+        assertEq(held[1], 1 ether, "native output held by the call");
+        assertEq(alice.balance, aliceBefore + 1 ether, "the user receives the native output");
+        assertEq(address(router).balance, 2 ether, "router native unchanged");
+        assertEq(tokenA.balanceOf(address(swapper)), 100);
+
+        // outside a flow, the swap router (not weth) cannot send native
+        vm.prank(address(swapper));
+        (bool sent, bytes memory ret) = address(router).call{value: 1}("");
+        assertFalse(sent);
+        assertEq(ret, abi.encodeWithSelector(IRouterErrors.UnexpectedNative.selector));
+    }
+
     /// ENSHRINED: `weth`'s start is the pre-existing native rounded UP to `weth` units, so `held(weth) * scale` never
     /// exceeds the call's own native. Router dust P = scale - 1 wei, msg.value = 2 * scale, and the call spends 1 wei:
     /// with `weth` closed first, a floor-rounded start would pay 2 * scale through `weth` (1 wei of it the router's
@@ -832,19 +865,20 @@ contract CoreBaseTest is Test {
         bytes memory sig = abi.encodePacked(r, s, v);
 
         vm.prank(operator);
-        ret = router.executeAutomation(alice, address(nfpm), 5, AutoAction.AUTO_ADJUST, abi.encode(p), order, sig);
+        ret =
+            router.executeAutomation(alice, address(nfpm), 5, uint8(AutoAction.AUTO_ADJUST), abi.encode(p), order, sig);
         assertEq(abi.decode(ret, (address)), alice);
 
         p.tokenId = 6;
         vm.prank(operator);
         vm.expectRevert(IRouterErrors.NotAutomation.selector);
-        router.executeAutomation(alice, address(nfpm), 5, AutoAction.AUTO_ADJUST, abi.encode(p), order, sig);
+        router.executeAutomation(alice, address(nfpm), 5, uint8(AutoAction.AUTO_ADJUST), abi.encode(p), order, sig);
 
         p.tokenId = 5;
         p.nfpm = address(tokenA);
         vm.prank(operator);
         vm.expectRevert(IRouterErrors.NotAutomation.selector);
-        router.executeAutomation(alice, address(nfpm), 5, AutoAction.AUTO_ADJUST, abi.encode(p), order, sig);
+        router.executeAutomation(alice, address(nfpm), 5, uint8(AutoAction.AUTO_ADJUST), abi.encode(p), order, sig);
     }
 
     function test_adapterFarmDelegate() public {

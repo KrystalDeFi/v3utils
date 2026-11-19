@@ -4,6 +4,8 @@ pragma solidity ^0.8.0;
 import "forge-std/Test.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {V3UtilsRouter} from "../../src/router/V3UtilsRouter.sol";
+import {ICoreModify} from "../../src/router/interfaces/ICoreModify.sol";
+import {AutoAction} from "../../src/router/RouterTypes.sol";
 
 /// @notice Shared base of the router's fork tests: pinned forks per chain, a freshly deployed router with test roles,
 /// registry helpers and token funding. Later flow/farm/automation suites inherit it.
@@ -62,6 +64,13 @@ abstract contract RouterTestBase is Test {
         vm.prank(routerDeployer, routerDeployer);
         r.initialize(routerAdmin, routerOperator, routerWithdrawer, routerSwapRouter, routerFeeTaker, weth_, 0);
         router = r;
+        // the deploy script's action -> flow mapping
+        vm.startPrank(routerAdmin);
+        r.setAutoSelector(uint8(AutoAction.AUTO_ADJUST), ICoreModify.adjustRange.selector);
+        r.setAutoSelector(uint8(AutoAction.AUTO_EXIT), ICoreModify.decreaseAndSwap.selector);
+        r.setAutoSelector(uint8(AutoAction.AUTO_COMPOUND), ICoreModify.compound.selector);
+        r.setAutoSelector(uint8(AutoAction.AUTO_HARVEST), ICoreModify.harvest.selector);
+        vm.stopPrank();
     }
 
     function _register(address nfpm, address adapter, address farm) internal {

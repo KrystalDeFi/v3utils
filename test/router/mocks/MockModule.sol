@@ -38,12 +38,29 @@ contract MockModule {
         RouterStorage.layout().expectedNft = bytes32(0);
     }
 
+    /// @dev Has `payer` send `amount` of native into the router mid-flow (as an aggregator or NFPM paying native does).
+    function receiveNative(MockNativePayer payer, uint256 amount) external {
+        payer.pay(address(this), amount);
+    }
+
     /// @dev Catches the automation flow selectors: returns the recorded automation state and the calldata it got.
     /// Leaves a stale NFT record behind, which the router must clear.
     fallback(bytes calldata data) external returns (bytes memory) {
         RouterStorage.Layout storage s = RouterStorage.layout();
         s.expectedNft = keccak256(data);
         return abi.encode(s.automationAccount, s.automationTarget, data);
+    }
+}
+
+/// @dev Pays native to `to` from a balance the test dealt it; reverts bubble unchanged.
+contract MockNativePayer {
+    function pay(address to, uint256 amount) external {
+        (bool ok, bytes memory ret) = to.call{value: amount}("");
+        if (!ok) {
+            assembly {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
     }
 }
 

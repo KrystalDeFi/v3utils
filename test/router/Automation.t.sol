@@ -63,7 +63,7 @@ abstract contract AutomationOrders is RouterTestBase {
         bytes memory signature
     ) internal returns (bytes memory) {
         vm.prank(routerOperator);
-        return router.executeAutomation(account, nfpm, tokenId, action, actionData, order, signature);
+        return router.executeAutomation(account, nfpm, tokenId, uint8(action), actionData, order, signature);
     }
 
     /// @dev `automationAccount` (slot 8, offset 1, packed after `locked`) and `automationTarget` (slot 9) of the
@@ -269,12 +269,12 @@ contract AutomationUnstakedTest is UniV3FlowBase, AutomationOrders {
         vm.prank(alice);
         vm.expectRevert();
         router.executeAutomation(
-            alice, NFPM, tokenId, AutoAction.AUTO_ADJUST, abi.encode(_adjustParams(tokenId)), order, sig
+            alice, NFPM, tokenId, uint8(AutoAction.AUTO_ADJUST), abi.encode(_adjustParams(tokenId)), order, sig
         );
         vm.prank(bob);
         vm.expectRevert();
         router.executeAutomation(
-            alice, NFPM, tokenId, AutoAction.AUTO_ADJUST, abi.encode(_adjustParams(tokenId)), order, sig
+            alice, NFPM, tokenId, uint8(AutoAction.AUTO_ADJUST), abi.encode(_adjustParams(tokenId)), order, sig
         );
     }
 

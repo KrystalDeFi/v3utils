@@ -21,9 +21,9 @@ import {IFarm} from "../../src/router/interfaces/IFarm.sol";
 contract SelectorsTest is Test {
     uint256 internal constant MAX_SIZE = 24_576;
 
-    /// @dev The router's external selectors, listed by hand from its ABI (42 entries, as `forge inspect V3UtilsRouter methodIdentifiers` lists them).
+    /// @dev The router's external selectors, listed by hand from its ABI (44 entries, as `forge inspect V3UtilsRouter methodIdentifiers` lists them).
     function _routerSelectors() internal pure returns (bytes4[] memory s) {
-        s = new bytes4[](42);
+        s = new bytes4[](44);
         uint256 i;
         s[i++] = V3UtilsRouter.execute.selector;
         s[i++] = V3UtilsRouter.executeAutomation.selector;
@@ -34,6 +34,7 @@ contract SelectorsTest is Test {
         s[i++] = V3UtilsRouter.setModule.selector;
         s[i++] = V3UtilsRouter.setAdapter.selector;
         s[i++] = V3UtilsRouter.setFarm.selector;
+        s[i++] = V3UtilsRouter.setAutoSelector.selector;
         s[i++] = V3UtilsRouter.setSwapRouter.selector;
         s[i++] = V3UtilsRouter.setNativeConfig.selector;
         s[i++] = V3UtilsRouter.setFeeTaker.selector;
@@ -47,6 +48,7 @@ contract SelectorsTest is Test {
         s[i++] = V3UtilsRouter.module.selector;
         s[i++] = V3UtilsRouter.adapter.selector;
         s[i++] = V3UtilsRouter.farm.selector;
+        s[i++] = V3UtilsRouter.autoSelector.selector;
         s[i++] = V3UtilsRouter.swapRouter.selector;
         s[i++] = V3UtilsRouter.feeTaker.selector;
         s[i++] = V3UtilsRouter.maxFeeX64.selector;
