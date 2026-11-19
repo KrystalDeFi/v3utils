@@ -152,7 +152,7 @@ abstract contract AdapterConformance is RouterTestBase {
         assertEq(p.key.token0, f.key.token0);
         assertEq(p.key.token1, f.key.token1);
         assertEq(p.key.fee, f.key.fee);
-        assertEq(p.key.deployer, address(0));
+        assertEq(p.key.deployer, f.key.deployer);
         assertEq(p.key.tickSpacing, f.key.tickSpacing, "tickSpacing read from the pool");
     }
 
