@@ -76,3 +76,23 @@ deploy-everything:
 	make init-v3utils
 	make init-v3automation
 	make grant-role
+
+# --- V3UtilsRouter (src/router) ---------------------------------------------------------------------
+# Plain CREATE, no linked libraries, so the generic deploy-%/verify-% rules above do not fit. The script
+# deploys the router, CoreMint, CoreModify, the adapters in ADAPTERS and (with AERO_GAUGE_FACTORY) the Aero farm,
+# initializes and registers them in one broadcast, and never locks. FOUNDRY_EVM_VERSION=cancun is needed to
+# simulate against Aero's gauge factory; the verify target runs without it so the explorer gets the real settings.
+#   make dryrun-v3router    simulate the deploy against RPC_URL (no transactions)
+#   make deploy-v3router    deploy and wire
+#   make verify-v3router    print and run `forge verify-contract` for each deployed address in the broadcast
+.PHONY: dryrun-v3router deploy-v3router verify-v3router
+V3ROUTER_DEPLOY_CMD = FOUNDRY_EVM_VERSION=cancun forge script script/V3UtilsRouter.s.sol:V3UtilsRouterScript --rpc-url $(RPC_URL)
+V3ROUTER_BROADCAST = broadcast/V3UtilsRouter.s.sol/$(CHAIN_ID)/run-latest.json
+V3ROUTER_DEPLOYED ?= $(shell jq -r '[.transactions[] | select(.transactionType == "CREATE") | .contractName + ":" + .contractAddress] | join(",")' $(V3ROUTER_BROADCAST) 2>/dev/null)
+dryrun-v3router:
+	$(V3ROUTER_DEPLOY_CMD)
+deploy-v3router:
+	$(V3ROUTER_DEPLOY_CMD) --broadcast
+verify-v3router:
+	@test -n "$(V3ROUTER_DEPLOYED)" || { echo "no deployment in $(V3ROUTER_BROADCAST); set V3ROUTER_DEPLOYED=Name:address,..."; exit 1; }
+	V3ROUTER_DEPLOYED="$(V3ROUTER_DEPLOYED)" forge script script/Verify.s.sol:VerifyV3UtilsRouterScript | grep 'forge verify-contract' | sed 's/^ *//' | bash

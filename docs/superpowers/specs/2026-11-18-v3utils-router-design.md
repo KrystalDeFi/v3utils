@@ -406,3 +406,53 @@ Router-own storage (roles, pause, reentrancy, cancelled orders) is never written
 - **The exact adapter and farm interfaces**, within §6.3 and §6.5.
 - **Exact struct fields**, within §6.6's table. The pool key per protocol comes from the adapter.
 - **Native details**, ported from `Common` and `CommonLib`.
+
+## 10. As built (2026-11-19)
+
+What changed from the spec while building it (all within §9, or called out as a departure).
+
+**Structure**
+- **No separate Automation module.** `executeAutomation` records `account` and the target `(nfpm, tokenId)`, then
+  delegatecalls the flow for the action (AUTO_ADJUST `adjustRange`, AUTO_EXIT `decreaseAndSwap`, AUTO_COMPOUND
+  `compound`, AUTO_HARVEST `harvest`) with the bot's `actionData` as its params. Flows read the account from
+  `_account(nfpm, tokenId)`, which requires the params to match the recorded target while automation is active, so
+  the four flows serve users and the bot alike. Two modules ship: `CoreMint` and `CoreModify`.
+- **`expectedNft` record instead of a farm hook.** A farm that brings an NFT in by `safeTransferFrom` (an Aero gauge's
+  `withdrawFrom`) sets `RouterStorage.expectedNft = keccak256(abi.encode(nfpm, from, tokenId))`; `onERC721Received`
+  accepts only that. The router clears it after every module call.
+- **Router selector collisions** are guarded by a test (`Selectors.t.sol`), not router code. No `unwrap` flag: end
+  `swaps[]` with a `WETH -> address(0)` step.
+- **`IFarm`** exposes `isStakedBy` (yes/no, so a farm that reverts never decides ownership) and `canCompound`. Every
+  adapter and farm function is `payable`, because a delegatecall keeps the flow's `msg.value`.
+- **Holder check** is `ownerOf` first, then the farm's `isStakedBy`, so a reverting farm never blocks a wallet holder.
+- **Deploy script** (`script/V3UtilsRouter.s.sol`): the deployer is the first admin (registration needs ADMIN_ROLE and
+  only tx.origin can initialize), then grants both admin roles to `ADMIN` and renounces them in the same broadcast. It
+  never locks. Verify and size checks: `make verify-v3router`, `Selectors.t.sol::test_sizes`.
+
+**Ledger rules (CoreBase)**
+- `amountIn` above what the call holds reverts `AmountError`; a swap's `tokenOut` must already be tracked
+  (`NotTracked`); a registered NFPM as a token is rejected; fees are bounded by what the call holds.
+- ENSHRINED native (Arc): the starting balance excludes `msg.value` and converts with `ceilDiv`. The ENSHRINED token
+  view must have code on the chain (the deploy script requires it), because `_open` skips codeless non-native tokens.
+- A native payer gets leftover WETH back as native (`_close` unwraps when `msg.value > 0` on a WRAPPED chain).
+- Fee events on a mint are emitted after the mint with the real tokenId (fee transfers still happen up front).
+- `SlippageError` is checked on the principal that actually landed.
+
+**Harvest and compound**
+- `harvest` reverts `MissingSwapData` when `swaps` is empty and something earned is not `destToken`; `amountOut` is the
+  call's own `destToken` balance delta (native included).
+- `compound` with nothing to add is a quiet skip (liquidity 0), not a revert.
+- A staked `harvest` needs `canCompound` for any swap or any `destToken` other than zero or the reward token
+  (`CompoundDisabled`); with `!canCompound` the reward is paid as is.
+- Rewards an unstake pays the router take `PERFORMANCE_FEE`, and `SwapAndIncreaseParams.performanceFeeX64` carries the
+  rate; its cap is validated even when the reward delta is 0.
+
+**Testing**
+- Pancake v3 conformance runs on Base (same NFPM as BSC); there is no BSC fork. Algebra Integral's default-deployer
+  path is checked only against the live factory.
+
+**Backend notes**
+- `TakeFees` uses the v4utils `FeeType` order: GAS_FEE 0, PERFORMANCE_FEE 1, PROTOCOL_FEE 2. v3utils' LIQUIDITY fee is
+  PROTOCOL_FEE here.
+- `DecreaseAndSwap.liquidity` is the clamped amount actually removed (0 for a fees-only collect).
+- A zero claim emits no `TakeFees`.
