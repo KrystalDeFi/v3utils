@@ -14,11 +14,16 @@ abstract contract RouterTestBase is Test {
     uint256 internal constant ARBITRUM_BLOCK = 171544977;
     uint256 internal constant BASE_BLOCK = 56384489;
     uint256 internal constant OP_BLOCK = 145000000;
+    uint256 internal constant HYPEREVM_BLOCK = 51000000;
+    uint256 internal constant AVALANCHE_BLOCK = 100000000;
 
     string internal constant ARBITRUM_RPC_DEFAULT =
         "https://arbitrum.blockpi.network/v1/rpc/d806195b2a58dc2aa626f6c77b0626fc4d03d70d";
     string internal constant BASE_RPC_DEFAULT = "https://mainnet.base.org";
     string internal constant OP_RPC_DEFAULT = "https://mainnet.optimism.io";
+    // rpc.hyperliquid.xyz/evm ignores the block parameter (it answers from latest), so it is not usable for a pin.
+    string internal constant HYPEREVM_RPC_DEFAULT = "https://rpc.hyperlend.finance";
+    string internal constant AVALANCHE_RPC_DEFAULT = "https://api.avax.network/ext/bc/C/rpc";
 
     // ---- test roles
     address internal routerDeployer = makeAddr("rtDeployer");
@@ -40,6 +45,14 @@ abstract contract RouterTestBase is Test {
 
     function _forkOp() internal returns (uint256 id) {
         id = vm.createSelectFork(vm.envOr("OP_RPC_URL", OP_RPC_DEFAULT), OP_BLOCK);
+    }
+
+    function _forkHyperEvm() internal returns (uint256 id) {
+        id = vm.createSelectFork(vm.envOr("HYPEREVM_RPC_URL", HYPEREVM_RPC_DEFAULT), HYPEREVM_BLOCK);
+    }
+
+    function _forkAvalanche() internal returns (uint256 id) {
+        id = vm.createSelectFork(vm.envOr("AVALANCHE_RPC_URL", AVALANCHE_RPC_DEFAULT), AVALANCHE_BLOCK);
     }
 
     /// @dev Deploys and initializes a router on the current fork (WRAPPED native mode, `weth_` as given).
