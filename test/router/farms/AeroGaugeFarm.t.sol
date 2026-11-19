@@ -123,6 +123,25 @@ contract AeroGaugeFarmTest is AeroFarmBase {
         farm.unstake(NFPM, 1, staker);
         vm.expectRevert(IRouterErrors.NotDelegateCall.selector);
         farm.claim(NFPM, 1, staker);
+        // the reads too, as on the adapters (the immutable getters stay public)
+        vm.expectRevert(IRouterErrors.NotDelegateCall.selector);
+        farm.isStakedBy(NFPM, 1, staker);
+        vm.expectRevert(IRouterErrors.NotDelegateCall.selector);
+        farm.canUnstake();
+        vm.expectRevert(IRouterErrors.NotDelegateCall.selector);
+        farm.canIncreaseStaked();
+        vm.expectRevert(IRouterErrors.NotDelegateCall.selector);
+        farm.earnsTradingFees();
+        vm.expectRevert(IRouterErrors.NotDelegateCall.selector);
+        farm.canCompound();
+        vm.expectRevert(IRouterErrors.NotDelegateCall.selector);
+        farm.rewardToken();
+        vm.expectRevert(IRouterErrors.NotDelegateCall.selector);
+        farm.checkStakeable(NFPM, _key(WETH, USDC_BASE, TS_A));
+        vm.expectRevert(IRouterErrors.NotDelegateCall.selector);
+        farm.increaseStaked(NFPM, 1, 1, 1, block.timestamp);
+        assertEq(farm.gaugeFactory(), GAUGE_FACTORY);
+        assertTrue(farm.compoundEnabled());
     }
 
     /// @dev `claim` pays the router the account's emissions and returns exactly the reward delta.

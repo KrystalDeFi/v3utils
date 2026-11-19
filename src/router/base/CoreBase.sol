@@ -307,7 +307,10 @@ abstract contract CoreBase is IRouterErrors {
     }
 
     /// @dev Calls `swapRouter` with `swapData`, paying `amountIn` as value (native) or approving exactly `amountIn`
-    /// and resetting the approval after (ERC20).
+    /// and resetting the approval after (ERC20). The reset ignores a failed approve(0), so a token that refuses
+    /// approve(0) can keep a standing allowance to `swapRouter` for what the swap left unspent. That allowance only
+    /// reaches router-held stray balance of the token: users' tokens sit in the router only during their own call and
+    /// are swept to them by `_close`, and a call's ledger never credits it more than its own balance delta.
     function _callSwapRouter(
         address swapRouter,
         address tokenIn,

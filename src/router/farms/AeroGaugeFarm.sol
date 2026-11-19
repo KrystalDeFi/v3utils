@@ -14,7 +14,8 @@ import {AeroGauge, IAeroCLGauge} from "./AeroGauge.sol";
 /// gauge approvals the user grants (`setApprovalForAll` for `withdrawFrom`, `approveForClaim` for `claimEmissions`).
 /// @dev Stateless: per-chain config is immutable and the router and modules DELEGATECALL it, so it runs as the router;
 /// the only storage it touches is `RouterStorage.expectedNft` around `withdrawFrom`. The gauge is always derived from
-/// the position or the pool key (`AeroGauge`), never taken from calldata. Every function is `payable` (see `IFarm`).
+/// the position or the pool key (`AeroGauge`), never taken from calldata. Every function is `payable` (see `IFarm`) and,
+/// like the adapters', `onlyDelegateCall`; only the immutable config getters answer a direct call.
 ///
 /// Emissions: with `approveForClaim`, `withdrawFrom` pays the stake's emissions to the router; the flows track the
 /// reward token in their ledger, so they reach the account. An unstake inside the gauge's penalty window
@@ -46,36 +47,41 @@ contract AeroGaugeFarm is IFarm, IRouterErrors {
     /// @inheritdoc IFarm
     /// @dev False, never a revert, when the position's pool has no gauge of `gaugeFactory`: wallet positions in
     /// gauge-less pools keep working behind the holder check.
-    function isStakedBy(address nfpm, uint256 tokenId, address account) external payable returns (bool) {
+    function isStakedBy(address nfpm, uint256 tokenId, address account)
+        external
+        payable
+        onlyDelegateCall
+        returns (bool)
+    {
         address gauge = AeroGauge.findOfToken(gaugeFactory, nfpm, tokenId);
         return gauge != address(0) && IAeroCLGauge(gauge).stakedContains(account, tokenId);
     }
 
-    function canUnstake() external payable returns (bool) {
+    function canUnstake() external payable onlyDelegateCall returns (bool) {
         return true;
     }
 
     /// @dev Aero adds liquidity only to an unstaked position (take, increase, restake).
-    function canIncreaseStaked() external payable returns (bool) {
+    function canIncreaseStaked() external payable onlyDelegateCall returns (bool) {
         return false;
     }
 
     /// @dev Staked liquidity's trading fees go to the gauge's voters.
-    function earnsTradingFees() external payable returns (bool) {
+    function earnsTradingFees() external payable onlyDelegateCall returns (bool) {
         return false;
     }
 
-    function canCompound() external payable returns (bool) {
+    function canCompound() external payable onlyDelegateCall returns (bool) {
         return compoundEnabled;
     }
 
-    function rewardToken() external payable returns (address) {
+    function rewardToken() external payable onlyDelegateCall returns (address) {
         return _rewardToken;
     }
 
     /// @inheritdoc IFarm
     /// @dev `InvalidGauge()` without a gauge of `gaugeFactory` for the pool, `GaugeNotLive()` when it is killed.
-    function checkStakeable(address nfpm, PoolKey calldata key) external payable {
+    function checkStakeable(address nfpm, PoolKey calldata key) external payable onlyDelegateCall {
         address gauge = AeroGauge.ofPool(gaugeFactory, nfpm, key.token0, key.token1, key.tickSpacing);
         AeroGauge.requireLive(gaugeFactory, gauge);
     }
@@ -123,6 +129,7 @@ contract AeroGaugeFarm is IFarm, IRouterErrors {
     function increaseStaked(address, uint256, uint256, uint256, uint256)
         external
         payable
+        onlyDelegateCall
         returns (uint128, uint256, uint256)
     {
         revert FarmUnsupported();
