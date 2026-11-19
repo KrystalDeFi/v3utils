@@ -4,7 +4,13 @@ pragma solidity ^0.8.0;
 import {AlgebraIntegralAdapter} from "../../../src/router/adapters/AlgebraIntegralAdapter.sol";
 import {IRouterErrors} from "../../../src/router/IRouterErrors.sol";
 import {PoolKey} from "../../../src/router/RouterTypes.sol";
-import {AdapterConformance} from "./AdapterConformance.sol";
+import {AdapterConformance, AdapterHarness} from "./AdapterConformance.sol";
+
+interface IIntegralFactoryLike {
+    function factory() external view returns (address);
+
+    function poolByPair(address a, address b) external view returns (address);
+}
 
 /// @dev Algebra Integral NFPM on Avalanche (chain 43114), found by enumerating the deployed V3Utils whitelist:
 /// 0x3fed017ec0f5517cdf2e8a9a4156c64d74252146 ("Algebra Positions NFT-V2", `positions()` has a `deployer` field).
@@ -31,6 +37,20 @@ contract AlgebraIntegralAdapterTest is AdapterConformance {
         x.amount0 = 1 ether;
         x.amount1 = 1.3 ether;
         x.expectedPool = 0xeE2Ceda742bfb2ef566aB57642D47aBA1909B653;
+    }
+
+    /// @dev No live default-deployer Integral pool is reachable (see the file header; every one of ~22 sampled
+    /// positions, spread over the whole NFPM, has a custom deployer, and `poolByPair` is empty for the major pairs
+    /// on this chain). So the `deployer == 0` branch is pinned to the factory's live `poolByPair` answer, and it
+    /// must differ from the custom-deployer lookup for the same pair.
+    function test_poolLookup_defaultDeployerUsesPoolByPair() public {
+        PoolKey memory key = f.key;
+        key.deployer = address(0);
+        address viaAdapter = abi.decode(_exec(abi.encodeCall(AdapterHarness.pool, (f.nfpm, key))), (address));
+        address viaFactory =
+            IIntegralFactoryLike(IIntegralFactoryLike(f.nfpm).factory()).poolByPair(key.token0, key.token1);
+        assertEq(viaAdapter, viaFactory, "deployer 0 -> poolByPair");
+        assertTrue(viaAdapter != f.expectedPool, "default lookup is not the custom pool");
     }
 
     function test_directCall_reverts() public {

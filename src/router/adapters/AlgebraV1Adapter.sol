@@ -54,6 +54,10 @@ contract AlgebraV1Adapter is AdapterBase {
         p.liquidity = liquidity;
     }
 
+    function _tokens(address nfpm, uint256 tokenId) internal view override returns (address token0, address token1) {
+        (,, token0, token1,,,,,,,) = IAlgebraV1Nfpm(nfpm).positions(tokenId);
+    }
+
     function pool(address nfpm, PoolKey calldata key) external payable onlyDelegateCall returns (address) {
         return IAlgebraV1Factory(IAlgebraV1Nfpm(nfpm).factory()).poolByPair(key.token0, key.token1);
     }

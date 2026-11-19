@@ -26,6 +26,12 @@ abstract contract AdapterBase is IAdapter, IRouterErrors {
     /// @dev Decodes the protocol's `positions(tokenId)` into the neutral `Position`.
     function _position(address nfpm, uint256 tokenId) internal view virtual returns (Position memory);
 
+    /// @dev Just the tokens of a position; overridden where `_position` costs a pool lookup.
+    function _tokens(address nfpm, uint256 tokenId) internal view virtual returns (address, address) {
+        PoolKey memory key = _position(nfpm, tokenId).key;
+        return (key.token0, key.token1);
+    }
+
     function position(address nfpm, uint256 tokenId) external payable onlyDelegateCall returns (Position memory) {
         return _position(nfpm, tokenId);
     }
@@ -36,9 +42,9 @@ abstract contract AdapterBase is IAdapter, IRouterErrors {
         onlyDelegateCall
         returns (uint128 liquidity, uint256 used0, uint256 used1)
     {
-        PoolKey memory key = _position(nfpm, tokenId).key;
-        IERC20(key.token0).forceApprove(nfpm, amount0);
-        IERC20(key.token1).forceApprove(nfpm, amount1);
+        (address token0, address token1) = _tokens(nfpm, tokenId);
+        IERC20(token0).forceApprove(nfpm, amount0);
+        IERC20(token1).forceApprove(nfpm, amount1);
         (liquidity, used0, used1) = IUniNfpm(nfpm)
             .increaseLiquidity(
                 IUniNfpm.IncreaseLiquidityParams({
@@ -50,8 +56,8 @@ abstract contract AdapterBase is IAdapter, IRouterErrors {
                 deadline: deadline
             })
             );
-        IERC20(key.token0).forceApprove(nfpm, 0);
-        IERC20(key.token1).forceApprove(nfpm, 0);
+        IERC20(token0).forceApprove(nfpm, 0);
+        IERC20(token1).forceApprove(nfpm, 0);
     }
 
     function decrease(
