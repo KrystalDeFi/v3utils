@@ -61,6 +61,10 @@ interface IRouterErrors {
     /// @dev Under `executeAutomation`, flow params that name a position other than the recorded target.
     error NotAutomation();
 
+    // ---- flows
+    /// @dev A mint or increase that added less liquidity than the caller's `minLiquidity`.
+    error LiquiditySlippage();
+
     /// @dev v4utils' event payload, so the backend's `TakeFees` decoding applies unchanged.
     struct TakeFeesEventData {
         InputTokenParams[] feeTokens;

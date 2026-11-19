@@ -13,6 +13,7 @@ import {IRouterErrors} from "../IRouterErrors.sol";
 /// @notice Adapter for Uniswap-v3-style NFPMs (Uniswap v3, Pancake v3, Sushi v3 and other forks that keep the
 /// periphery ABI). Stateless: modules DELEGATECALL it, so `address(this)` is the router and the tokens are the
 /// router's. `mint` and `increase` approve the NFPM for exactly the amounts offered and reset to 0 afterwards.
+/// Every function is `payable` (see `IAdapter`): it runs inside payable flows by DELEGATECALL, which keeps `msg.value`.
 contract UniV3Adapter is IAdapter, IRouterErrors {
     using SafeERC20 for IERC20;
 
@@ -24,7 +25,7 @@ contract UniV3Adapter is IAdapter, IRouterErrors {
         _;
     }
 
-    function position(address nfpm, uint256 tokenId) external view onlyDelegateCall returns (Position memory p) {
+    function position(address nfpm, uint256 tokenId) external payable onlyDelegateCall returns (Position memory p) {
         (,, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity,,,,) =
             INonfungiblePositionManager(nfpm).positions(tokenId);
         address pool_ = IUniswapV3Factory(INonfungiblePositionManager(nfpm).factory()).getPool(token0, token1, fee);
@@ -40,7 +41,7 @@ contract UniV3Adapter is IAdapter, IRouterErrors {
         p.liquidity = liquidity;
     }
 
-    function pool(address nfpm, PoolKey calldata key) external view onlyDelegateCall returns (address) {
+    function pool(address nfpm, PoolKey calldata key) external payable onlyDelegateCall returns (address) {
         return IUniswapV3Factory(INonfungiblePositionManager(nfpm).factory()).getPool(key.token0, key.token1, key.fee);
     }
 
@@ -53,7 +54,7 @@ contract UniV3Adapter is IAdapter, IRouterErrors {
         uint256 amount1,
         address recipient,
         uint256 deadline
-    ) external onlyDelegateCall returns (uint256 tokenId, uint128 liquidity, uint256 used0, uint256 used1) {
+    ) external payable onlyDelegateCall returns (uint256 tokenId, uint128 liquidity, uint256 used0, uint256 used1) {
         IERC20(key.token0).forceApprove(nfpm, amount0);
         IERC20(key.token1).forceApprove(nfpm, amount1);
         (tokenId, liquidity, used0, used1) = INonfungiblePositionManager(nfpm)
@@ -78,6 +79,7 @@ contract UniV3Adapter is IAdapter, IRouterErrors {
 
     function increase(address nfpm, uint256 tokenId, uint256 amount0, uint256 amount1, uint256 deadline)
         external
+        payable
         onlyDelegateCall
         returns (uint128 liquidity, uint256 used0, uint256 used1)
     {
@@ -106,7 +108,7 @@ contract UniV3Adapter is IAdapter, IRouterErrors {
         uint256 amount0Min,
         uint256 amount1Min,
         uint256 deadline
-    ) external onlyDelegateCall returns (uint256 amount0, uint256 amount1) {
+    ) external payable onlyDelegateCall returns (uint256 amount0, uint256 amount1) {
         (amount0, amount1) = INonfungiblePositionManager(nfpm)
             .decreaseLiquidity(
                 INonfungiblePositionManager.DecreaseLiquidityParams({
@@ -121,6 +123,7 @@ contract UniV3Adapter is IAdapter, IRouterErrors {
 
     function collect(address nfpm, uint256 tokenId)
         external
+        payable
         onlyDelegateCall
         returns (uint256 amount0, uint256 amount1)
     {
