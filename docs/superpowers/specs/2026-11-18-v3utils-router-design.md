@@ -245,62 +245,67 @@ below; the builder finalizes it.
 - **Behaviour carried over unchanged from PR #64:** live-gauge check, rebalance, `MissingSwapData`, and the
   penalty-window note.
 
-### 6.6 Params, swaps and the flow pipeline (v4utils style; user decision 2026‑11‑19)
+### 6.6 Params, swaps and the flow pipeline (v4utils style)
 
-V3Utils' swap model is limited:
-- One optional `swapSourceToken`, plus `amountIn0`/`swapData0` into token0 and `amountIn1`/`swapData1` into token1.
-- One `Instructions` struct for every action, where which fields matter depends on `whatToDo`.
+Decided 2026-11-19 (user): user-facing params and swaps follow v4utils' `IV4Utils` (`v4utils/src/univ4`), with three
+fixes listed under "Swaps" below.
 
-This router uses v4utils' model (`v4utils/src/univ4/interfaces/IV4Utils.sol`) instead, with two fixes.
+**One params struct per action.** This replaces V3Utils' single `Instructions` struct, whose fields mean different
+things per `whatToDo`. Each module function names exactly what it uses:
 
-**One params struct per action.** Each module function says exactly what it uses: `SwapAndMintParams` (with
-`stake`), `SwapAndIncreaseParams`, `DecreaseAndSwapParams` (partial or full withdraw), `AdjustRangeParams`,
-`CompoundParams` and `HarvestParams`. Each carries its own fee fields (§6.8) and a `deadline`. Liquidity slippage is
-`minLiquidity`, as in v4utils, instead of two minimum token amounts.
+| Function | Params (sketch; mirrors v4utils) |
+|---|---|
+| `swapAndMint(SwapAndMintParams)` | `nfpm`, pool key (`token0`, `token1`, `fee`/`tickSpacing`/`deployer`), `MintParams {tickLower, tickUpper, minLiquidity, deadline}`, `inputTokens[]`, `swaps[]`, `stake`, `protocolFeeX64`, `gasFeeX64` |
+| `swapAndIncrease(SwapAndIncreaseParams)` | `nfpm`, `tokenId`, `IncreaseParams {minLiquidity, deadline}`, `inputTokens[]`, `swaps[]`, `protocolFeeX64`, `gasFeeX64` |
+| `decreaseAndSwap(DecreaseAndSwapParams)` | `nfpm`, `tokenId`, `DecreaseParams {liquidity, amount0Min, amount1Min, deadline}`, `swaps[]`, `destToken`, `protocolFeeX64`, `performanceFeeX64`, `gasFeeX64` (partial or full withdraw; full withdraw unstakes, §6.4) |
+| `adjustRange(AdjustRangeParams)` | `nfpm`, `tokenId`, `swaps[]`, `MintParams`, `compoundFees`, `protocolFeeX64`, `performanceFeeX64`, `gasFeeX64` |
+| `compound(CompoundParams)` | `nfpm`, `tokenId`, `swaps[]`, `IncreaseParams`, `performanceFeeX64` (farm rewards, or trading fees when unstaked) |
+| `harvest(HarvestParams)` | `nfpm`, `tokenId`, `swaps[]`, `destToken`, `performanceFeeX64` |
 
-**Swaps are an ordered list of steps**, `SwapParams[] {tokenIn, amountIn, tokenOut, amountOutMin, swapData}`:
-- They run in order through the `swapRouter` aggregator, each with its own slippage check.
-- Any number of input tokens, multi-hop, and any exit token are possible.
-- Native↔WETH is a step too, needing no `swapData`, and it handles ENSHRINED as in v4utils' `NativeCurrency`.
-- **Fix 1 (vs v4utils):** `amountIn == 0` means "everything *this call* holds of `tokenIn`". That is the balance
-  change since the call started, tracked as in PR #64, never the router's whole balance. v4utils' "whole balance"
-  rule could consume tokens that belonged to no one in the call; see the advisories referenced in its code,
-  GHSA-m36p-ffh3-mvmc and GHSA-v6cm-hp8p-f37m.
+- Liquidity slippage is checked as `minLiquidity`, as in v4utils, instead of V3Utils' `amountAddMin0/1`.
+- The bot's `actionData` is the same struct as the user's for that action (AUTO_ADJUST uses `AdjustRangeParams`,
+  AUTO_EXIT uses a full `DecreaseAndSwapParams`, and so on).
 
-**Inputs are a list**, `InputTokenParams[] {token, amount}`, pulled from the user (`msg.value` for native).
+**Swaps** are a list of steps: `SwapParams {tokenIn, amountIn, tokenOut, amountOutMin, swapData}`, run in order
+through `swapRouter`, with slippage checked per step. This gives any number of input tokens, multi-hop routes, and
+any exit token, which V3Utils' fixed `swapSourceToken` → token0/token1 slots could not. A native↔WETH step is a
+conversion, not a trade (v4utils' `NativeCurrency`, including ENSHRINED native on Arc). Three changes from v4utils:
+1. **`amountIn == 0` means "everything *this call* holds of `tokenIn`"**, measured by balance delta from the start
+   of the call. It never means the router's whole balance. v4utils' whole-balance meaning lets a swap consume tokens
+   from outside the call; v4utils' own GHSA-m36p-ffh3-mvmc and GHSA-v6cm-hp8p-f37m fixes deal with this area.
+2. **No caller-chosen `sweepTokens[]`.** At the end of every flow the router sweeps, by balance delta, every token
+   the call touched to the account: input tokens, both legs of every swap, the pool's tokens, and the reward token.
+   Nothing the call brought in stays behind, and nothing it did not bring in leaves.
+3. **`destToken` amounts are measured as deltas**, as v4utils does after GHSA-m36p.
 
-**Sweep is automatic. Fix 2 (vs v4utils):** there is no caller-supplied `sweepTokens[]`. At the end of every flow,
-the router returns to the user the balance change of every token the call touched: inputs, every swap leg's
-`tokenIn` and `tokenOut`, the pool's two tokens, and farm rewards. With a caller-supplied list, an omitted token
-stayed in the router, where the next caller's full sweep could collect it. Native is unwrapped on return only if the
-user asks (`unwrap`).
+**The flow pipeline.** Every flow reads top to bottom in the same order:
 
-**Every flow runs the same pipeline:**
-
-```
-take position (wallet or farm, §6.4) → collect / claim → take fees → swaps → act (mint / increase / decrease)
-→ put position back (§6.4) → sweep
-```
-
-Fees are taken on what is collected and on inputs before the swaps, as in v4utils. For example, `swapAndMint` runs:
-pull inputs, then `PROTOCOL`/`GAS` fees on inputs, then swaps, then mint, then stake or send to the wallet, then
-sweep.
+1. take the inputs or the position (wallet or farm, §6.4);
+2. collect fees or claim rewards;
+3. take fees;
+4. swaps;
+5. the position operation (adapter);
+6. put the position back (§6.4);
+7. sweep (above);
+8. emit the event.
 
 ### 6.7 Flows
 
-| Flow (module function) | Unstaked position | Staked position |
+All flows follow the pipeline in §6.6. Every flow except mint uses take, act, put back (§6.4).
+
+| Flow | Unstaked position | Staked position |
 |---|---|---|
 | `swapAndMint` (`stake` flag) | mint to the wallet | mint, then `farm.stake` |
-| `swapAndIncrease` | take, increase, put back | in place through the farm if `canIncreaseStaked`, otherwise unstake, increase, restake |
-| `decreaseAndSwap` (partial or full) | decrease, collect, swap to `swapDestToken` | the same; restake if liquidity remains (full: wallet) |
-| `adjustRange` | decrease all, swaps, mint new range (optionally compounding fees) | the same; restake the new NFT |
-| `compound` | **trading fees**: collect, fee, swaps, increase | **farm rewards**: claim, fee, swaps, increase (PR #64 compound); plus trading fees if `earnsTradingFees` |
-| `harvest` (user and bot) | **trading fees**: collect, `PERFORMANCE_FEE`, optional swaps to a target token | **farm rewards**: claim, `PERFORMANCE_FEE`, optional swaps; the position stays staked |
+| `swapAndIncrease` | increase | in place through the farm if `canIncreaseStaked`, otherwise between unstake and restake |
+| `decreaseAndSwap` (partial or full) | decrease, collect, swap to `destToken` | the same; restake if liquidity remains |
+| `adjustRange` | collect, decrease all, swap, mint | the same; restake the new NFT |
+| `compound` | **trading fees** (collect, swap, increase) | **farm rewards** (claim, fee, swap and add; PR #64 compound); plus trading fees if `earnsTradingFees` |
+| `harvest` (user and bot) | **trading fees** (collect, `PERFORMANCE_FEE`, swap to `destToken`) | **farm rewards** (claim, `PERFORMANCE_FEE`, optional swap); position stays staked |
 
 - **Harvest is a user entry point too** (2026‑11‑19, user decision: rewards are fee-collectible for Krystal).
   This replaces PR #64's "no fee on harvest", where users claimed on the gauge directly.
-  - `harvest(tokenId, params)` claims a staked position's farm rewards, or collects an unstaked position's trading
-    fees. It takes `performanceFeeX64` (`PERFORMANCE_FEE`), optionally swaps to a target token, and pays the user.
+  - `harvest(HarvestParams)` claims a staked position's farm rewards, or collects an unstaked position's trading
+    fees. It takes `performanceFeeX64` (`PERFORMANCE_FEE`), runs `swaps[]`, and pays the user.
   - A staked position stays staked. Harvest on a staked position needs the farm to allow claim (Aero needs
     `approveForClaim`; MasterChef reverts `FarmUnsupported`).
   - AUTO_HARVEST is the same flow, run by the bot.
@@ -316,23 +321,29 @@ sweep.
 
 ### 6.8 Fees
 
-- **Same semantics as V3Utils and V3Automation:**
-  - Fee fields come in the params.
-  - The `_deductFees` math matches theirs.
-  - **The event is v4utils' `TakeFees`** (user decision 2026‑11‑19): `TakeFees(nfpm, tokenId, user, {feeTokens[],
-    feeX64, feeType})`, not V3Utils' 3‑slot `DeductFees`. Fees now apply to any number of tokens, and the backend
-    already indexes `TakeFees` from v4utils. The backend needs the router's address added to its indexing.
-  - Fees go to `feeTaker`.
-  - Caps are per `FeeType` in `RouterStorage`, with the same defaults as `Common`: gas 30%, liquidity 30%,
+- **Fee mechanics follow v4utils' `_takeFees`:**
+  - A fee is taken per token on a list of tokens, with `FullMath.mulDiv(amount, feeX64, 2^64)`, and sent to
+    `feeTaker`.
+  - **Event:** v4utils' `TakeFees(posm, tokenId, userAddress, {feeTokens[], feeX64, feeType})`, with `posm` = the
+    NFPM. The backend already indexes it for v4utils. This replaces V3Utils' 3-slot `DeductFees`, which cannot
+    describe fees on any number of tokens.
+  - **`FeeType` uses v4utils' enum and ordering** (`GAS_FEE`, `PERFORMANCE_FEE`, `PROTOCOL_FEE`), so the backend's
+    `TakeFees` decoding applies unchanged. V3Utils' `LIQUIDITY_FEE` (a fee on liquidity inputs and outputs)
+    becomes `PROTOCOL_FEE`, which is what v4utils charges on the same flows. *(Builder's call; flag it to the
+    backend.)*
+  - **Which fee applies where follows v4utils:**
+    - mint and increase charge `PROTOCOL_FEE` and `GAS_FEE` on the inputs;
+    - decrease charges `PROTOCOL_FEE` and `GAS_FEE` on the principal and `PERFORMANCE_FEE` on collected fees;
+    - farm rewards charge `PERFORMANCE_FEE` (below).
+  - **Caps** are per `FeeType` in `RouterStorage`, with the same defaults as `Common`: gas 30%, protocol 30%,
     performance 32%.
 - **Rewards are always fee-collectible, as `PERFORMANCE_FEE`** (user decision; V3Utils labels its fee on collected
   trading fees `PERFORMANCE_FEE` the same way). That covers:
   - farm rewards on compound and harvest, one `performanceFeeX64` with gas folded in (PR #64);
   - trading fees collected by harvest or compound on an unstaked position, and the fee portion of a withdraw;
   - user calls and bot calls alike.
-- **Labels are correct by construction.** The router takes the fees itself, so the hardcoded `LIQUIDITY_FEE` label
-  in V3Utils' `swapAndIncreaseLiquidity` is no longer forced on anything. Each fee field gets its own `FeeType`, as
-  in V3Utils' `execute` path.
+- **Labels are correct by construction.** The router takes the fees itself, so no label is hardcoded the way V3Utils'
+  `swapAndIncreaseLiquidity` hardcodes `LIQUIDITY_FEE`.
 
 ### 6.9 Storage (`RouterStorage`, ERC-7201, append-only)
 
@@ -350,6 +361,7 @@ Router-own storage (roles, pause, reentrancy, cancelled orders) is never written
   from calldata alone.
 - Gauges and pools are derived from the position or the mint params, never taken from calldata.
 - There is no self-delegatecall multicall, because it would reuse `msg.value`.
+- Swap amounts and sweeps are scoped to the call's own balance deltas, never the router's whole balance (§6.6).
 - `RouterStorage` fields are append-only.
 - Adapters and farms never transfer custody out of the router except to the account, the farm (for its own
   stake), or the fee taker.
@@ -373,8 +385,14 @@ Router-own storage (roles, pause, reentrancy, cancelled orders) is never written
   v1 chain, Ramses, an Algebra Integral chain, and Aero on Base and OP. Each tests mint, increase, withdraw (partial
   and full), change range, compound and harvest, staked and unstaked where a farm exists.
 - **PR #64's Aero test suite** ports over to the farm.
-- **Parity tests:** for the same inputs, the router's results (amounts, fees, events) match V3Utils' and
-  V3Automation's on the same fork block.
+- **Parity tests:** for the same inputs, the router's position outcome and fee amounts match V3Utils' and
+  V3Automation's on the same fork block. Events differ by design (`TakeFees`, §6.8).
+- **Swap tests:**
+  - several input tokens;
+  - a multi-hop route;
+  - native in and out on WRAPPED and ENSHRINED chains;
+  - `amountIn == 0` touches only the call's own balance (pre-seed the router with the same token);
+  - no token the call touched is left on the router.
 - **Router tests:**
   - registry guards (no router selectors, code required, lock);
   - the automation account cannot be reached through `execute`;
@@ -386,5 +404,5 @@ Router-own storage (roles, pause, reentrancy, cancelled orders) is never written
 
 - **How Core is split into modules.** Split by flow; the size budget decides.
 - **The exact adapter and farm interfaces**, within §6.3 and §6.5.
-- **Exact field lists of the per-action params structs**, within §6.6. Follow v4utils' structs where they apply.
+- **Exact struct fields**, within §6.6's table. The pool key per protocol comes from the adapter.
 - **Native details**, ported from `Common` and `CommonLib`.
