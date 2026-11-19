@@ -156,7 +156,7 @@ The router carries over from PR #64's `AeroFarmingRouter`, generalized.
   - per-`FeeType` max fee (`setMaxFeeX64`);
   - the native config (`weth`, WRAPPED or ENSHRINED, and the scale, derived from token decimals as in `Common`).
 - **Other router functions:** EIP-712 orders (`hashOrder`, `cancelOrder`, `isOrderCancelled`), the NFT receive guard
-  (§6.7), `receive()` (only from `weth`), and pause.
+  (§6.7), `receive()` (only from `weth`; as built, from anyone while a flow runs, see §10), and pause.
 
 The EIP-712 domain is name `V3UtilsRouter`, version `1`, with the router as `verifyingContract`. The order struct is
 `StructHash.Order`, hashed internally with no deployed StructHash library.
@@ -413,17 +413,31 @@ What changed from the spec while building it (all within §9, or called out as a
 
 **Structure**
 - **No separate Automation module.** `executeAutomation` records `account` and the target `(nfpm, tokenId)`, then
-  delegatecalls the flow for the action (AUTO_ADJUST `adjustRange`, AUTO_EXIT `decreaseAndSwap`, AUTO_COMPOUND
-  `compound`, AUTO_HARVEST `harvest`) with the bot's `actionData` as its params. Flows read the account from
+  delegatecalls the flow for the action with the bot's `actionData` as its params. Flows read the account from
   `_account(nfpm, tokenId)`, which requires the params to match the recorded target while automation is active, so
   the four flows serve users and the bot alike. Two modules ship: `CoreMint` and `CoreModify`.
+- **Automation action registry (final review).** The action -> flow mapping is not hardcoded: it would have frozen the
+  four automated param structs and the action set in a router that cannot be upgraded. `executeAutomation` takes
+  `uint8 action` and runs `RouterStorage.autoSelector[action]` (appended to the layout after `expectedNft`), whose
+  module comes from `module[selector]` as for `execute`. An unmapped action, or a selector with no module, reverts
+  `UnknownSelector()`. `setAutoSelector(action, selector)` is ADMIN_ROLE, emits `AutoSelectorSet`, takes `bytes4(0)` to
+  unmap, and is frozen by `lock()` like the other registries; `autoSelector(action)` reads it. The deploy script maps
+  the `AutoAction` ordinals, which stay in `RouterTypes` for off-chain encoding: AUTO_ADJUST 0 `adjustRange`,
+  AUTO_EXIT 1 `decreaseAndSwap`, AUTO_COMPOUND 2 `compound`, AUTO_HARVEST 3 `harvest`. A new action or params struct
+  needs only a new module and a mapping. The `executeAutomation` selector is unchanged (an enum encodes as `uint8`).
 - **`expectedNft` record instead of a farm hook.** A farm that brings an NFT in by `safeTransferFrom` (an Aero gauge's
   `withdrawFrom`) sets `RouterStorage.expectedNft = keccak256(abi.encode(nfpm, from, tokenId))`; `onERC721Received`
   accepts only that. The router clears it after every module call.
-- **Router selector collisions** are guarded by a test (`Selectors.t.sol`), not router code. No `unwrap` flag: end
-  `swaps[]` with a `WETH -> address(0)` step.
+- **Router-own selectors are guarded by a test, not router code.** `setModule` accepts any selector, including one
+  of the router's own; `Selectors.t.sol` checks every module, adapter and farm selector against the router's ABI
+  (kept by hand; update it when the router gains a function). That is enough because `execute` only ever dispatches
+  through the registry: the router has no fallback, so a direct call with a router selector always runs the router's
+  own function, and a module registered under that selector is reachable only as `execute(data)`, by DELEGATECALL like
+  any module. A collision can never shadow a router function; the test keeps the registry free of confusing entries.
+  No `unwrap` flag: end `swaps[]` with a `WETH -> address(0)` step.
 - **`IFarm`** exposes `isStakedBy` (yes/no, so a farm that reverts never decides ownership) and `canCompound`. Every
-  adapter and farm function is `payable`, because a delegatecall keeps the flow's `msg.value`.
+  adapter and farm function is `payable`, because a delegatecall keeps the flow's `msg.value`, and `onlyDelegateCall`
+  (the farm's reads too, since the final review; only its immutable config getters answer a direct call).
 - **Holder check** is `ownerOf` first, then the farm's `isStakedBy`, so a reverting farm never blocks a wallet holder.
 - **Deploy script** (`script/V3UtilsRouter.s.sol`): the deployer is the first admin (registration needs ADMIN_ROLE and
   only tx.origin can initialize), then grants both admin roles to `ADMIN` and renounces them in the same broadcast. It
@@ -435,12 +449,18 @@ What changed from the spec while building it (all within §9, or called out as a
 - ENSHRINED native (Arc): the starting balance excludes `msg.value` and converts with `ceilDiv`. The ENSHRINED token
   view must have code on the chain (the deploy script requires it), because `_open` skips codeless non-native tokens.
 - A native payer gets leftover WETH back as native (`_close` unwraps when `msg.value > 0` on a WRAPPED chain).
+- **Native receive during flows (final review).** `receive()` accepts native from anyone while a flow runs (the
+  reentrancy guard is entered during `execute` / `executeAutomation`), in both native modes, so aggregator steps whose
+  `tokenOut` is native, swap-router native refunds and future native-paying farms or NFPMs work. The ledger credits the
+  call only its own native delta. Outside a flow it is as before: only `weth` unwrapping, only while WRAPPED.
 - Fee events on a mint are emitted after the mint with the real tokenId (fee transfers still happen up front).
 - `SlippageError` is checked on the principal that actually landed.
 
 **Harvest and compound**
 - `harvest` reverts `MissingSwapData` when `swaps` is empty and something earned is not `destToken`; `amountOut` is the
   call's own `destToken` balance delta (native included).
+- `harvest` with `destToken == address(0)` means two things at once: "pay as is" (no conversion required, so no
+  `MissingSwapData`) and "native" (`amountOut` is the call's native delta). See the backend note below.
 - `compound` with nothing to add is a quiet skip (liquidity 0), not a revert.
 - A staked `harvest` needs `canCompound` for any swap or any `destToken` other than zero or the reward token
   (`CompoundDisabled`); with `!canCompound` the reward is paid as is.
@@ -456,3 +476,8 @@ What changed from the spec while building it (all within §9, or called out as a
   PROTOCOL_FEE here.
 - `DecreaseAndSwap.liquidity` is the clamped amount actually removed (0 for a fees-only collect).
 - A zero claim emits no `TakeFees`.
+- `harvest` / `decreaseAndSwap` with `destToken == address(0)`: the account is paid everything as is (pool tokens,
+  reward), and `amountOut` (also the `Harvest` / `DecreaseAndSwap` event amount) counts only native, so it is usually
+  0 for a non-native pool. When `destToken` is zero, read what was paid from the token transfers, not from `amountOut`.
+- `executeAutomation`'s `action` is a `uint8`; encode `AutoAction` ordinals (0 adjust, 1 exit, 2 compound, 3 harvest).
+  An action the router has not mapped reverts `UnknownSelector()`.
