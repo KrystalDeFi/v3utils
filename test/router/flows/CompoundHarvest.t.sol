@@ -2,6 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {Vm} from "forge-std/Vm.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "v3-periphery/interfaces/INonfungiblePositionManager.sol";
 import {CoreModify} from "../../../src/router/modules/CoreModify.sol";
@@ -69,6 +70,22 @@ contract CompoundHarvestTest is UniV3FlowBase {
         });
     }
 
+    uint256 internal constant SEED_WETH = 3 ether;
+    uint256 internal constant SEED_USDC = 7_000e6;
+
+    /// @dev Puts WETH and USDC on the router that no flow may touch.
+    function _seedRouter() internal {
+        deal(WETH, address(router), SEED_WETH);
+        deal(USDC, address(router), SEED_USDC);
+    }
+
+    function _assertSeedUntouched() internal view {
+        assertEq(_bal(WETH, address(router)), SEED_WETH, "router WETH unchanged");
+        assertEq(_bal(USDC, address(router)), SEED_USDC, "router USDC unchanged");
+        assertEq(IERC20(WETH).allowance(address(router), NFPM), 0, "nfpm allowance");
+        assertEq(IERC20(USDC).allowance(address(router), NFPM), 0, "nfpm allowance");
+    }
+
     function _compound(address who, CompoundParams memory p) internal returns (uint128) {
         vm.prank(who);
         return abi.decode(router.execute(abi.encodeCall(ICoreModify.compound, (p))), (uint128));
@@ -89,6 +106,7 @@ contract CompoundHarvestTest is UniV3FlowBase {
         assertGt(fee1, 0, "fees in USDC");
         uint256 weth0 = _bal(WETH, alice);
         uint256 usdc0 = _bal(USDC, alice);
+        _seedRouter();
 
         vm.recordLogs();
         uint128 added = _compound(alice, _compoundParams(tokenId, new SwapParams[](0)));
@@ -97,7 +115,7 @@ contract CompoundHarvestTest is UniV3FlowBase {
         assertGt(added, 0, "liquidity added");
         assertEq(_liquidityOf(tokenId), liquidity + added, "position grew by the return value");
         assertEq(IERC721(NFPM).ownerOf(tokenId), alice, "NFT back in the wallet");
-        _assertRouterClean(_tokens3(WETH, USDC, address(0)));
+        _assertSeedUntouched();
 
         (IRouterErrors.TakeFeesEventData[] memory fees, uint256[] memory ids, uint256 n) = _takeFeesLogs(logs);
         assertEq(n, 1, "one fee");
@@ -132,14 +150,59 @@ contract CompoundHarvestTest is UniV3FlowBase {
         assertTrue(found, "CompoundFees emitted");
     }
 
-    function test_compound_withSwap_usesAllFees() public {
+    /// @dev An `amountIn == 0` swap of the WETH fees, with WETH and USDC already on the router: only the call's own
+    /// fees are swapped and added (alice's leftover is the net fees less what the NFPM took), the router keeps its seed.
+    function test_compound_withSwap_routerBalancesUntouched() public {
         (uint256 tokenId, uint128 liquidity) = _aliceMints();
         _churn();
-        (uint256 fee0,) = _earned(tokenId);
-        uint256 half = _net10(fee0) / 2;
-        uint128 added = _compound(alice, _compoundParams(tokenId, _swaps1(_step(WETH, USDC, half, half))));
+        (uint256 fee0, uint256 fee1) = _earned(tokenId);
+        uint256 net0 = _net10(fee0);
+        uint256 net1 = _net10(fee1);
+        uint256 weth0 = _bal(WETH, alice);
+        uint256 usdc0 = _bal(USDC, alice);
+        _seedRouter();
+
+        vm.recordLogs();
+        uint128 added = _compound(alice, _compoundParams(tokenId, _swaps1(_step(WETH, USDC, 0, net0 / 2))));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
         assertEq(_liquidityOf(tokenId), liquidity + added);
-        _assertRouterClean(_tokens3(WETH, USDC, address(0)));
+        _assertSeedUntouched();
+        uint256 swapped = _swapOut(logs);
+        // WETH: net fees, half swapped away, rest (less what the NFPM took) back; USDC: net fees + swap output
+        assertLe(_bal(WETH, alice) - weth0, net0 - net0 / 2, "WETH back is within the call's own fees");
+        assertLe(_bal(USDC, alice) - usdc0, net1 + swapped, "USDC back is within the call's own fees");
+        (, uint256 a0, uint256 a1) = _compoundLog(logs);
+        assertEq(_bal(WETH, alice) - weth0, net0 - net0 / 2 - a0, "WETH leftover");
+        assertEq(_bal(USDC, alice) - usdc0, net1 + swapped - a1, "USDC leftover");
+    }
+
+    function _compoundLog(Vm.Log[] memory logs) internal pure returns (uint128 l, uint256 a0, uint256 a1) {
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].topics[0] == CompoundFees.selector) {
+                return abi.decode(logs[i].data, (uint128, uint256, uint256));
+            }
+        }
+        revert("no CompoundFees");
+    }
+
+    /// @dev No fees earned: nothing to add, the call succeeds with liquidity unchanged (an AUTO_COMPOUND bot must not
+    /// fail on a quiet position); a `minLiquidity` above the 0 added still reverts.
+    function test_compound_noFees_noop() public {
+        (uint256 tokenId, uint128 liquidity) = _aliceMints();
+        _seedRouter();
+        uint256 weth0 = _bal(WETH, alice);
+        assertEq(_compound(alice, _compoundParams(tokenId, new SwapParams[](0))), 0, "nothing added");
+        assertEq(_liquidityOf(tokenId), liquidity, "liquidity unchanged");
+        assertEq(IERC721(NFPM).ownerOf(tokenId), alice, "NFT back");
+        assertEq(_bal(WETH, alice), weth0, "nothing paid out");
+        _assertSeedUntouched();
+
+        CompoundParams memory p = _compoundParams(tokenId, new SwapParams[](0));
+        p.increase.minLiquidity = 1;
+        vm.prank(alice);
+        vm.expectRevert(IRouterErrors.LiquiditySlippage.selector);
+        router.execute(abi.encodeCall(ICoreModify.compound, (p)));
     }
 
     function test_compound_minLiquidity_reverts() public {
@@ -168,7 +231,7 @@ contract CompoundHarvestTest is UniV3FlowBase {
         uint256 netWeth = _net10(fee0);
         uint256 weth0 = _bal(WETH, alice);
         uint256 usdc0 = _bal(USDC, alice);
-        deal(USDC, address(router), 7_000e6);
+        _seedRouter();
 
         vm.recordLogs();
         uint256 out = _harvest(alice, _harvestParams(tokenId, USDC, _swaps1(_step(WETH, USDC, 0, netWeth))));
@@ -178,7 +241,7 @@ contract CompoundHarvestTest is UniV3FlowBase {
         assertEq(out, _bal(USDC, alice) - usdc0, "amountOut is the user's delta");
         assertEq(out, _net10(fee1) + _swapOut(logs), "reconciles");
         assertEq(_bal(WETH, alice), weth0, "WETH all swapped");
-        assertEq(_bal(USDC, address(router)), 7_000e6, "router balance untouched");
+        _assertSeedUntouched();
         assertEq(_liquidityOf(tokenId), liquidity, "no liquidity removed");
         assertEq(IERC721(NFPM).ownerOf(tokenId), alice, "NFT back");
         (IRouterErrors.TakeFeesEventData[] memory fees,, uint256 n) = _takeFeesLogs(logs);
@@ -220,6 +283,38 @@ contract CompoundHarvestTest is UniV3FlowBase {
         assertEq(out, 0);
         assertEq(_bal(WETH, alice) - weth0, _net10(fee0));
         assertEq(_bal(USDC, alice) - usdc0, _net10(fee1));
+    }
+
+    /// @dev destToken 0 with swaps ending in a WETH -> native conversion: amountOut is the native the account got.
+    function test_harvest_nativeDest_amountOutIsNativeDelta() public {
+        (uint256 tokenId,) = _aliceMints();
+        _churn();
+        (uint256 fee0,) = _earned(tokenId);
+        uint256 native0 = alice.balance;
+        _seedRouter();
+        vm.deal(address(router), 0.7 ether);
+
+        vm.recordLogs();
+        uint256 out = _harvest(alice, _harvestParams(tokenId, address(0), _swaps1(_convert(WETH, address(0)))));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(out, _net10(fee0), "all net WETH fees unwrapped");
+        assertEq(out, alice.balance - native0, "amountOut is the native delta");
+        assertEq(address(router).balance, 0.7 ether, "router native unchanged");
+        assertEq(_bal(WETH, address(router)), SEED_WETH, "router WETH unchanged");
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].topics[0] != Harvest.selector) continue;
+            (address token, uint256 amount) = abi.decode(logs[i].data, (address, uint256));
+            assertEq(token, address(0));
+            assertEq(amount, out, "event amount");
+        }
+    }
+
+    /// @dev No fees earned: a non-pool destToken needs no swap, so there is nothing to convert and no revert.
+    function test_harvest_destTokenNoSwaps_noFees_succeeds() public {
+        (uint256 tokenId,) = _aliceMints();
+        assertEq(_harvest(alice, _harvestParams(tokenId, ARB, new SwapParams[](0))), 0);
+        assertEq(IERC721(NFPM).ownerOf(tokenId), alice);
     }
 
     function test_harvest_destTokenNoSwaps_reverts() public {

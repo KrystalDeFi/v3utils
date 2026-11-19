@@ -16,9 +16,10 @@ import {IAdapter} from "../interfaces/IAdapter.sol";
 import {CoreBase} from "../base/CoreBase.sol";
 
 /// @notice Flows on an existing position: `decreaseAndSwap` withdraws part or all of it (or only its fees) and swaps
-/// the proceeds, `adjustRange` moves it to a new range. Runs only by DELEGATECALL from the router, for the account
-/// `_account` resolves (the caller, or the order's account under `executeAutomation`). Neither flow takes native, so
-/// neither is payable: value sent with them reverts.
+/// the proceeds, `adjustRange` moves it to a new range, `compound` adds its trading fees back into it and `harvest`
+/// pays them out (optionally swapped to a `destToken`). Runs only by DELEGATECALL from the router, for the account
+/// `_account` resolves (the caller, or the order's account under `executeAutomation`). None of the flows takes native,
+/// so none is payable: value sent with them reverts.
 /// @dev Every flow reads top to bottom in the pipeline order of spec §6.6:
 ///   1. read the position, open the ledger, take the position (wallet or farm, §6.4);
 ///   2. collect the earned fees and take PERFORMANCE_FEE on them; then remove liquidity, collect the principal and
@@ -132,16 +133,18 @@ contract CoreModify is ICoreModify, CoreBase {
         _swaps(l, params.swaps);
         uint256 used0;
         uint256 used1;
-        (liquidity, used0, used1) = abi.decode(
-            _delegate(
-                t.adapter,
-                abi.encodeCall(
-                    IAdapter.increase,
-                    (t.nfpm, t.tokenId, _held(l, t.token0), _held(l, t.token1), params.increase.deadline)
-                )
-            ),
-            (uint128, uint256, uint256)
-        );
+        uint256 held0 = _held(l, t.token0);
+        uint256 held1 = _held(l, t.token1);
+        // a quiet position (no fees) has nothing to add: the pool would revert on zero liquidity
+        if (held0 != 0 || held1 != 0) {
+            (liquidity, used0, used1) = abi.decode(
+                _delegate(
+                    t.adapter,
+                    abi.encodeCall(IAdapter.increase, (t.nfpm, t.tokenId, held0, held1, params.increase.deadline))
+                ),
+                (uint128, uint256, uint256)
+            );
+        }
         if (liquidity < params.increase.minLiquidity) revert LiquiditySlippage();
 
         _putBack(t.nfpm, t.tokenId, t.account, staked);
@@ -162,7 +165,7 @@ contract CoreModify is ICoreModify, CoreBase {
                 && (net[0] != 0 || net[1] != 0) && params.swaps.length == 0
         ) revert MissingSwapData();
         _swaps(l, params.swaps);
-        if (params.destToken != address(0)) amountOut = _held(l, params.destToken);
+        amountOut = _held(l, params.destToken);
 
         _putBack(t.nfpm, t.tokenId, t.account, staked);
         _close(l, t.account);

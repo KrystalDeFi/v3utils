@@ -4,9 +4,10 @@ pragma solidity ^0.8.0;
 import {DecreaseAndSwapParams, AdjustRangeParams, CompoundParams, HarvestParams} from "../RouterTypes.sol";
 
 /// @notice The CoreModify module's flows on an existing position: withdraw (partly or fully) and swap the proceeds,
-/// or move the liquidity to a new range. Users reach them through
-/// `V3UtilsRouter.execute(abi.encodeCall(ICoreModify.<flow>, (params)))`; the operator runs the same functions
-/// through `executeAutomation` (AUTO_EXIT, AUTO_ADJUST), so each takes exactly one params struct and is not payable.
+/// move the liquidity to a new range, compound the trading fees into the position, or harvest them. Users reach them
+/// through `V3UtilsRouter.execute(abi.encodeCall(ICoreModify.<flow>, (params)))`; the operator runs the same functions
+/// through `executeAutomation` (AUTO_EXIT, AUTO_ADJUST, AUTO_COMPOUND, AUTO_HARVEST), so each takes exactly one params
+/// struct and is not payable.
 interface ICoreModify {
     /// @notice `liquidity` removed from the position (0 for a fees-only collect); `amount` of `token` (the
     /// `destToken`) went to the account.
@@ -46,7 +47,8 @@ interface ICoreModify {
     function adjustRange(AdjustRangeParams calldata params) external returns (uint256 newTokenId, uint128 liquidity);
 
     /// @notice Collects the position's trading fees, takes PERFORMANCE_FEE, runs `swaps`, and adds everything the call
-    /// holds of the pool's tokens to the same position (`increase.minLiquidity` checked); leftovers go to the account.
+    /// holds of the pool's tokens to the same position (`increase.minLiquidity` checked); leftovers go to the account. A
+    /// position with no fees to add is left as it is (liquidity 0 returned).
     function compound(CompoundParams calldata params) external returns (uint128 liquidity);
 
     /// @notice Collects the position's trading fees, takes PERFORMANCE_FEE, runs `swaps` and pays the account. No
