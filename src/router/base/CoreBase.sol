@@ -116,6 +116,15 @@ abstract contract CoreBase is IRouterErrors {
         }
     }
 
+    /// @dev Sends `to` `amount` of `token` out of what the call holds, before `_close` (e.g. fees returned ahead of
+    /// the swaps). More than the call holds reverts `AmountError()`, so it can never spend the router's own balance;
+    /// 0 sends nothing.
+    function _pay(Ledger memory l, address token, address to, uint256 amount) internal {
+        if (amount == 0) return;
+        if (amount > _held(l, token)) revert AmountError();
+        _send(token, to, amount);
+    }
+
     /// @dev On a WRAPPED chain, unwraps what the call holds of `weth` (nothing if `weth` is untracked). Native is
     /// tracked whenever `msg.value != 0`, so the unwrapped amount is part of the call's held native.
     function _unwrapHeldWeth(Ledger memory l) private {
