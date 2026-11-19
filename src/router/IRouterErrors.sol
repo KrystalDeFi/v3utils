@@ -67,8 +67,17 @@ interface IRouterErrors {
     /// @dev A decrease whose principal, as it actually reached the router, is below the caller's `amount0Min` /
     /// `amount1Min` (the NFPM checks only the gross amounts; a token that skims on transfer out delivers less).
     error SlippageError();
-    /// @dev A harvest whose `destToken` is neither zero nor a pool token, with fees to convert and no `swaps`.
+    /// @dev A harvest with something to convert to `destToken` and no `swaps`: net trading fees when `destToken` is
+    /// neither zero nor a pool token, or net farm rewards when it is neither zero nor the reward token.
     error MissingSwapData();
+    /// @dev A compound of a staked position whose farm cannot compound its rewards (e.g. xAERO off Base).
+    error CompoundDisabled();
+
+    // ---- farms
+    /// @dev No pool for the key, or the pool's gauge is not one of the farm's gauge factory for this NFPM.
+    error InvalidGauge();
+    /// @dev Staking into a gauge the voter no longer runs (killed or never activated).
+    error GaugeNotLive();
 
     /// @dev v4utils' event payload, so the backend's `TakeFees` decoding applies unchanged.
     struct TakeFeesEventData {

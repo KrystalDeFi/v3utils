@@ -19,6 +19,11 @@ interface IFarm {
     /// @notice Whether staked positions still earn trading fees (false for Aero gauges, which take them).
     function earnsTradingFees() external payable returns (bool);
 
+    /// @notice Whether `compound` may add this farm's rewards back into a staked position (false where the reward
+    /// cannot be swapped into the pool, e.g. xAERO off Base).
+    function canCompound() external payable returns (bool);
+
+    /// @notice The token `claim` pays, and an unstake may pay (swept to the account by the flow's ledger).
     function rewardToken() external payable returns (address);
 
     /// @notice Reverts unless `key`'s pool on `nfpm` has a live farm.

@@ -337,29 +337,55 @@ abstract contract CoreBase is IRouterErrors {
 
     // ---------------------------------------------------------------- custody
 
-    /// @dev Brings `account`'s position `tokenId` into the router and returns whether it was staked. A position in
-    /// `account`'s wallet moves by `transferFrom` (needs the owner's NFPM approval to the router). Otherwise the NFPM's
-    /// farm must report it staked by `account` and allow unstaking (else `FarmUnsupported()`), and unstakes it into
-    /// the router. Anything else reverts `NotPositionHolder()`, before anything moves.
+    /// @dev Where `account` holds `tokenId`, checked before anything moves: zero when the NFT is in `account`'s wallet,
+    /// else the NFPM's farm, which must report it staked by `account` (else `NotPositionHolder()`).
     /// @dev The wallet check runs first (as in the router's holder check), so a farm that reverts never blocks a
     /// wallet holder; a staked position is held by its gauge, so the two cases never overlap.
-    function _take(address nfpm, uint256 tokenId, address account) internal returns (bool staked) {
-        if (IERC721(nfpm).ownerOf(tokenId) == account) {
-            IERC721(nfpm).transferFrom(account, address(this), tokenId);
-            return false;
+    function _stakedIn(address nfpm, uint256 tokenId, address account) internal returns (address farm) {
+        if (IERC721(nfpm).ownerOf(tokenId) == account) return address(0);
+        farm = _farm(nfpm);
+        if (farm == address(0) || !_farmFlag(farm, abi.encodeCall(IFarm.isStakedBy, (nfpm, tokenId, account)))) {
+            revert NotPositionHolder();
         }
-        address farm = _farm(nfpm);
-        if (
-            farm == address(0)
-                || !abi.decode(_delegate(farm, abi.encodeCall(IFarm.isStakedBy, (nfpm, tokenId, account))), (bool))
-        ) revert NotPositionHolder();
-        if (!abi.decode(_delegate(farm, abi.encodeCall(IFarm.canUnstake, ())), (bool))) revert FarmUnsupported();
-        _delegate(farm, abi.encodeCall(IFarm.unstake, (nfpm, tokenId, account)));
-        return true;
+    }
+
+    /// @dev `_stakedIn`, also requiring a staked position's farm to let the router unstake it (`FarmUnsupported()`).
+    /// Returns the farm (zero for a wallet position) for `_bring` and `_putBack`; nothing has moved yet, so a flow
+    /// calls it before `_open` to put the farm's reward token among its candidates.
+    function _locate(address nfpm, uint256 tokenId, address account) internal returns (address farm) {
+        farm = _stakedIn(nfpm, tokenId, account);
+        if (farm != address(0) && !_farmFlag(farm, abi.encodeCall(IFarm.canUnstake, ()))) revert FarmUnsupported();
+    }
+
+    /// @dev Brings the position into the router from where `_locate` found it: `transferFrom` out of the wallet (needs
+    /// the owner's NFPM approval to the router) or `farm.unstake` (which may also pay the farm's reward token).
+    function _bring(address nfpm, uint256 tokenId, address account, address farm) internal {
+        if (farm == address(0)) IERC721(nfpm).transferFrom(account, address(this), tokenId);
+        else _delegate(farm, abi.encodeCall(IFarm.unstake, (nfpm, tokenId, account)));
+    }
+
+    /// @dev `_locate` then `_bring`; returns whether the position was staked.
+    function _take(address nfpm, uint256 tokenId, address account) internal returns (bool staked) {
+        address farm = _locate(nfpm, tokenId, account);
+        _bring(nfpm, tokenId, account, farm);
+        return farm != address(0);
+    }
+
+    /// @dev `farm`'s reward token, or `none` when `farm` is zero (a ledger candidate that is already tracked, so a
+    /// wallet position's flow tracks nothing extra).
+    function _rewardOf(address farm, address none) internal returns (address) {
+        if (farm == address(0)) return none;
+        return abi.decode(_delegate(farm, abi.encodeCall(IFarm.rewardToken, ())), (address));
+    }
+
+    /// @dev A farm call that answers a bool (`isStakedBy` and the capability flags).
+    function _farmFlag(address farm, bytes memory data) internal returns (bool) {
+        return abi.decode(_delegate(farm, data), (bool));
     }
 
     /// @dev Returns the router-held position where `_take` found it: restaked for `account` through the farm when
-    /// `staked` (`FarmUnsupported()` if the NFPM has no farm), else to `account`'s wallet.
+    /// `staked` (`FarmUnsupported()` if the NFPM has no farm; the farm checks its pool is still live), else to
+    /// `account`'s wallet.
     function _putBack(address nfpm, uint256 tokenId, address account, bool staked) internal {
         if (staked) {
             address farm = _farm(nfpm);

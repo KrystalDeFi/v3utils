@@ -39,6 +39,11 @@ contract MockStakeFarm {
         if (!live) revert NoLiveFarm();
     }
 
+    /// @dev A stake mint tracks the farm's reward token in its ledger; ARB on Arbitrum stands in for it.
+    function rewardToken() external payable returns (address) {
+        return 0x912CE59144191C1204E64559FE8253a0e49E6548;
+    }
+
     function stake(address nfpm, uint256 tokenId, address account) external payable {
         IERC721(nfpm).approve(address(gauge), tokenId);
         gauge.deposit(nfpm, tokenId, account);

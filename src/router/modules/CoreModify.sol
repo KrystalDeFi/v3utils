@@ -13,6 +13,7 @@ import {
 } from "../RouterTypes.sol";
 import {ICoreModify} from "../interfaces/ICoreModify.sol";
 import {IAdapter} from "../interfaces/IAdapter.sol";
+import {IFarm} from "../interfaces/IFarm.sol";
 import {CoreBase} from "../base/CoreBase.sol";
 
 /// @notice Flows on an existing position: `decreaseAndSwap` withdraws part or all of it (or only its fees) and swaps
@@ -20,9 +21,16 @@ import {CoreBase} from "../base/CoreBase.sol";
 /// pays them out (optionally swapped to a `destToken`). Runs only by DELEGATECALL from the router, for the account
 /// `_account` resolves (the caller, or the order's account under `executeAutomation`). None of the flows takes native,
 /// so none is payable: value sent with them reverts.
+/// A staked position (§6.4, §6.7) is unstaked for the flow and restaked after it, except: a withdraw that empties it
+/// ends in the wallet; `adjustRange` restakes the new NFT and sends the old, empty one to the wallet; `harvest` claims
+/// the farm's rewards and leaves the position staked; `compound` claims the rewards, unstakes, adds and restakes. The
+/// farm's reward token is always in the ledger, so emissions an unstake pays the router reach the account.
 /// @dev Every flow reads top to bottom in the pipeline order of spec §6.6:
-///   1. read the position, open the ledger, take the position (wallet or farm, §6.4);
-///   2. collect the earned fees and take PERFORMANCE_FEE on them; then remove liquidity, collect the principal and
+///   1. read the position and locate it (`NotPositionHolder()` before anything moves), open the ledger, take the
+///      position (wallet or farm, §6.4); a staked compound/harvest claims the farm's rewards first and takes
+///      PERFORMANCE_FEE on them;
+///   2. collect the earned fees and take PERFORMANCE_FEE on them (skipped for a staked position whose farm takes its
+///      trading fees, `earnsTradingFees == false`); then remove liquidity, collect the principal and
 ///      take PROTOCOL_FEE then GAS_FEE on it. Earned fees and principal are told apart by collecting twice (fees
 ///      first), as v4utils does, and each amount is the call's balance delta, never an NFPM-reported figure;
 ///   3. run the swaps;
@@ -60,8 +68,9 @@ contract CoreModify is ICoreModify, CoreBase {
         returns (uint256 amountOut)
     {
         (Target memory t, Position memory pos) = _target(params.nfpm, params.tokenId);
-        Ledger memory l = _open(_candidates(params.swaps, t.token0, t.token1, params.destToken));
-        bool staked = _take(t.nfpm, t.tokenId, t.account);
+        address farm = _locate(t.nfpm, t.tokenId, t.account);
+        Ledger memory l = _open(_candidates(params.swaps, t, params.destToken, _rewardOf(farm, t.token0)));
+        _bring(t.nfpm, t.tokenId, t.account, farm);
 
         uint128 liquidity = params.decrease.liquidity;
         _collectFees(l, t, params.performanceFeeX64, liquidity == 0 ? params.gasFeeX64 : 0);
@@ -82,7 +91,7 @@ contract CoreModify is ICoreModify, CoreBase {
         // GHSA-m36p (v4utils): what the account receives of destToken is the call's delta, read before the sweep
         amountOut = _held(l, params.destToken);
 
-        _putBack(t.nfpm, t.tokenId, t.account, staked && liquidity < pos.liquidity);
+        _putBack(t.nfpm, t.tokenId, t.account, farm != address(0) && liquidity < pos.liquidity);
         _close(l, t.account);
 
         emit DecreaseAndSwap(t.nfpm, t.tokenId, liquidity, params.destToken, amountOut);
@@ -98,8 +107,9 @@ contract CoreModify is ICoreModify, CoreBase {
         returns (uint256 newTokenId, uint128 liquidity)
     {
         (Target memory t, Position memory pos) = _target(params.nfpm, params.tokenId);
-        Ledger memory l = _open(_candidates(params.swaps, t.token0, t.token1, t.token0));
-        bool staked = _take(t.nfpm, t.tokenId, t.account);
+        address farm = _locate(t.nfpm, t.tokenId, t.account);
+        Ledger memory l = _open(_candidates(params.swaps, t, t.token0, _rewardOf(farm, t.token0)));
+        _bring(t.nfpm, t.tokenId, t.account, farm);
 
         uint256[] memory fees = _collectFees(l, t, params.performanceFeeX64, 0);
         if (!params.compoundFees) {
@@ -113,7 +123,7 @@ contract CoreModify is ICoreModify, CoreBase {
         Minted memory m = _mint(l, t, pos, params.mint);
         if (m.liquidity < params.mint.minLiquidity) revert LiquiditySlippage();
 
-        _putBack(t.nfpm, m.tokenId, t.account, staked);
+        _putBack(t.nfpm, m.tokenId, t.account, farm != address(0));
         _putBack(t.nfpm, t.tokenId, t.account, false);
         _close(l, t.account);
 
@@ -122,55 +132,55 @@ contract CoreModify is ICoreModify, CoreBase {
     }
 
     /// @inheritdoc ICoreModify
-    /// @dev Unstaked trading fees. The increase takes what the call holds of the pool's tokens (the net fees after the
-    /// swaps), so the router's own balances are never added.
+    /// @dev A wallet position compounds its trading fees. A staked one compounds its farm rewards: the farm must allow
+    /// it (`CompoundDisabled()`, before anything moves), claim them (PERFORMANCE_FEE on everything the farm paid), and
+    /// the position is unstaked, increased and restaked; its trading fees are added too only if the farm lets a staked
+    /// position earn them. The increase takes what the call holds of the pool's tokens after the swaps, so the
+    /// router's own balances are never added.
     function compound(CompoundParams calldata params) external onlyDelegateCall returns (uint128 liquidity) {
         (Target memory t,) = _target(params.nfpm, params.tokenId);
-        Ledger memory l = _open(_candidates(params.swaps, t.token0, t.token1, t.token0));
-        bool staked = _take(t.nfpm, t.tokenId, t.account);
+        address farm = _locate(t.nfpm, t.tokenId, t.account);
+        if (farm != address(0) && !_farmFlag(farm, abi.encodeCall(IFarm.canCompound, ()))) revert CompoundDisabled();
+        address reward = _rewardOf(farm, t.token0);
+        Ledger memory l = _open(_candidates(params.swaps, t, t.token0, reward));
 
-        _collectFees(l, t, params.performanceFeeX64, 0);
+        _earnings(l, t, farm, reward, params.performanceFeeX64, true);
         _swaps(l, params.swaps);
         uint256 used0;
         uint256 used1;
-        uint256 held0 = _held(l, t.token0);
-        uint256 held1 = _held(l, t.token1);
-        // a quiet position (no fees) has nothing to add: the pool would revert on zero liquidity
-        if (held0 != 0 || held1 != 0) {
-            (liquidity, used0, used1) = abi.decode(
-                _delegate(
-                    t.adapter,
-                    abi.encodeCall(IAdapter.increase, (t.nfpm, t.tokenId, held0, held1, params.increase.deadline))
-                ),
-                (uint128, uint256, uint256)
-            );
-        }
+        (liquidity, used0, used1) = _addHeld(l, t, params.increase.deadline);
         if (liquidity < params.increase.minLiquidity) revert LiquiditySlippage();
 
-        _putBack(t.nfpm, t.tokenId, t.account, staked);
+        _putBack(t.nfpm, t.tokenId, t.account, farm != address(0));
         _close(l, t.account);
 
         emit CompoundFees(t.nfpm, t.tokenId, liquidity, used0, used1);
     }
 
     /// @inheritdoc ICoreModify
+    /// @dev A staked position claims its farm rewards (PERFORMANCE_FEE on them) and stays staked; its NFT moves only
+    /// when the farm lets it earn trading fees too (unstake, collect, restake).
     function harvest(HarvestParams calldata params) external onlyDelegateCall returns (uint256 amountOut) {
         (Target memory t,) = _target(params.nfpm, params.tokenId);
-        Ledger memory l = _open(_candidates(params.swaps, t.token0, t.token1, params.destToken));
-        bool staked = _take(t.nfpm, t.tokenId, t.account);
+        address farm = _locate(t.nfpm, t.tokenId, t.account);
+        address reward = _rewardOf(farm, t.token0);
+        Ledger memory l = _open(_candidates(params.swaps, t, params.destToken, reward));
 
-        uint256[] memory net = _collectFees(l, t, params.performanceFeeX64, 0);
-        if (
-            params.destToken != address(0) && params.destToken != t.token0 && params.destToken != t.token1
-                && (net[0] != 0 || net[1] != 0) && params.swaps.length == 0
-        ) revert MissingSwapData();
+        address dest = params.destToken;
+        (uint256 rewardNet, uint256[] memory feesNet, bool earnsFees) =
+            _earnings(l, t, farm, reward, params.performanceFeeX64, false);
+        // non-zero when something earned is not already `destToken` (only tested against 0, never summed)
+        uint256 toConvert;
+        if (dest != reward) toConvert = rewardNet;
+        if (dest != t.token0 && dest != t.token1) toConvert |= feesNet[0] | feesNet[1];
+        if (dest != address(0) && toConvert != 0 && params.swaps.length == 0) revert MissingSwapData();
         _swaps(l, params.swaps);
-        amountOut = _held(l, params.destToken);
+        amountOut = _held(l, dest);
 
-        _putBack(t.nfpm, t.tokenId, t.account, staked);
+        if (earnsFees) _putBack(t.nfpm, t.tokenId, t.account, farm != address(0));
         _close(l, t.account);
 
-        emit Harvest(t.nfpm, t.tokenId, params.destToken, amountOut);
+        emit Harvest(t.nfpm, t.tokenId, dest, amountOut);
     }
 
     // ---------------------------------------------------------------- steps
@@ -187,21 +197,70 @@ contract CoreModify is ICoreModify, CoreBase {
         t.token1 = pos.key.token1;
     }
 
-    /// @dev Every token the flow can touch: both legs of every swap, the pool's tokens, and `extra` (the destToken).
-    function _candidates(SwapParams[] calldata swaps, address token0, address token1, address extra)
+    /// @dev Every token the flow can touch: both legs of every swap, the pool's tokens, `extra` (the destToken) and
+    /// `reward` (the farm's reward token, or a pool token for a wallet position).
+    function _candidates(SwapParams[] calldata swaps, Target memory t, address extra, address reward)
         private
         pure
         returns (address[] memory c)
     {
         uint256 n = 2 * swaps.length;
-        c = new address[](n + 3);
+        c = new address[](n + 4);
         for (uint256 i; i < swaps.length; i++) {
             c[2 * i] = swaps[i].tokenIn;
             c[2 * i + 1] = swaps[i].tokenOut;
         }
-        c[n] = token0;
-        c[n + 1] = token1;
+        c[n] = t.token0;
+        c[n + 1] = t.token1;
         c[n + 2] = extra;
+        c[n + 3] = reward;
+    }
+
+    /// @dev What compound and harvest gather, net of PERFORMANCE_FEE: a staked position's farm rewards (`rewardNet`;
+    /// the position is unstaked into the router with `take`, or when the farm lets it earn trading fees), then its
+    /// trading fees (`feesNet`; zeros, and the NFT not taken, when `earnsFees` is false). A wallet position is taken
+    /// and only collects its trading fees.
+    function _earnings(Ledger memory l, Target memory t, address farm, address reward, uint64 feeX64, bool take)
+        private
+        returns (uint256 rewardNet, uint256[] memory feesNet, bool earnsFees)
+    {
+        earnsFees = farm == address(0) || _farmFlag(farm, abi.encodeCall(IFarm.earnsTradingFees, ()));
+        if (farm != address(0)) rewardNet = _claimRewards(l, t, farm, reward, feeX64, take || earnsFees);
+        else _bring(t.nfpm, t.tokenId, t.account, address(0));
+        feesNet = earnsFees ? _collectFees(l, t, feeX64, 0) : new uint256[](2);
+    }
+
+    /// @dev Adds everything the call holds of the pool's tokens to the router-held position; a quiet position (nothing
+    /// held) is left as it is, since the pool would revert on zero liquidity.
+    function _addHeld(Ledger memory l, Target memory t, uint256 deadline)
+        private
+        returns (uint128 liquidity, uint256 used0, uint256 used1)
+    {
+        uint256 held0 = _held(l, t.token0);
+        uint256 held1 = _held(l, t.token1);
+        if (held0 == 0 && held1 == 0) return (0, 0, 0);
+        (liquidity, used0, used1) = abi.decode(
+            _delegate(t.adapter, abi.encodeCall(IAdapter.increase, (t.nfpm, t.tokenId, held0, held1, deadline))),
+            (uint128, uint256, uint256)
+        );
+    }
+
+    /// @dev Claims the staked position's farm rewards to the router (the farm requires the account's claim approval)
+    /// and, with `unstake`, unstakes it into the router right after; then takes PERFORMANCE_FEE on everything the call
+    /// holds of `reward`, i.e. what the farm paid, claim and unstake together. The flow has taken no inputs, so nothing
+    /// else of `reward` can be held yet. Returns the net reward.
+    function _claimRewards(Ledger memory l, Target memory t, address farm, address reward, uint64 feeX64, bool unstake)
+        private
+        returns (uint256 net)
+    {
+        _delegate(farm, abi.encodeCall(IFarm.claim, (t.nfpm, t.tokenId, t.account)));
+        if (unstake) _bring(t.nfpm, t.tokenId, t.account, farm);
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = reward;
+        amounts[0] = _held(l, reward);
+        net = amounts[0]
+            - _takeFees(l, t.nfpm, t.tokenId, t.account, tokens, amounts, feeX64, FeeType.PERFORMANCE_FEE)[0];
     }
 
     /// @dev Collects what the position owes (its earned fees, before any decrease) and takes PERFORMANCE_FEE, then

@@ -13,7 +13,7 @@ abstract contract RouterTestBase is Test {
     // ---- pinned fork blocks
     uint256 internal constant ARBITRUM_BLOCK = 171544977;
     uint256 internal constant BASE_BLOCK = 56384489;
-    uint256 internal constant OP_BLOCK = 145000000;
+    uint256 internal constant OP_BLOCK = 159434366;
     uint256 internal constant HYPEREVM_BLOCK = 51000000;
     uint256 internal constant AVALANCHE_BLOCK = 100000000;
 

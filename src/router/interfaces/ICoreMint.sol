@@ -25,6 +25,7 @@ interface ICoreMint {
         returns (uint256 tokenId, uint128 liquidity);
 
     /// @notice Same as `swapAndMint`, adding to the caller's existing position `tokenId` instead. The position is
-    /// taken from the caller (NFPM approval to the router needed) and given back.
+    /// taken from the caller (NFPM approval to the router needed) and given back; a staked one is unstaked and restaked
+    /// (farm approvals needed), or increased in place when the farm can add to a staked position.
     function swapAndIncrease(SwapAndIncreaseParams calldata params) external payable returns (uint128 liquidity);
 }
