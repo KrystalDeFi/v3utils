@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity ^0.8.0;
+
+import {FeeType, InputTokenParams} from "./RouterTypes.sol";
+
+/// @notice Errors shared by the router and the code it delegatecalls (so a module's revert decodes against one ABI).
+interface IRouterErrors {
+    // ---- initialize and config
+    /// @dev `initialize` from anyone but the deploying tx.origin.
+    error NotInitializer();
+    error AlreadyInitialized();
+    error ZeroAddress();
+    /// @dev A native mode other than WRAPPED (0) / ENSHRINED (1), or an ENSHRINED token with more than 18 decimals.
+    error InvalidNativeConfig();
+    /// @dev A non-zero module, adapter or farm with no code.
+    error InvalidTarget();
+    /// @dev A frozen setter after `lock()`, or a fee cap raised after it.
+    error Locked();
+
+    // ---- dispatch
+    /// @dev No module registered for the selector.
+    error UnknownSelector();
+    /// @dev No adapter registered for the NFPM.
+    error UnsupportedNfpm();
+    /// @dev The account neither holds the NFT nor has it staked in the NFPM's farm.
+    error NotPositionHolder();
+
+    // ---- orders
+    error WrongChainId();
+    error WrongPositionManager();
+    error InvalidSignature();
+    error OrderCancelled();
+
+    // ---- receiving
+    error UnexpectedNft();
+    error UnexpectedNative();
+    error NativeTransferFailed();
+
+    // ---- core (CoreBase: ledger, inputs, fees, swaps, custody)
+    /// @dev A module, adapter or farm called directly instead of by DELEGATECALL from the router.
+    error NotDelegateCall();
+    /// @dev A token the call's ledger does not track.
+    error NotTracked();
+    /// @dev A ledger candidate that is a registered NFPM (it answers the ERC20 `approve` selector).
+    error InvalidToken();
+    /// @dev An input pull credited the router a different amount than declared (fee-on-transfer, surcharge).
+    error TransferError();
+    /// @dev `msg.value` does not equal the native inputs, or a swap asks for more than the call holds.
+    error AmountError();
+    /// @dev A token twice in the inputs, or a swap with `tokenIn == tokenOut`.
+    error SameToken();
+    /// @dev A fee above its type's cap.
+    error TooMuchFee();
+    /// @dev The swap router has no code (unset, an EOA, or code since removed): a low-level call to it would succeed
+    /// without swapping, sending native away and passing a 0 `amountOutMin`.
+    error InvalidSwapRouter();
+    error SwapFailed(bytes swapData, uint256 index);
+    error SwapSlippage();
+    /// @dev A non-zero approval the token refused.
+    error ApproveFailed();
+    /// @dev The position is staked in a farm that does not let the router unstake it.
+    error FarmUnsupported();
+    /// @dev Under `executeAutomation`, flow params that name a position other than the recorded target.
+    error NotAutomation();
+
+    // ---- flows
+    /// @dev A mint or increase that added less liquidity than the caller's `minLiquidity`.
+    error LiquiditySlippage();
+    /// @dev A decrease whose principal, as it actually reached the router, is below the caller's `amount0Min` /
+    /// `amount1Min` (the NFPM checks only the gross amounts; a token that skims on transfer out delivers less).
+    error SlippageError();
+    /// @dev A harvest with something to convert to `destToken` and no `swaps`: net trading fees when `destToken` is
+    /// neither zero nor a pool token, or net farm rewards when it is neither zero nor the reward token.
+    error MissingSwapData();
+    /// @dev A compound of a staked position whose farm cannot compound its rewards (e.g. xAERO off Base).
+    error CompoundDisabled();
+
+    // ---- farms
+    /// @dev No pool for the key, or the pool's gauge is not one of the farm's gauge factory for this NFPM.
+    error InvalidGauge();
+    /// @dev Staking into a gauge the voter no longer runs (killed or never activated).
+    error GaugeNotLive();
+
+    /// @dev v4utils' event payload, so the backend's `TakeFees` decoding applies unchanged.
+    struct TakeFeesEventData {
+        InputTokenParams[] feeTokens;
+        uint64 feeX64;
+        FeeType feeType;
+    }
+
+    /// @notice Fees taken from a flow; `nfpm` is v4utils' `posm`.
+    event TakeFees(address indexed nfpm, uint256 indexed tokenId, address indexed userAddress, TakeFeesEventData data);
+    /// @notice One swap step, with the balance deltas it produced (unit-converted amounts for native<->weth).
+    event Swap(address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut);
+}
