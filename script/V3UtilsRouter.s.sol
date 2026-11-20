@@ -51,6 +51,7 @@ contract V3UtilsRouterScript is Script {
         address operator = _required("OPERATOR");
         address withdrawer = _required("WITHDRAWER");
         address swapRouter = _required("SWAP_ROUTER");
+        require(swapRouter.code.length > 0, "SWAP_ROUTER has no code on this chain");
         address feeTaker = _required("FEE_TAKER");
         address weth = _required("NATIVE_WETH");
         uint8 nativeMode = uint8(vm.envUint("NATIVE_MODE"));

@@ -88,6 +88,7 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
         _grantRole(OPERATOR_ROLE, operator);
         _grantRole(WITHDRAWER_ROLE, withdrawer);
         _setNativeConfig(weth_, nativeMode_);
+        _checkSwapRouter(swapRouter_);
         RouterStorage.Layout storage s = RouterStorage.layout();
         s.swapRouter = swapRouter_;
         s.feeTaker = feeTaker_;
@@ -191,8 +192,10 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
     // ---------------------------------------------------------------- config
 
     /// @dev Frozen by lock: swaps run `swapRouter.call(swapData)` as the router, which holds users' approvals.
+    /// `address(0)` turns swaps off; any other address needs code.
     function setSwapRouter(address swapRouter_) external onlyRole(ADMIN_ROLE) {
         if (RouterStorage.layout().locked) revert Locked();
+        _checkSwapRouter(swapRouter_);
         RouterStorage.layout().swapRouter = swapRouter_;
         emit SwapRouterSet(swapRouter_);
     }
@@ -360,6 +363,11 @@ contract V3UtilsRouter is AccessControl, Pausable, ReentrancyGuard, IERC721Recei
         s.nativeMode = nativeMode_;
         s.nativeScale = scale;
         emit NativeConfigSet(weth_, nativeMode_, scale);
+    }
+
+    /// @dev `address(0)` (swaps off) or an address with code. Swaps re-check for code, since this can change later.
+    function _checkSwapRouter(address swapRouter_) private view {
+        if (swapRouter_ != address(0) && swapRouter_.code.length == 0) revert InvalidTarget();
     }
 
     /// @dev Non-zero targets need code; any target is refused after lock.

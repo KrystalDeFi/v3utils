@@ -567,11 +567,46 @@ contract CoreBaseTest is Test {
         vm.prank(admin);
         router.setSwapRouter(address(0));
         vm.prank(alice);
-        vm.expectRevert(IRouterErrors.ZeroSwapRouter.selector);
+        vm.expectRevert(IRouterErrors.InvalidSwapRouter.selector);
         router.execute(
             abi.encodeCall(
                 CoreHarness.flow,
                 (candidates, _inputs(address(tokenA), 100), _swaps(_step(address(tokenA), 0, address(tokenB), 0, 5)))
+            )
+        );
+    }
+
+    /// PR #65 review: a swap router that loses its code (an EIP-7702 account dropping its delegation) is refused at
+    /// swap time. A bare call to it would succeed, keep native-input value and pass a 0 `amountOutMin`.
+    function test_swaps_codelessSwapRouter_reverts() public {
+        vm.etch(address(swapper), "");
+
+        vm.prank(alice);
+        vm.expectRevert(IRouterErrors.InvalidSwapRouter.selector);
+        router.execute{value: 1 ether}(
+            abi.encodeCall(
+                CoreHarness.flow,
+                (
+                    _addrs(address(0), address(tokenB)),
+                    _inputs(address(0), 1 ether),
+                    _swaps(_step(address(0), 1 ether, address(tokenB), 0, 0))
+                )
+            )
+        );
+        assertEq(alice.balance, 10 ether);
+        assertEq(address(swapper).balance, 0);
+
+        _approve(tokenA, alice, 100);
+        vm.prank(alice);
+        vm.expectRevert(IRouterErrors.InvalidSwapRouter.selector);
+        router.execute(
+            abi.encodeCall(
+                CoreHarness.flow,
+                (
+                    _addrs(address(tokenA), address(tokenB)),
+                    _inputs(address(tokenA), 100),
+                    _swaps(_step(address(tokenA), 100, address(tokenB), 0, 0))
+                )
             )
         );
     }

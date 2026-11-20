@@ -296,9 +296,10 @@ abstract contract CoreBase is IRouterErrors {
             return (amountIn, NativeCurrency.toNativeUnits(weth, enshrined, amountIn));
         }
         if (swapData.length == 0) return (0, 0);
-        // a low-level call to a codeless address succeeds, which would burn native and pass a 0 amountOutMin
+        // a low-level call to a codeless address succeeds, which would burn native and pass a 0 amountOutMin; checked
+        // here, not only when set, because an EIP-7702 account can drop its code later
         address swapRouter = s.swapRouter;
-        if (swapRouter == address(0)) revert ZeroSwapRouter();
+        if (swapRouter.code.length == 0) revert InvalidSwapRouter();
         inDelta = _balanceOf(tokenIn); // before
         outDelta = _balanceOf(tokenOut); // before
         _callSwapRouter(swapRouter, tokenIn, amountIn, swapData, index);

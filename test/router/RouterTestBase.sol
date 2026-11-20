@@ -61,6 +61,7 @@ abstract contract RouterTestBase is Test {
     function _deployRouter(address weth_) internal returns (V3UtilsRouter r) {
         vm.prank(routerDeployer, routerDeployer);
         r = new V3UtilsRouter();
+        vm.etch(routerSwapRouter, hex"00"); // a non-zero swap router needs code; flows set the real one
         vm.prank(routerDeployer, routerDeployer);
         r.initialize(routerAdmin, routerOperator, routerWithdrawer, routerSwapRouter, routerFeeTaker, weth_, 0);
         router = r;

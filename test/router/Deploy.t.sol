@@ -23,7 +23,9 @@ contract DeployTest is RouterTestBase {
         vm.setEnv("ADMIN", vm.toString(makeAddr("dpAdmin")));
         vm.setEnv("OPERATOR", vm.toString(makeAddr("dpOperator")));
         vm.setEnv("WITHDRAWER", vm.toString(makeAddr("dpWithdrawer")));
-        vm.setEnv("SWAP_ROUTER", vm.toString(makeAddr("dpSwapRouter")));
+        address swapRouter = makeAddr("dpSwapRouter");
+        vm.etch(swapRouter, hex"00"); // the router refuses a codeless swap router
+        vm.setEnv("SWAP_ROUTER", vm.toString(swapRouter));
         vm.setEnv("FEE_TAKER", vm.toString(makeAddr("dpFeeTaker")));
         vm.setEnv("NATIVE_WETH", vm.toString(WETH));
         vm.setEnv("NATIVE_MODE", "0");

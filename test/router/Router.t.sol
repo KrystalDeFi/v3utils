@@ -62,6 +62,7 @@ contract RouterTest is Test {
     // ------------------------------------------------------------------ helpers
 
     function _deploy() internal returns (V3UtilsRouter r) {
+        vm.etch(swapRouter, hex"00"); // a non-zero swap router needs code
         vm.prank(deployer, deployer);
         r = new V3UtilsRouter();
     }
@@ -184,6 +185,29 @@ contract RouterTest is Test {
         e.initialize(admin, operator, withdrawer, swapRouter, feeTaker, token6, 1);
         assertEq(e.nativeMode(), 1);
         assertEq(e.nativeScale(), 1e12);
+    }
+
+    /// A codeless swap router would take native-input swaps' value and pass a 0 `amountOutMin` (PR #65 review).
+    function test_swapRouter_requiresCodeOrZero() public {
+        address eoa = makeAddr("routerEoaSwapRouter");
+
+        V3UtilsRouter r = _deploy();
+        vm.startPrank(deployer, deployer);
+        vm.expectRevert(IRouterErrors.InvalidTarget.selector);
+        r.initialize(admin, operator, withdrawer, eoa, feeTaker, weth, 0);
+        r.initialize(admin, operator, withdrawer, address(0), feeTaker, weth, 0); // swaps off
+        vm.stopPrank();
+        assertEq(r.swapRouter(), address(0));
+
+        vm.startPrank(admin);
+        vm.expectRevert(IRouterErrors.InvalidTarget.selector);
+        router.setSwapRouter(eoa);
+        assertEq(router.swapRouter(), swapRouter);
+        router.setSwapRouter(address(0));
+        assertEq(router.swapRouter(), address(0));
+        router.setSwapRouter(address(module));
+        assertEq(router.swapRouter(), address(module));
+        vm.stopPrank();
     }
 
     // ------------------------------------------------------------------ execute

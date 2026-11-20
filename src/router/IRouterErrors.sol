@@ -51,7 +51,9 @@ interface IRouterErrors {
     error SameToken();
     /// @dev A fee above its type's cap.
     error TooMuchFee();
-    error ZeroSwapRouter();
+    /// @dev The swap router has no code (unset, an EOA, or code since removed): a low-level call to it would succeed
+    /// without swapping, sending native away and passing a 0 `amountOutMin`.
+    error InvalidSwapRouter();
     error SwapFailed(bytes swapData, uint256 index);
     error SwapSlippage();
     /// @dev A non-zero approval the token refused.
